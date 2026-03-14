@@ -1,0 +1,54 @@
+name: Daily signals
+
+on:
+  schedule:
+    # 23:00 UTC = 6pm ET (weekdays)
+    - cron: "0 23 * * 1-5"
+  workflow_dispatch:
+
+jobs:
+  generate-signals:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run daily signal pipeline
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python -m pipeline.daily_runner
+
+      - name: Commit and push cache
+        run: |
+          git config user.email "github-actions@github.com"
+          git config user.name "GitHub Actions"
+          git add output/cache/
+          git diff --staged --quiet || git commit -m "chore: daily signals $(date -u +%Y-%m-%d)"
+          git push
+
+      - name: Job summary
+        run: |
+          echo "## Daily signals summary" >> $GITHUB_STEP_SUMMARY
+          echo "**Date (UTC):** $(date -u +%Y-%m-%d)" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** completed successfully" >> $GITHUB_STEP_SUMMARY
+          echo "**Runner:** ${{ runner.os }}" >> $GITHUB_STEP_SUMMARY

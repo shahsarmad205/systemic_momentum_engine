@@ -1,0 +1,7 @@
+{
+  "probability_sharpe_positive": 0.68,
+  "probability_profitable": 0.76,
+  "percentile_5_return": -0.020588800000000046,
+  "percentile_95_return": 0.057821174999999975,
+  "n_simulations": 50
+}

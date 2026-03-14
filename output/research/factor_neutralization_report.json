@@ -1,0 +1,14 @@
+{
+  "n_dates": 116,
+  "factor_correlations_before": {
+    "size_factor": 0.00491865505898163,
+    "sector_Technology": 0.008505258887842407,
+    "market_beta": 0.0
+  },
+  "factor_correlations_after": {
+    "size_factor": -2.638726822937412e-16,
+    "sector_Technology": -1.4447182194748439e-16,
+    "market_beta": 0.0
+  },
+  "signal_ic_after_neutralization": 0.05033655843498443
+}

@@ -1,0 +1,16 @@
+{
+  "date": "2024-01-15",
+  "regime": "Bull",
+  "rows": [
+    {"ticker": "NVDA", "adjusted_score": 0.62, "signal": "Bullish", "confidence": "High"},
+    {"ticker": "META", "adjusted_score": 0.55, "signal": "Bullish", "confidence": "High"},
+    {"ticker": "AAPL", "adjusted_score": 0.41, "signal": "Bullish", "confidence": "Medium"},
+    {"ticker": "MSFT", "adjusted_score": 0.38, "signal": "Bullish", "confidence": "Medium"},
+    {"ticker": "GOOG", "adjusted_score": 0.12, "signal": "Neutral", "confidence": "Low"},
+    {"ticker": "AMZN", "adjusted_score": -0.08, "signal": "Neutral", "confidence": "Low"},
+    {"ticker": "JPM", "adjusted_score": -0.35, "signal": "Bearish", "confidence": "Medium"},
+    {"ticker": "SPY", "adjusted_score": -0.42, "signal": "Bearish", "confidence": "Medium"},
+    {"ticker": "QQQ", "adjusted_score": -0.51, "signal": "Bearish", "confidence": "High"},
+    {"ticker": "XOM", "adjusted_score": -0.58, "signal": "Bearish", "confidence": "High"}
+  ]
+}

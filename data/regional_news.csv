@@ -1,0 +1,67 @@
+date,ticker,sector,headline,description
+2026-03-07,AAPL,Technology,Apple launches new AI-powered MacBook lineup,Apple unveils next-generation MacBooks with custom AI chips targeting enterprise and creative professionals.
+2026-03-06,AAPL,Technology,Apple iPhone sales beat expectations in Q1,Strong demand in Asia drives iPhone revenue above Wall Street estimates for the quarter.
+2026-03-05,AAPL,Technology,Apple faces EU antitrust scrutiny over App Store policies,European regulators open new investigation into Apple's app marketplace fees and restrictions.
+2026-03-04,NVDA,Technology,Nvidia reports record data center revenue,AI infrastructure spending propels Nvidia data center segment to all-time quarterly high.
+2026-03-03,NVDA,Technology,Nvidia announces next-gen GPU architecture,New Blackwell Ultra chips promise 3x performance gains for large language model training.
+2026-03-01,NVDA,Technology,Nvidia faces increased competition from AMD in AI chips,AMD gains market share in data center GPUs as hyperscalers diversify suppliers.
+2026-02-28,TSLA,Technology,Tesla Cybertruck production ramps to 5000 units per week,Austin Gigafactory reaches production milestone ahead of revised schedule.
+2026-02-27,TSLA,Technology,Tesla faces recall of 200K vehicles over autopilot software,NHTSA investigation leads to voluntary recall for software update addressing highway driving behavior.
+2026-02-25,TSLA,Technology,Tesla expands energy storage business with record Megapack orders,Utility-scale battery deployments double year-over-year as grid storage demand surges.
+2026-03-06,META,Technology,Meta AI assistant reaches 500 million monthly users,Meta's AI chatbot becomes the most widely used consumer AI product globally.
+2026-03-04,META,Technology,Meta faces backlash over AI-generated content in feeds,User complaints about AI-generated posts spark congressional hearing on content authenticity.
+2026-03-02,AMZN,Technology,Amazon AWS launches new AI infrastructure tier,AWS introduces dedicated AI compute instances targeting mid-market enterprise customers.
+2026-03-01,AMZN,Technology,Amazon expands same-day delivery to 30 new cities,Logistics investment drives same-day coverage to over 200 metro areas in the US.
+2026-02-28,MSFT,Technology,Microsoft Copilot enterprise adoption doubles in Q1,Office 365 Copilot subscriptions surpass 50 million as businesses automate workflows.
+2026-02-26,MSFT,Technology,Microsoft Azure revenue grows 35% year-over-year,Cloud infrastructure business continues to outpace market growth driven by AI workloads.
+2026-03-05,GOOG,Technology,Google DeepMind unveils breakthrough protein folding model,New AlphaFold iteration predicts protein interactions with near-experimental accuracy.
+2026-03-03,GOOG,Technology,Google faces DOJ antitrust remedy proposal,Department of Justice proposes structural remedies in landmark search monopoly case.
+2026-02-27,AVGO,Technology,Broadcom AI networking revenue surges 60%,Custom AI accelerator and networking chip demand drives strong quarterly results.
+2026-02-25,ADBE,Technology,Adobe integrates generative AI across full Creative Suite,New Firefly-powered features automate complex design workflows for creative professionals.
+2026-03-04,CRM,Technology,Salesforce acquires AI startup for $4 billion,CRM giant bolsters AI capabilities with acquisition of enterprise automation platform.
+2026-03-01,AMD,Technology,AMD MI400 chips gain traction in cloud data centers,Microsoft and Google expand AMD AI chip deployments as alternative to Nvidia hardware.
+2026-02-26,INTC,Technology,Intel foundry business secures major defense contract,US government awards Intel $3 billion contract for domestic chip manufacturing.
+2026-02-24,INTC,Technology,Intel reports wider losses in foundry division,Manufacturing business continues to burn cash as node transitions face delays.
+2026-03-03,ORCL,Technology,Oracle cloud infrastructure revenue jumps 40%,Oracle gains enterprise cloud market share as businesses migrate legacy workloads.
+2026-02-28,CSCO,Technology,Cisco reports strong demand for AI networking equipment,Data center networking refresh cycle boosts orders for high-speed switches and routers.
+2026-02-25,IBM,Technology,IBM consulting revenue grows on AI implementation demand,Enterprise AI consulting engagements drive double-digit growth in services division.
+2026-03-06,JPM,Finance,JPMorgan posts record Q1 trading revenue,Volatile markets drive fixed income and equities trading desks to best quarter ever.
+2026-03-04,JPM,Finance,JPMorgan raises dividend by 12%,Strong capital position enables bank to increase quarterly payout to shareholders.
+2026-03-02,BAC,Finance,Bank of America digital banking users top 50 million,Mobile app engagement reaches record levels as branch transactions continue to decline.
+2026-02-28,GS,Finance,Goldman Sachs expands wealth management to mass affluent market,New digital advisory platform targets clients with $250K to $1M in assets.
+2026-02-26,MS,Finance,Morgan Stanley wealth management AUM hits $7 trillion,Continued market appreciation and net new asset flows drive record assets under management.
+2026-03-05,C,Finance,Citi completes major restructuring with 10K job cuts,Cost reduction program reaches target as bank simplifies organizational structure.
+2026-03-01,WFC,Finance,Wells Fargo asset cap removal expected by mid-2026,Federal Reserve signals progress on compliance requirements for lifting growth restrictions.
+2026-02-27,BLK,Finance,BlackRock sees record ETF inflows of $150 billion in Q1,Passive investing trend accelerates as retail investors shift from active mutual funds.
+2026-02-24,SCHW,Finance,Schwab completes TD Ameritrade integration,Final platform migration brings total client assets to over $9 trillion.
+2026-03-07,JNJ,Healthcare,J&J wins FDA approval for new cancer immunotherapy,Breakthrough designation drug approved for treatment of advanced non-small cell lung cancer.
+2026-03-05,JNJ,Healthcare,J&J faces new talc litigation in state courts,Additional lawsuits filed despite company's bankruptcy strategy for legacy liabilities.
+2026-03-03,UNH,Healthcare,UnitedHealth expands Medicare Advantage enrollment by 8%,Annual enrollment period drives strong growth in government healthcare programs.
+2026-03-01,PFE,Healthcare,Pfizer cuts revenue guidance on weak vaccine demand,Post-pandemic normalization continues to weigh on COVID and flu vaccine sales.
+2026-02-27,PFE,Healthcare,Pfizer acquires oncology biotech for $8 billion,Deal adds three late-stage cancer drug candidates to Pfizer pipeline.
+2026-02-25,ABBV,Healthcare,AbbVie Humira biosimilar impact smaller than expected,Patent cliff erosion slows as newer immunology drugs offset Humira revenue decline.
+2026-03-04,MRK,Healthcare,Merck Keytruda sales surpass $30 billion annual run rate,Blockbuster cancer drug continues to expand into new tumor types and combinations.
+2026-03-02,LLY,Healthcare,Eli Lilly obesity drug Mounjaro demand outpaces supply,Manufacturing expansion underway as GLP-1 prescriptions reach record levels.
+2026-02-28,TMO,Healthcare,Thermo Fisher wins large-scale bioprocessing contract,Multi-year agreement with top pharma company for biologics manufacturing support.
+2026-02-26,ABT,Healthcare,Abbott continuous glucose monitor gains market share,FreeStyle Libre 4 captures record 60% of new CGM prescriptions in the US.
+2026-03-06,KO,Consumer,Coca-Cola raises full-year guidance on strong pricing,Price increases in emerging markets offset modest volume declines in developed economies.
+2026-03-04,PG,Consumer,Procter & Gamble launches direct-to-consumer platform,New e-commerce channel offers personalized product bundles and subscription services.
+2026-03-02,PEP,Consumer,PepsiCo snack division outperforms beverages in Q1,Frito-Lay North America posts 6% organic revenue growth despite consumer spending concerns.
+2026-02-28,COST,Consumer,Costco membership renewal rate hits 93% globally,Warehouse club loyalty remains strong as consumers prioritize value shopping.
+2026-02-26,WMT,Consumer,Walmart e-commerce sales grow 22% year-over-year,Online grocery and marketplace expansion drive digital revenue acceleration.
+2026-03-05,MCD,Consumer,McDonald's launches AI-powered drive-through nationwide,Automated ordering system reduces wait times by 30 seconds on average.
+2026-03-03,NKE,Consumer,Nike direct sales growth slows as wholesale rebounds,Brand shifts strategy back toward retail partnerships after direct-to-consumer plateau.
+2026-03-01,SBUX,Consumer,Starbucks China recovery gains momentum,Same-store sales turn positive in China as consumer confidence improves.
+2026-03-07,XOM,Energy,Exxon boosts Permian Basin output to record levels,New drilling techniques and acquisitions push production past 2 million barrels per day.
+2026-03-05,XOM,Energy,Exxon invests $5 billion in carbon capture projects,Major commitment to CCS technology as part of energy transition strategy.
+2026-03-03,CVX,Energy,Chevron completes Hess acquisition after regulatory approval,Combined entity becomes largest US oil producer with significant Guyana assets.
+2026-03-01,CVX,Energy,Chevron cuts capital spending amid oil price uncertainty,Budget reduction of 10% reflects cautious outlook on near-term crude prices.
+2026-02-27,CAT,Industrials,Caterpillar backlog reaches $30 billion on infrastructure spending,Government infrastructure programs drive sustained demand for construction equipment.
+2026-02-25,CAT,Industrials,Caterpillar raises prices 5% on construction equipment,Input cost inflation and strong demand support pricing power across product lines.
+2026-03-06,GE,Industrials,GE Aerospace jet engine orders surge on air travel recovery,Commercial aviation fleet renewal drives record order book for LEAP engines.
+2026-03-02,GE,Industrials,GE Vernova wind turbine margins improve,Offshore wind division turns profitable as supply chain costs normalize.
+2026-03-07,SPY,ETF,S&P 500 reaches new all-time high above 6500,Broad market rally driven by strong earnings season and easing inflation expectations.
+2026-03-05,QQQ,ETF,Nasdaq-100 outperforms on AI spending boom,Technology sector leadership continues as AI infrastructure investment accelerates.
+2026-03-03,ARKK,ETF,ARK Innovation ETF rebounds 15% year-to-date,Growth and speculative tech stocks rally as interest rate cuts boost valuations.
+2026-02-28,IWM,ETF,Small-cap stocks lag large-caps in Q1,Russell 2000 underperforms as regional banks and small manufacturers face margin pressure.
+2026-02-25,DIA,ETF,Dow Jones Industrial Average hits record on industrial strength,Manufacturing renaissance and infrastructure spending lift blue-chip industrial stocks.

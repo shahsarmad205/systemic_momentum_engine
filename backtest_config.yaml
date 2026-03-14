@@ -1,0 +1,193 @@
+# ============================================================
+# Trend Signal Engine — Backtest Configuration
+# ============================================================
+# Edit this file to customize backtest parameters.
+# All values shown are defaults; delete any line to use its default.
+
+# Tickers to backtest. Any list of symbols (e.g. ["AAPL", "MSFT", "NVDA"]).
+# 24 names from main.TICKERS so validation "tickers traded >= 12" can pass even if only ~half get signals.
+tickers:
+  - AAPL
+  - NVDA
+  - MSFT
+  - GOOG
+  - AMZN
+  - META
+  - AMD
+  - AVGO
+  - ADBE
+  - CRM
+  - JPM
+  - BAC
+  - JNJ
+  - UNH
+  - LLY
+  - COST
+  - WMT
+  - NKE
+  - XOM
+  - CVX
+  - INTC
+  - ORCL
+  - PFE
+  - ABBV
+
+# Market data: provider and local cache (avoids repeated API calls)
+data:
+  provider: "yahoo"              # "yahoo" | "alpaca" | "finnhub"
+  cache_ohlcv: true
+  cache_dir: "data/cache/ohlcv"
+  cache_ttl_days: 0              # 0 = use cache indefinitely
+
+backtest:
+  start_date: "2018-01-01"
+  end_date: "2024-01-01"
+  initial_capital: 100000
+  max_positions: 10
+  holding_period_days: 3   # shorter = more turnover, more trades and days with positions
+  # Cross-sectional ranking (top/bottom portfolio). When enabled, execution.enable_shorts is forced on if market_neutral.
+  cross_sectional:
+    enabled: false
+    market_neutral: false   # long-only from top; no short leg
+  #   top_longs: 5
+  #   top_shorts: 5
+  #   rebalance_daily: false  # if true, close positions not in today's target before opens
+  #   daily_positions_csv_path: "output/portfolio/daily_positions.csv"
+  # Optional: hold longer for stronger signals or by signal type (Bullish/Bearish)
+  # dynamic_holding:
+  #   enabled: false
+  #   by_signal:    # days per signal type (fallback when no strength band matches)
+  #     Bullish: 5
+  #     Bearish: 3
+  #   by_strength:   # [min |adjusted_score|, holding_days]; check strongest first
+  #     - [0.5, 10]
+  #     - [0.3, 5]
+
+execution:
+  slippage_bps: 5.0            # basis points per trade side (used when execution_costs disabled)
+  commission_per_trade: 1.00   # USD flat fee per trade (used when execution_costs disabled)
+  enable_shorts: false         # set true to allow short trades; false isolates bullish validation
+  long_only: true              # ignore bearish signals; long-only portfolio
+
+# Transaction costs (realistic execution: when enabled, used for entry/exit cost and slippage)
+execution_costs:
+  enabled: true
+  commission_bps: 0
+  spread_bps: 0.0005   # 5 bps realistic for large-cap US equities
+  slippage_bps: 0.0002 # 2 bps additional slippage
+  # sensitivity_test: false
+  # scenarios: [5, 10, 20]   # total bps for stress tests → output/research/cost_sensitivity.csv
+
+# Risk and position management (see docs/INDUSTRY_ROADMAP.md for industry-level settings)
+risk:
+  position_sizing: "kelly"      # "equal" | "vol_scaled" | "kelly" — kelly = default (half-Kelly, rolling stats)
+  vol_target_annual: 0.12      # target annual vol for vol_scaled sizing (10–15% typical)
+  vol_lookback_days: 20        # rolling window for volatility estimate
+  kelly_fraction: 0.5          # fraction of full Kelly when position_sizing="kelly"
+  kelly_win_rate: 0.55         # used for Kelly (or from backtest stats)
+  kelly_avg_win_return: 0.02   # average winning return
+  kelly_avg_loss_return: 0.015 # average losing return (positive number)
+  stop_loss_pct: 0.025         # 2.5% per-position stop (0 = disabled); cuts tail losses
+  take_profit_pct: 0.0         # 0 = disabled; e.g. 0.05 = +5% exit
+  max_position_pct_of_equity: 0.25  # max single position (e.g. 0.25 = 25% of equity)
+  max_drawdown_pct: 0.0       # disable circuit breaker (research backtest; use in live only)
+  drawdown_resume_pct: 0.0
+
+# Markowitz Mean-Variance position sizing (set enabled: true to use mv_max_sharpe / mv_min_variance)
+mean_variance:
+  enabled: false
+  method: "max_sharpe"        # or "min_variance"
+  lookback_days: 60
+  rebalance_days: 20
+  max_single_weight: 0.25
+
+signals:
+  # Base |adjusted_score| threshold for classifying Bullish/Bearish.
+  # This now drives both static and dynamic thresholds. For learned
+  # weights with small coefficients, keep this low (e.g. 0.01–0.05).
+  min_signal_strength: 0.01   # low so more tickers qualify for strict validation (trades≥300, tickers≥12)
+  mode: "learned"              # "price" | "full" | "learned"
+  learned_weights_path: "output/learned_weights.json"   # used when mode=learned
+  weights:
+    trend: 1.0
+    regional_news: 0.5
+    global_news: 0.4
+    social: 0.3
+
+# Factor exposure neutralization (signals adjusted to remove market/sector/size bias)
+factor_neutralization:
+  enabled: true
+  neutralize_market_beta: true
+  neutralize_sector: true
+  neutralize_size: true
+  # market_index: "SPY"
+  # rolling_window: 60
+  # factor_exposures_path: "output/research/factor_exposures.csv"
+  # factor_neutralization_report_path: "output/research/factor_neutralization_report.json"
+
+# Simulation: GBM-derived features in feature pipeline (optional; slows build)
+simulation:
+  gbm_enabled: false
+
+# Monte Carlo robustness testing (randomized simulations)
+monte_carlo:
+  enabled: true
+  runs: 500
+  signal_noise: 0.02
+  max_execution_delay_days: 2
+  # results_path: "output/research/monte_carlo_results.csv"
+  # summary_path: "output/research/monte_carlo_summary.json"
+  # equity_curves_path: "output/research/monte_carlo_equity_curves.csv"
+  # equity_plot_path: "output/research/monte_carlo_equity_distribution.png"
+  # robustness_report_path: "output/research/monte_carlo_robustness_report.json"
+
+regime:
+  enabled: true
+  adjustments:
+    Bull:
+      score_mult: 1.2
+      position_scale: 1.0
+    Bear:
+      score_mult: 0.8
+      position_scale: 0.8
+    Sideways:
+      score_mult: 1.0
+      position_scale: 0.7
+    Crisis:
+      score_mult: 0.6
+      position_scale: 0.5
+
+sectors:
+  enabled: false              # portfolio exposure limit per sector
+  max_exposure: 0.30          # max fraction of max_positions per sector
+  adjustment_enabled: false   # adjust signals by sector momentum/vol/sentiment
+  momentum_weight: 0.1        # add sector momentum to adjusted score
+  volatility_weight: -0.05    # subtract sector vol (reduce in high-vol sectors)
+  sentiment_weight: 0.1       # add average sector sentiment
+
+research:
+  # Walk-forward validation (calendar-year windows)
+  walk_forward_enabled: true
+  train_years: 5
+  test_years: 1
+  step_years: 1
+  walk_forward_windows: 4
+  walk_forward_train_ratio: 0.70
+  # Train weight model on train window, backtest OOS (when signals.mode=learned)
+  walk_forward_train_weights: true
+  walk_forward_report_path: "output/backtests/walk_forward_validation_report.csv"
+  # Forward horizons for IC decay (1d, 5d, 10d, 20d); best horizon is reported with --ic-decay
+  ic_decay_lags: [1, 5, 10, 20]
+  # Optional: custom cost scenarios for --cost-sensitivity (else use built-in default)
+  # cost_sensitivity_scenarios:
+  #   - { slippage_bps: 0,  commission_per_trade: 0 }
+  #   - { slippage_bps: 10, commission_per_trade: 2 }
+  #   - { slippage_bps: 25, commission_per_trade: 5 }
+
+output:
+  save_trades_csv: true
+  save_equity_csv: true
+  equity_curve_path: "output/backtests/equity_curve.png"
+  trades_csv_path: "output/backtests/trades.csv"
+  equity_csv_path: "output/backtests/daily_equity.csv"
+  cost_sensitivity_report_path: "output/backtests/cost_sensitivity_report.csv"

@@ -1,0 +1,12 @@
+[
+  {"ticker": "AAPL", "sector": "Technology", "price": 178.5},
+  {"ticker": "MSFT", "sector": "Technology", "price": 378.2},
+  {"ticker": "GOOG", "sector": "Technology", "price": 141.0},
+  {"ticker": "NVDA", "sector": "Technology", "price": 495.0},
+  {"ticker": "META", "sector": "Technology", "price": 505.0},
+  {"ticker": "AMZN", "sector": "Consumer Discretionary", "price": 178.0},
+  {"ticker": "JPM", "sector": "Financials", "price": 195.0},
+  {"ticker": "XOM", "sector": "Energy", "price": 105.0},
+  {"ticker": "SPY", "sector": "ETF", "price": 480.0},
+  {"ticker": "QQQ", "sector": "ETF", "price": 420.0}
+]

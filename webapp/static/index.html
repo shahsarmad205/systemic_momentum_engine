@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Signal Ranking Engine</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Signal Ranking Engine</h1>
+      <div class="subtitle">Cross-sectional ranking · Portfolio construction · Backtest</div>
+    </div>
+    <div class="flex" style="flex:0">
+      <button type="button" id="btn-backtest">Run backtest</button>
+      <span id="backtest-status" style="color:var(--muted);font-size:0.875rem;"></span>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>1. Ticker universe</h2>
+      <p style="color:var(--muted);font-size:0.875rem;margin-top:0">
+        <span data-tooltip="Enter symbols separated by space or comma. DEV_MODE caps universe to 10 when using defaults.">Set tickers manually</span> or upload CSV/Excel (first column = ticker).
+      </p>
+      <div class="grid-2">
+        <div>
+          <label for="ticker-input">Tickers</label>
+          <textarea id="ticker-input" rows="3" placeholder="AAPL MSFT GOOG NVDA ..."></textarea>
+        </div>
+        <div class="flex">
+          <button type="button" id="btn-save-universe">Save universe</button>
+          <label style="flex:0">
+            Upload file
+            <input type="file" id="file-upload" accept=".csv,.txt,.xlsx" />
+          </label>
+        </div>
+      </div>
+      <div id="universe-table" style="margin-top:1rem;overflow:auto"></div>
+    </section>
+
+    <section>
+      <h2>2. Portfolio & cross-sectional controls</h2>
+      <div class="flex">
+        <div>
+          <label for="top-longs"><span data-tooltip="Number of highest-score names to go long each day.">TOP_LONGS</span></label>
+          <input type="number" id="top-longs" min="1" max="50" value="5" />
+        </div>
+        <div>
+          <label for="top-shorts"><span data-tooltip="Number of lowest-score names to short (market-neutral).">TOP_SHORTS</span></label>
+          <input type="number" id="top-shorts" min="0" max="50" value="5" />
+        </div>
+        <div>
+          <label><span data-tooltip="If on, long dollar ≈ short dollar using bottom ranks as shorts.">Market neutral</span></label>
+          <label style="display:flex;align-items:center;gap:0.5rem;margin-top:0.5rem">
+            <input type="checkbox" id="market-neutral" checked /> Enable shorts leg
+          </label>
+        </div>
+        <div>
+          <label><span data-tooltip="Close positions not in today’s target before opening new (backtester flag).">Daily rebalance</span></label>
+          <label style="display:flex;align-items:center;gap:0.5rem;margin-top:0.5rem">
+            <input type="checkbox" id="rebalance-daily" /> cross_sectional_rebalance_daily
+          </label>
+        </div>
+        <div>
+          <label for="min-strength"><span data-tooltip="Minimum |adjusted_score| to include in ranking universe.">Min signal strength</span></label>
+          <input type="number" id="min-strength" step="0.05" value="0" />
+        </div>
+        <div>
+          <label for="initial-capital"><span data-tooltip="Used for equal-weight notional display.">Initial capital</span></label>
+          <input type="number" id="initial-capital" value="100000" />
+        </div>
+      </div>
+      <div style="margin-top:1rem">
+        <button type="button" id="btn-ranking">Compute ranking (mock snapshot)</button>
+        <span id="equal-weight-out" style="margin-left:1rem;color:var(--muted)"></span>
+      </div>
+      <p style="margin-top:0.75rem;font-size:0.875rem">
+        <strong>Long targets:</strong> <span id="long-targets">—</span><br />
+        <strong>Short targets:</strong> <span id="short-targets">—</span>
+      </p>
+    </section>
+
+    <section>
+      <h2>3. Signal ranking table</h2>
+      <p style="color:var(--muted);font-size:0.875rem">Sorted by adjusted_score (high → low). LONG / SHORT columns from top/bottom selection.</p>
+      <div id="ranking-table" style="overflow:auto;max-height:400px"></div>
+    </section>
+
+    <section>
+      <h2>4. Daily positions log</h2>
+      <p style="color:var(--muted);font-size:0.875rem">From <code>output/portfolio/daily_positions.csv</code> after a cross-sectional backtest.</p>
+      <button type="button" class="secondary" id="btn-refresh-positions">Refresh</button>
+      <button type="button" class="secondary" id="btn-export">Export CSV</button>
+      <div id="positions-table" style="margin-top:1rem;overflow:auto;max-height:320px"></div>
+    </section>
+
+    <section>
+      <h2>5. Trades & equity</h2>
+      <div class="grid-2">
+        <div>
+          <h3 style="font-size:0.9rem;color:var(--muted)">Equity curve</h3>
+          <div class="chart-wrap"><canvas id="equity-chart"></canvas></div>
+        </div>
+        <div>
+          <h3 style="font-size:0.9rem;color:var(--muted)">Metrics (last experiment)</h3>
+          <pre id="metrics-pre" style="background:var(--bg);padding:1rem;border-radius:6px;overflow:auto;font-size:0.75rem;max-height:280px"></pre>
+        </div>
+      </div>
+      <h3 style="font-size:0.9rem;color:var(--muted);margin-top:1rem">Recent trades</h3>
+      <div id="trades-table" style="overflow:auto;max-height:280px"></div>
+    </section>
+
+    <section>
+      <h2>Run locally</h2>
+      <pre style="background:var(--bg);padding:1rem;border-radius:6px;font-size:0.8rem;overflow:auto">
+pip install flask
+cd webapp && python app.py
+# Open http://127.0.0.1:5000
+      </pre>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
