@@ -74,6 +74,7 @@ COMPOUND_AND_PRICE_FEATURES = [
     # Macro / volatility context (shifted to avoid look-ahead)
     "vix_zscore",
     "vol_spike",
+    "vix_term",
 ]
 
 
@@ -96,6 +97,7 @@ class LearnedWeights:
     w_corr_market: float = 0.0
     w_vix_zscore: float = 0.0
     w_vol_spike: float = 0.0
+    w_vix_term: float = 0.0
     intercept: float = 0.0
 
     model_type: str = "ridge"
@@ -127,6 +129,7 @@ class LearnedWeights:
         rolling_corr_market: float = 0.0,
         vix_zscore: float = 0.0,
         vol_spike: float = 0.0,
+        vix_term: float = 0.0,
     ) -> float:
         raw = (
             self.intercept
@@ -143,6 +146,7 @@ class LearnedWeights:
             + getattr(self, "w_corr_market", 0) * rolling_corr_market
             + getattr(self, "w_vix_zscore", 0) * vix_zscore
             + getattr(self, "w_vol_spike", 0) * vol_spike
+            + getattr(self, "w_vix_term", 0) * vix_term
         )
         raw_scaled = getattr(self, "score_scale", 1.0) * raw
         direction = getattr(self, "score_direction", 1)
@@ -167,7 +171,7 @@ class LearnedWeights:
         """Load from a dict (e.g. one entry of regime_models)."""
         for key in (
             "w_ret_5d", "w_ret_10d", "w_vol_10", "w_vol", "w_rel_vol",
-            "w_vol_zscore", "w_corr_market", "w_vix_zscore", "w_vol_spike",
+            "w_vol_zscore", "w_corr_market", "w_vix_zscore", "w_vol_spike", "w_vix_term",
             "score_scale", "score_direction",
         ):
             if key == "score_scale":
@@ -730,6 +734,7 @@ class WeightLearner:
             w_corr_market=weight_map.get("rolling_corr_market_20", 0.0),
             w_vix_zscore=weight_map.get("vix_zscore", 0.0),
             w_vol_spike=weight_map.get("vol_spike", 0.0),
+            w_vix_term=weight_map.get("vix_term", 0.0),
             intercept=round(intercept, 8),
             model_type=self.model_type,
             train_start=train_start,

@@ -743,6 +743,9 @@ class Backtester:
             return pos.entry_price * (1.0 + early_exit_drawdown_pct)
 
         def _min_hold_effective_for_pos(pos: Position) -> int:
+            # Crisis transition: forced shortened exit must not be blocked by min-hold.
+            if getattr(pos, "crisis_accelerated_exit", False):
+                return 0
             # Crisis: allow positions to close on their planned exit date
             # (candidates.py shortens holding_days to <= 3). This disables the
             # global min-holding constraint for Crisis positions.
@@ -914,6 +917,58 @@ class Backtester:
                 crisis_consecutive_days = 0
             prev_regime = regime_today
 
+            # Crisis transition: accelerate exit for positions entered before Crisis (holdthrough P&L drag).
+            # Losers: optional same-day forced close; winners: cap planned exit up to N days ahead.
+            if (
+                regime_today == "Crisis"
+                and prev_reg_before is not None
+                and prev_reg_before != "Crisis"
+                and bool(getattr(self.config, "crisis_transition_accel_enabled", True))
+            ):
+                flatten_all = bool(getattr(self.config, "crisis_transition_flatten_all", False))
+                if flatten_all:
+                    for pos in list(self.portfolio.positions):
+                        px = self._crisis_transition_exit_price(pos, date, price_data)
+                        self._close_position(
+                            pos,
+                            date,
+                            price_data,
+                            exit_price_override=px,
+                            reason="crisis_transition_flatten_all",
+                        )
+                else:
+                    loser_days = int(getattr(self.config, "crisis_transition_loser_max_hold_days", 0) or 0)
+                    winner_extra = int(getattr(self.config, "crisis_transition_winner_extra_days", 3) or 3)
+                    force_loser_same_day = bool(
+                        getattr(self.config, "crisis_transition_force_close_losers_same_day", True)
+                    )
+                    for pos in list(self.portfolio.positions):
+                        tk = pos.ticker
+                        if tk in price_data and date in price_data[tk].index:
+                            bar = price_data[tk].loc[date]
+                            o = float(bar.get("Open", np.nan))
+                            c = float(bar.get("Close", np.nan))
+                            px = o if np.isfinite(o) else c
+                            if np.isfinite(px):
+                                pos.current_price = px
+                        prof = float(pos.unrealized_return) > 0
+                        if (not prof) and force_loser_same_day:
+                            px = self._crisis_transition_exit_price(pos, date, price_data)
+                            self._close_position(
+                                pos,
+                                date,
+                                price_data,
+                                exit_price_override=px,
+                                reason="crisis_transition_loser",
+                            )
+                            continue
+                        extra_idx = winner_extra if prof else loser_days
+                        cap_idx = min(i + extra_idx, len(trading_days) - 1)
+                        forced_cap = pd.Timestamp(trading_days[cap_idx])
+                        pe = pd.Timestamp(pos.planned_exit_date)
+                        pos.planned_exit_date = min(pe, forced_cap)
+                        pos.crisis_accelerated_exit = True
+
             # --- 0a. Mean-Variance weights (rebalance every rebalance_days; no lookahead) ---
             method = getattr(self.config, "position_sizing_method", None) or getattr(
                 self.config, "position_sizing", "equal"
@@ -1040,8 +1095,23 @@ class Backtester:
                                 reason="stop_loss",
                             )
                         continue
-                    if is_trade_rebalance_day_current:
-                        self._close_position(pos, date, price_data, reason="expiry")
+                    allow_expiry = is_trade_rebalance_day_current or getattr(
+                        pos, "crisis_accelerated_exit", False
+                    )
+                    if allow_expiry:
+                        px_override = None
+                        # Any planned exit on a Crisis session: use open (with slippage) to limit same-day crash drag.
+                        if regime_today == "Crisis" and bool(
+                            getattr(self.config, "crisis_transition_use_open_exit", True)
+                        ):
+                            px_override = self._crisis_transition_exit_price(pos, date, price_data)
+                        self._close_position(
+                            pos,
+                            date,
+                            price_data,
+                            exit_price_override=px_override,
+                            reason="expiry",
+                        )
                     continue
 
             # --- 1b. Stop-loss / take-profit (before entry loop so freed slots are available same day)
@@ -1345,6 +1415,12 @@ class Backtester:
                 ):
                     continue
 
+                # Crisis: optional hard block — no new entries for entire Crisis spell (fixes Crisis Sharpe from day 4+ entries).
+                if regime_today == "Crisis" and bool(
+                    getattr(self.config, "crisis_block_all_new_entries", False)
+                ):
+                    continue
+
                 # Crisis day 1-3 hard block:
                 # avoid opening fresh risk in the initial shock window.
                 if regime_today == "Crisis" and crisis_consecutive_days <= 3:
@@ -1402,7 +1478,7 @@ class Backtester:
                                 pass
 
                 # Optional: rolling score volatility confidence — skip weak signals vs recent dispersion.
-                scm = getattr(self.config, "signal_confidence_multiplier", None)
+                scm = self._signal_confidence_multiplier_for_regime(regime_today)
                 if scm is not None and float(scm) > 0:
                     sc_window = int(getattr(self.config, "signal_confidence_std_window", 60) or 60)
                     sc_min = int(getattr(self.config, "signal_confidence_min_periods", 20) or 20)
@@ -1709,9 +1785,28 @@ class Backtester:
             pending_entries = []  # will be refilled below from new_entries (or scheduled for delay)
 
             # --- 3. Mark-to-market ---
+            is_first_crisis_day = (
+                regime_today == "Crisis"
+                and prev_reg_before is not None
+                and prev_reg_before != "Crisis"
+            )
             for pos in self.portfolio.positions:
                 if pos.ticker in price_data and date in price_data[pos.ticker].index:
-                    pos.current_price = float(price_data[pos.ticker].loc[date, "Close"])
+                    bar = price_data[pos.ticker].loc[date]
+                    close_px = float(bar["Close"])
+                    use_open_mtm = False
+                    if regime_today == "Crisis" and getattr(pos, "crisis_accelerated_exit", False):
+                        if bool(getattr(self.config, "crisis_accelerated_mtm_at_open", False)):
+                            use_open_mtm = True
+                        elif is_first_crisis_day and bool(
+                            getattr(self.config, "crisis_first_day_winner_mtm_at_open", False)
+                        ):
+                            use_open_mtm = True
+                    if use_open_mtm:
+                        o = float(bar.get("Open", np.nan))
+                        pos.current_price = o if np.isfinite(o) and o > 0 else close_px
+                    else:
+                        pos.current_price = close_px
 
             # --- 3.5. Volatility-based position scaling (SPY vol target) ---
             # Apply the rule: scale all position sizes by min(1, 1/vol_ratio).
@@ -2014,6 +2109,32 @@ class Backtester:
     # ------------------------------------------------------------------
     # helpers
     # ------------------------------------------------------------------
+
+    def _signal_confidence_multiplier_for_regime(self, regime_today: str) -> float | None:
+        """Rolling-std confidence gate: regime-specific σ multiplier, else global signal_confidence_multiplier."""
+        m = {
+            "Bull": getattr(self.config, "signal_confidence_multiplier_bull", None),
+            "Sideways": getattr(self.config, "signal_confidence_multiplier_sideways", None),
+            "Bear": getattr(self.config, "signal_confidence_multiplier_bear", None),
+            "Crisis": getattr(self.config, "signal_confidence_multiplier_crisis", None),
+        }.get(regime_today)
+        if m is not None:
+            return float(m)
+        base = getattr(self.config, "signal_confidence_multiplier", None)
+        return float(base) if base is not None else None
+
+    def _crisis_transition_exit_price(self, pos, date, price_data) -> float | None:
+        """Exit at Open when enabled; else None (caller uses Close in _close_position)."""
+        if not bool(getattr(self.config, "crisis_transition_use_open_exit", True)):
+            return None
+        tk = pos.ticker
+        if tk not in price_data or date not in price_data[tk].index:
+            return None
+        bar = price_data[tk].loc[date]
+        o = float(bar.get("Open", np.nan))
+        if np.isfinite(o) and o > 0:
+            return float(self.execution.apply_exit_slippage(o, pos.signal))
+        return None
 
     def _close_position(self, pos, date, price_data, exit_price_override: float | None = None, reason: str = ""):
         tk = pos.ticker

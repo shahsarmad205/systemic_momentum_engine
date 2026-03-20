@@ -152,11 +152,13 @@ class SignalEngine:
         # Optional macro features (only needed for learned-weight models).
         vix_zscore_series = pd.Series(0.0, index=features.index, dtype=float)
         vol_spike_series = pd.Series(0.0, index=features.index, dtype=float)
+        vix_term_series = pd.Series(0.0, index=features.index, dtype=float)
         need_macro = False
         if self.learned_weights is not None:
             need_macro = (
                 float(getattr(self.learned_weights, "w_vix_zscore", 0.0) or 0.0) != 0.0
                 or float(getattr(self.learned_weights, "w_vol_spike", 0.0) or 0.0) != 0.0
+                or float(getattr(self.learned_weights, "w_vix_term", 0.0) or 0.0) != 0.0
             )
         if self.regime_weights is not None and not need_macro:
             try:
@@ -164,6 +166,7 @@ class SignalEngine:
                     if (
                         float(getattr(_lw, "w_vix_zscore", 0.0) or 0.0) != 0.0
                         or float(getattr(_lw, "w_vol_spike", 0.0) or 0.0) != 0.0
+                        or float(getattr(_lw, "w_vix_term", 0.0) or 0.0) != 0.0
                     ):
                         need_macro = True
                         break
@@ -195,6 +198,15 @@ class SignalEngine:
                     vix_std_252 = vix_close.rolling(252).std(ddof=0).replace(0, np.nan)
                     vix_z = ((vix_close - vix_mean_252) / vix_std_252).shift(1)
                     vix_zscore_series = vix_z.reindex(features.index).fillna(0.0).astype(float)
+
+                    vix3m_df = _get_ohlcv("^VIX3M", start, end, use_cache=True, cache_ttl_days=0)
+                    if vix3m_df is not None and not vix3m_df.empty and "Close" in vix3m_df.columns:
+                        vix3m_close = pd.to_numeric(vix3m_df["Close"], errors="coerce").dropna().sort_index()
+                        vix3m_aligned = vix3m_close.reindex(vix_close.index).ffill()
+                        vix_term = (vix_close / vix3m_aligned.replace(0.0, np.nan)).replace(
+                            [np.inf, -np.inf], np.nan
+                        ).shift(1)
+                        vix_term_series = vix_term.reindex(features.index).fillna(0.0).astype(float)
             except Exception:
                 # If macro downloads fail, fall back to zeros.
                 pass
@@ -235,6 +247,7 @@ class SignalEngine:
                     + getattr(lw, "w_corr_market", 0) * rolling_corr_market_20.loc[mask]
                     + getattr(lw, "w_vix_zscore", 0) * vix_zscore_series.loc[mask]
                     + getattr(lw, "w_vol_spike", 0) * vol_spike_series.loc[mask]
+                    + getattr(lw, "w_vix_term", 0) * vix_term_series.loc[mask]
                 )
                 adjusted.loc[mask] = raw * getattr(lw, "score_scale", 1.0)
             still_missing = adjusted.isna()
@@ -251,6 +264,7 @@ class SignalEngine:
                     + getattr(default_lw, "w_corr_market", 0) * rolling_corr_market_20[still_missing]
                     + getattr(default_lw, "w_vix_zscore", 0) * vix_zscore_series[still_missing]
                     + getattr(default_lw, "w_vol_spike", 0) * vol_spike_series[still_missing]
+                    + getattr(default_lw, "w_vix_term", 0) * vix_term_series[still_missing]
                 )
                 adjusted.loc[still_missing] = raw_def * getattr(default_lw, "score_scale", 1.0)
             adjusted = adjusted.fillna(0)
@@ -274,6 +288,7 @@ class SignalEngine:
                 + getattr(lw, "w_corr_market", 0) * rolling_corr_market_20
                 + getattr(lw, "w_vix_zscore", 0) * vix_zscore_series
                 + getattr(lw, "w_vol_spike", 0) * vol_spike_series
+                + getattr(lw, "w_vix_term", 0) * vix_term_series
             )
             scale = getattr(lw, "score_scale", 1.0)
             direction = getattr(lw, "score_direction", 1)

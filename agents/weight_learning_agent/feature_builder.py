@@ -12,6 +12,7 @@ weights.  All features use only past data (no look-ahead bias).
     Crisis / macro:
         vix_zscore: z-scored VIX level (shifted by 1)
         vol_spike: SPY vol(5d)/vol(60d) ratio (shifted by 1)
+        vix_term: VIX spot / VIX3M term structure (shifted by 1)
     Target: forward_return, direction
 """
 
@@ -302,6 +303,7 @@ def build_feature_matrix(
     spy = None
     vix_zscore = pd.Series(dtype=float)
     vol_spike = pd.Series(dtype=float)
+    vix_term = pd.Series(dtype=float)
     try:
         spy = _download(MARKET_TICKER, dl_start, dl_end)
         if not spy.empty and len(spy) >= 25:
@@ -334,6 +336,21 @@ def build_feature_matrix(
             vix_mean_252 = vix_close.rolling(252).mean()
             vix_std_252 = vix_close.rolling(252).std(ddof=0).replace(0, np.nan)
             vix_zscore = ((vix_close - vix_mean_252) / vix_std_252).shift(1)
+
+            vix3m_raw = get_ohlcv(
+                "^VIX3M",
+                dl_start.strftime("%Y-%m-%d"),
+                dl_end.strftime("%Y-%m-%d"),
+                provider="yahoo",
+                use_cache=True,
+                cache_ttl_days=1,
+            )
+            if vix3m_raw is not None and not vix3m_raw.empty and "Close" in vix3m_raw.columns:
+                vix3m_close = pd.to_numeric(vix3m_raw["Close"], errors="coerce").dropna().sort_index()
+                vix3m_aligned = vix3m_close.reindex(vix_close.index).ffill()
+                vix_term = (vix_close / vix3m_aligned.replace(0.0, np.nan)).replace(
+                    [np.inf, -np.inf], np.nan
+                ).shift(1)
     except Exception:
         # If downloads/derivations fail, keep defaults (features will be 0.0 later).
         pass
@@ -390,6 +407,10 @@ def build_feature_matrix(
             result["vol_spike"] = result["date"].map(vol_spike.to_dict()).astype(float).fillna(0.0)
         else:
             result["vol_spike"] = 0.0
+        if not vix_term.empty:
+            result["vix_term"] = result["date"].map(vix_term.to_dict()).astype(float).fillna(0.0)
+        else:
+            result["vix_term"] = 0.0
 
     # Sector-relative momentum: stock 20d/60d return minus sector-median 20d/60d return (no look-ahead).
     if {"ret_20d", "sector"}.issubset(result.columns):

@@ -35,6 +35,8 @@ class Position:
     actual_exit_date: pd.Timestamp | None = None
     actual_holding_days: int = 0
     current_price: float = 0.0
+    # Set when Crisis transition shortens planned_exit — min-hold must not block expiry.
+    crisis_accelerated_exit: bool = False
 
     @property
     def unrealized_return(self) -> float:
@@ -235,7 +237,12 @@ class Portfolio:
 
     # -- daily snapshot ---------------------------------------------
 
-    def record_equity(self, date: pd.Timestamp, regime: str = "") -> None:
+    def record_equity(
+        self,
+        date: pd.Timestamp,
+        regime: str = "",
+        crisis_consecutive_days: int = 0,
+    ) -> None:
         self.equity_history.append({
             "date": date,
             "equity": round(self.equity, 2),
@@ -243,6 +250,7 @@ class Portfolio:
             "invested": round(sum(p.market_value for p in self.positions), 2),
             "n_positions": len(self.positions),
             "regime": regime,
+            "crisis_consecutive_days": int(crisis_consecutive_days),
         })
 
     # -- sector helpers ---------------------------------------------

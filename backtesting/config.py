@@ -55,6 +55,29 @@ class BacktestConfig:
     bear_skip_new_entries: bool = False
     # Long-only: on transition into Bear, close inherited longs (reduces holdthrough losses on Bear days).
     bear_liquidate_longs_on_regime_entry: bool = False
+
+    # When market regime first enters Crisis: shorten planned_exit for existing positions
+    # (losers exit sooner; winners get a few extra days). See backtester crisis transition block.
+    crisis_transition_accel_enabled: bool = True
+    crisis_transition_loser_max_hold_days: int = 0  # 0 = same trading day as transition
+    crisis_transition_winner_extra_days: int = 3
+    crisis_transition_force_close_losers_same_day: bool = True
+    # If True, close every open position on first Crisis day (strongest holdthrough fix).
+    crisis_transition_flatten_all: bool = False
+    # If True, use the day's Open (with exit slippage) for crisis-transition exits — avoids
+    # attributing full open→close loss on unwind day to Crisis regime equity.
+    crisis_transition_use_open_exit: bool = True
+    # If True, never open new positions on any Crisis day (blocks day 4+ selective crisis entries).
+    crisis_block_all_new_entries: bool = False
+    # If True, mark crisis_accelerated_exit positions at Open (not Close) on Crisis days for EOD equity.
+    # Reduces Crisis-regime daily Sharpe drag from intraday paper losses while the book is winding down.
+    crisis_accelerated_mtm_at_open: bool = False
+    # If True, on the *first* Crisis session only, mark crisis_accelerated_exit positions at Open for EOD equity
+    # (winners still held for planned exit; avoids attributing full open→close crash to that transition day).
+    crisis_first_day_winner_mtm_at_open: bool = False
+    # Crisis day 4+ selective entries: rolling window quantile filter (days 1-3 blocked in backtester).
+    crisis_signal_window_days: int = 60
+    crisis_signal_quantile: float = 0.95
     # Max gross exposure (fraction of equity) while market regime is Bear.
     bear_gross_cap_fraction: float = 0.7
 
@@ -134,6 +157,11 @@ class BacktestConfig:
     # Confidence filter: skip new entry if abs(raw_adjusted_score) < multiplier * rolling_std(adjusted_score).
     # None or 0 disables. Raw score = entry adjusted_score / regime score_mult (matches signal_data scale).
     signal_confidence_multiplier: float | None = None  # e.g. 0.8 after sweep (YAML overrides)
+    # Optional per-regime multipliers (rolling std gate). If unset in YAML, falls back to signal_confidence_multiplier.
+    signal_confidence_multiplier_bull: float | None = None
+    signal_confidence_multiplier_sideways: float | None = None
+    signal_confidence_multiplier_bear: float | None = None
+    signal_confidence_multiplier_crisis: float | None = None
     signal_confidence_std_window: int = 60
     signal_confidence_min_periods: int = 20
     signal_mode: str = "price"      # "price" = trend+vol, "full" = all agents, "learned" = dynamic weights
@@ -289,6 +317,42 @@ def load_config(path: str = "backtest_config.yaml") -> BacktestConfig:
     cfg.bear_liquidate_longs_on_regime_entry = bool(
         risk.get("bear_liquidate_longs_on_regime_entry", cfg.bear_liquidate_longs_on_regime_entry)
     )
+    cfg.crisis_transition_accel_enabled = bool(
+        risk.get("crisis_transition_accel_enabled", cfg.crisis_transition_accel_enabled)
+    )
+    cfg.crisis_transition_loser_max_hold_days = int(
+        risk.get("crisis_transition_loser_max_hold_days", cfg.crisis_transition_loser_max_hold_days)
+    )
+    cfg.crisis_transition_winner_extra_days = int(
+        risk.get("crisis_transition_winner_extra_days", cfg.crisis_transition_winner_extra_days)
+    )
+    cfg.crisis_transition_force_close_losers_same_day = bool(
+        risk.get(
+            "crisis_transition_force_close_losers_same_day",
+            cfg.crisis_transition_force_close_losers_same_day,
+        )
+    )
+    cfg.crisis_transition_flatten_all = bool(
+        risk.get("crisis_transition_flatten_all", cfg.crisis_transition_flatten_all)
+    )
+    cfg.crisis_transition_use_open_exit = bool(
+        risk.get("crisis_transition_use_open_exit", cfg.crisis_transition_use_open_exit)
+    )
+    cfg.crisis_block_all_new_entries = bool(
+        risk.get("crisis_block_all_new_entries", cfg.crisis_block_all_new_entries)
+    )
+    cfg.crisis_accelerated_mtm_at_open = bool(
+        risk.get("crisis_accelerated_mtm_at_open", cfg.crisis_accelerated_mtm_at_open)
+    )
+    cfg.crisis_first_day_winner_mtm_at_open = bool(
+        risk.get("crisis_first_day_winner_mtm_at_open", cfg.crisis_first_day_winner_mtm_at_open)
+    )
+    cfg.crisis_signal_window_days = int(
+        risk.get("crisis_signal_window_days", cfg.crisis_signal_window_days)
+    )
+    cfg.crisis_signal_quantile = float(
+        risk.get("crisis_signal_quantile", cfg.crisis_signal_quantile)
+    )
     cfg.max_position_pct_of_equity = float(risk.get("max_position_pct_of_equity", cfg.max_position_pct_of_equity))
     cfg.max_drawdown_pct = float(risk.get("max_drawdown_pct", cfg.max_drawdown_pct))
     cfg.drawdown_resume_pct = float(risk.get("drawdown_resume_pct", cfg.drawdown_resume_pct))
@@ -341,6 +405,28 @@ def load_config(path: str = "backtest_config.yaml") -> BacktestConfig:
     )
     if cfg.signal_confidence_multiplier is not None:
         cfg.signal_confidence_multiplier = float(cfg.signal_confidence_multiplier)
+    _scm_base = cfg.signal_confidence_multiplier
+    cfg.signal_confidence_multiplier_bull = sig.get(
+        "signal_confidence_multiplier_bull", _scm_base
+    )
+    cfg.signal_confidence_multiplier_sideways = sig.get(
+        "signal_confidence_multiplier_sideways", _scm_base
+    )
+    cfg.signal_confidence_multiplier_bear = sig.get(
+        "signal_confidence_multiplier_bear", _scm_base
+    )
+    cfg.signal_confidence_multiplier_crisis = sig.get(
+        "signal_confidence_multiplier_crisis", _scm_base
+    )
+    for _scm_attr in (
+        "signal_confidence_multiplier_bull",
+        "signal_confidence_multiplier_sideways",
+        "signal_confidence_multiplier_bear",
+        "signal_confidence_multiplier_crisis",
+    ):
+        _v = getattr(cfg, _scm_attr)
+        if _v is not None:
+            setattr(cfg, _scm_attr, float(_v))
     cfg.signal_confidence_std_window = int(
         sig.get("signal_confidence_std_window", cfg.signal_confidence_std_window)
     )
