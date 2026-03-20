@@ -12,9 +12,12 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import logging
 
 import numpy as np
 import pandas as pd
+
+logging.getLogger("matplotlib").setLevel(logging.WARNING)
 
 _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 if _PROJECT_ROOT not in sys.path:

@@ -149,6 +149,56 @@ class SignalEngine:
         volume_zscore = ((volume - vol_ma20) / vol_std20).replace([np.inf, -np.inf], np.nan).fillna(0)
         rolling_corr_market_20 = pd.Series(0.0, index=features.index)
 
+        # Optional macro features (only needed for learned-weight models).
+        vix_zscore_series = pd.Series(0.0, index=features.index, dtype=float)
+        vol_spike_series = pd.Series(0.0, index=features.index, dtype=float)
+        need_macro = False
+        if self.learned_weights is not None:
+            need_macro = (
+                float(getattr(self.learned_weights, "w_vix_zscore", 0.0) or 0.0) != 0.0
+                or float(getattr(self.learned_weights, "w_vol_spike", 0.0) or 0.0) != 0.0
+            )
+        if self.regime_weights is not None and not need_macro:
+            try:
+                for _lw in self.regime_weights.values():
+                    if (
+                        float(getattr(_lw, "w_vix_zscore", 0.0) or 0.0) != 0.0
+                        or float(getattr(_lw, "w_vol_spike", 0.0) or 0.0) != 0.0
+                    ):
+                        need_macro = True
+                        break
+            except Exception:
+                need_macro = False
+
+        if need_macro:
+            try:
+                from utils.market_data import get_ohlcv as _get_ohlcv
+                ix = features.index
+                start = ix.min().strftime("%Y-%m-%d") if hasattr(ix.min(), "strftime") else str(ix.min())[:10]
+                end = ix.max().strftime("%Y-%m-%d") if hasattr(ix.max(), "strftime") else str(ix.max())[:10]
+
+                # Vol spike = SPY realised vol (5d) / realised vol (60d)
+                spy_df = _get_ohlcv("SPY", start, end, use_cache=True, cache_ttl_days=0)
+                if spy_df is not None and not spy_df.empty and "Close" in spy_df.columns:
+                    spy_close = pd.to_numeric(spy_df["Close"], errors="coerce").dropna().sort_index()
+                    spy_ret = spy_close.pct_change()
+                    vol5 = spy_ret.rolling(5).std(ddof=0) * np.sqrt(252.0)
+                    vol60 = spy_ret.rolling(60).std(ddof=0) * np.sqrt(252.0)
+                    vol_spike = (vol5 / vol60).replace([np.inf, -np.inf], np.nan).shift(1)
+                    vol_spike_series = vol_spike.reindex(features.index).fillna(0.0).astype(float)
+
+                # VIX z-score = (VIX - rolling_252d_mean) / rolling_252d_std, shifted by 1
+                vix_df = _get_ohlcv("^VIX", start, end, use_cache=True, cache_ttl_days=0)
+                if vix_df is not None and not vix_df.empty and "Close" in vix_df.columns:
+                    vix_close = pd.to_numeric(vix_df["Close"], errors="coerce").dropna().sort_index()
+                    vix_mean_252 = vix_close.rolling(252).mean()
+                    vix_std_252 = vix_close.rolling(252).std(ddof=0).replace(0, np.nan)
+                    vix_z = ((vix_close - vix_mean_252) / vix_std_252).shift(1)
+                    vix_zscore_series = vix_z.reindex(features.index).fillna(0.0).astype(float)
+            except Exception:
+                # If macro downloads fail, fall back to zeros.
+                pass
+
         regime_label_for_log = "Sideways"
         if self.regime_series is not None and not self.regime_series.empty:
             raw_label = self.regime_series.reindex(features.index).iloc[-1]
@@ -183,6 +233,8 @@ class SignalEngine:
                     + getattr(lw, "w_rel_vol", 0) * relative_volume.loc[mask]
                     + getattr(lw, "w_vol_zscore", 0) * volume_zscore.loc[mask]
                     + getattr(lw, "w_corr_market", 0) * rolling_corr_market_20.loc[mask]
+                    + getattr(lw, "w_vix_zscore", 0) * vix_zscore_series.loc[mask]
+                    + getattr(lw, "w_vol_spike", 0) * vol_spike_series.loc[mask]
                 )
                 adjusted.loc[mask] = raw * getattr(lw, "score_scale", 1.0)
             still_missing = adjusted.isna()
@@ -197,6 +249,8 @@ class SignalEngine:
                     + getattr(default_lw, "w_rel_vol", 0) * relative_volume[still_missing]
                     + getattr(default_lw, "w_vol_zscore", 0) * volume_zscore[still_missing]
                     + getattr(default_lw, "w_corr_market", 0) * rolling_corr_market_20[still_missing]
+                    + getattr(default_lw, "w_vix_zscore", 0) * vix_zscore_series[still_missing]
+                    + getattr(default_lw, "w_vol_spike", 0) * vol_spike_series[still_missing]
                 )
                 adjusted.loc[still_missing] = raw_def * getattr(default_lw, "score_scale", 1.0)
             adjusted = adjusted.fillna(0)
@@ -218,6 +272,8 @@ class SignalEngine:
                 + getattr(lw, "w_rel_vol", 0) * relative_volume
                 + getattr(lw, "w_vol_zscore", 0) * volume_zscore
                 + getattr(lw, "w_corr_market", 0) * rolling_corr_market_20
+                + getattr(lw, "w_vix_zscore", 0) * vix_zscore_series
+                + getattr(lw, "w_vol_spike", 0) * vol_spike_series
             )
             scale = getattr(lw, "score_scale", 1.0)
             direction = getattr(lw, "score_direction", 1)

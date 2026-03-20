@@ -20,6 +20,7 @@ import logging
 
 import numpy as np
 import pandas as pd
+logging.getLogger("matplotlib").setLevel(logging.WARNING)
 import matplotlib.pyplot as plt
 from pathlib import Path
 from .config import BacktestConfig
@@ -652,6 +653,30 @@ class Backtester:
                 print(f"ERROR: {exc}")
                 logger.exception("Error preparing data for %s: %s", ticker, exc)
 
+        # Always load SPY for volatility-based risk scaling.
+        # Regime detection downloads SPY separately, but the simulation's
+        # `price_data` dict may not include it.
+        if "SPY" not in price_data:
+            try:
+                spy_raw = get_ohlcv(
+                    "SPY",
+                    dl_start.strftime("%Y-%m-%d"),
+                    dl_end.strftime("%Y-%m-%d"),
+                    provider=provider,
+                    cache_dir=cache_dir,
+                    use_cache=cache,
+                    cache_ttl_days=cache_ttl,
+                )
+                spy_data = spy_raw.dropna(subset=["Close"])
+                if not spy_data.empty:
+                    price_data["SPY"] = spy_data
+                    logger.info(
+                        "Loaded SPY for vol scaling: shape=%s",
+                        getattr(spy_data, "shape", None),
+                    )
+            except Exception:
+                logger.exception("Failed to load SPY for vol scaling")
+
         if excluded_for_history:
             msg = (
                 f"Excluding tickers with insufficient history "
@@ -682,6 +707,79 @@ class Backtester:
         if not trading_days:
             logger.warning("No trading days in simulation window %s → %s", start_ts, sim_end)
             return
+        date_to_idx = {d: idx for idx, d in enumerate(trading_days)}
+        min_hold = int(getattr(self.config, "min_holding_period_days", 0) or 0)
+        crisis_max_holding_days = int(getattr(self.config, "crisis_max_holding_days", 3) or 3)
+        crisis_beta_cutoff = float(getattr(self.config, "crisis_beta_cutoff", 0.8) or 0.8)
+        crisis_signal_window_days = int(getattr(self.config, "crisis_signal_window_days", 60) or 60)
+        crisis_signal_quantile = float(getattr(self.config, "crisis_signal_quantile", 0.95) or 0.95)
+        early_exit_drawdown_pct = float(
+            getattr(self.config, "min_holding_early_exit_drawdown_pct", 0.03) or 0.03
+        )
+        rebalance_every = int(getattr(self.config, "rebalance_every_trading_days", 1) or 1)
+        if rebalance_every < 1:
+            rebalance_every = 1
+
+        def _held_trading_days(pos: Position, cur_i: int) -> int:
+            entry_i = date_to_idx.get(pos.entry_date)
+            if entry_i is None:
+                # Fallback: should not happen because entry_date comes from trading_days.
+                return cur_i
+            return cur_i - entry_i
+
+        def _threshold_exit_price_for_stop(pos: Position) -> float:
+            if pos.entry_price <= 0:
+                return float(pos.current_price or pos.entry_price or 0.0)
+            if pos.direction > 0:
+                return pos.entry_price * (1.0 - early_exit_drawdown_pct)
+            return pos.entry_price * (1.0 + early_exit_drawdown_pct)
+
+        def _min_hold_effective_for_pos(pos: Position) -> int:
+            # Crisis: allow positions to close on their planned exit date
+            # (candidates.py shortens holding_days to <= 3). This disables the
+            # global min-holding constraint for Crisis positions.
+            if getattr(pos, "regime", None) == "Crisis":
+                return 0
+            return min_hold
+
+        def _drawdown_exceeded_early_stop(pos: Position, tk: str, day: pd.Timestamp) -> bool:
+            if tk not in price_data or day not in price_data[tk].index:
+                return False
+            if pos.entry_price <= 0:
+                return False
+            bar = price_data[tk].loc[day]
+            entry = float(pos.entry_price)
+            thr = early_exit_drawdown_pct
+            if pos.direction > 0:
+                low = float(bar.get("Low", np.nan))
+                return np.isfinite(low) and low <= entry * (1.0 - thr)
+            # For shorts, adverse move is price up.
+            high = float(bar.get("High", np.nan))
+            return np.isfinite(high) and high >= entry * (1.0 + thr)
+
+        # ==============================================================
+        # Volatility-based scaling (SPY 20d realized vs 252d average)
+        # ==============================================================
+        vol_scalar_series = pd.Series(1.0, index=pd.DatetimeIndex(trading_days))
+        try:
+            spy_df = price_data.get("SPY")
+            if spy_df is not None and not spy_df.empty and "Close" in spy_df.columns:
+                spy_close = pd.to_numeric(spy_df["Close"], errors="coerce").dropna().sort_index()
+                if len(spy_close) >= 300:
+                    spy_ret = spy_close.pct_change().dropna()
+                    vol20_annual = spy_ret.rolling(20).std() * np.sqrt(252.0)
+                    long_run_vol = vol20_annual.rolling(252).mean()
+                    vol_ratio = vol20_annual / long_run_vol.replace(0.0, np.nan)
+                    # scaling = min(1, 1/vol_ratio) so if vol is 2x normal => scale 0.5.
+                    vol_scalar = np.minimum(1.0, 1.0 / vol_ratio)
+                    vol_scalar = (
+                        pd.to_numeric(vol_scalar, errors="coerce")
+                        .replace([np.inf, -np.inf], np.nan)
+                        .fillna(1.0)
+                    )
+                    vol_scalar_series = vol_scalar.reindex(trading_days).ffill().bfill().fillna(1.0)
+        except Exception:
+            logger.exception("SPY vol scaling failed; using scalar=1.0")
 
         # Pre-index: calendar date → [(ticker, signal_row)] (string key so lookup matches regardless of type/tz)
         def _to_calendar_key(ts) -> str:
@@ -689,7 +787,39 @@ class Backtester:
                 return ts.isoformat()
             return pd.Timestamp(ts).strftime("%Y-%m-%d")
         cross_sectional = getattr(self.config, "cross_sectional_ranking", False)
-        min_strength = float(getattr(self.config, "min_signal_strength", 0.3))
+        # Optional std-based entry threshold scan:
+        # When enabled, candidates are filtered later (in build_ranked_candidates)
+        # using abs(adjusted_score) > (multiplier * signal_score_std).
+        signal_threshold_std_multiplier = getattr(self.config, "signal_threshold_std_multiplier", None)
+        signal_threshold_abs: float | None = None
+        if signal_threshold_std_multiplier is not None:
+            try:
+                scores: list[float] = []
+                for _tk, sig_df in signal_data.items():
+                    if sig_df is None or sig_df.empty or "adjusted_score" not in sig_df.columns:
+                        continue
+                    mask = (sig_df.index >= start_ts) & (sig_df.index <= end_ts)
+                    vals = pd.to_numeric(sig_df.loc[mask, "adjusted_score"], errors="coerce").dropna()
+                    if not vals.empty:
+                        scores.extend(vals.astype(float).tolist())
+                if len(scores) > 1:
+                    signal_score_std = float(pd.Series(scores).std(ddof=1))
+                else:
+                    signal_score_std = float("nan")
+                # Store so candidate builders can use it.
+                self.config.signal_score_std = signal_score_std
+                if np.isfinite(signal_score_std) and signal_score_std > 0:
+                    signal_threshold_abs = float(signal_threshold_std_multiplier) * signal_score_std
+            except Exception:
+                logger.exception("Failed to compute signal_score_std for std-based threshold scanning")
+
+        base_min_strength = float(getattr(self.config, "min_signal_strength", 0.3))
+        # If our std-based threshold is below the configured min_signal_strength,
+        # broaden inclusion of Neutral scores so candidates can still be filtered later.
+        if signal_threshold_abs is not None and np.isfinite(signal_threshold_abs):
+            min_strength = min(base_min_strength, float(signal_threshold_abs))
+        else:
+            min_strength = base_min_strength
         daily_signals: dict[str, list] = defaultdict(list)
         for ticker, sig_df in signal_data.items():
             mask = (sig_df.index >= start_ts) & (sig_df.index <= end_ts)
@@ -730,6 +860,14 @@ class Backtester:
         daily_allocation_rows: list[dict] = []  # for output/portfolio/daily_positions.csv
 
         for i, date in enumerate(trading_days):
+            # Trade rebalance day (used to gate expiry exits and new signal updates).
+            is_trade_rebalance_day_current = (rebalance_every == 1) or (i % rebalance_every == 0)
+            # The entries created from signals computed on day i will execute at i+1+delay.
+            execute_at = i + 1 + execution_delay_days
+            is_trade_rebalance_day_next = (
+                execute_at < len(trading_days)
+                and ((rebalance_every == 1) or (execute_at % rebalance_every == 0))
+            )
             # --- 0. Pull entries scheduled for today (repopulate every day from due scheduled entries) ---
             pending_entries = [e for (at, e) in scheduled_entries if at <= i]
             scheduled_entries = [(at, e) for (at, e) in scheduled_entries if at > i]
@@ -824,17 +962,45 @@ class Backtester:
                 if regime_today is not None:
                     for pos in list(self.portfolio.positions):
                         if pos.regime != regime_today:
-                            self._close_position(
-                                pos,
-                                date,
-                                price_data,
-                                reason="regime_change",
-                            )
+                            held_days = _held_trading_days(pos, i)
+                            min_hold_eff = _min_hold_effective_for_pos(pos)
+                            if min_hold_eff > 0 and held_days < min_hold_eff:
+                                if _drawdown_exceeded_early_stop(pos, pos.ticker, date):
+                                    self._close_position(
+                                        pos,
+                                        date,
+                                        price_data,
+                                        exit_price_override=_threshold_exit_price_for_stop(pos),
+                                        reason="stop_loss",
+                                    )
+                                continue
+                            if is_trade_rebalance_day_current:
+                                self._close_position(
+                                    pos,
+                                    date,
+                                    price_data,
+                                    reason="regime_change",
+                                )
+                            continue
 
             # --- 1. Close expired positions ---
             for pos in list(self.portfolio.positions):
                 if pos.planned_exit_date <= date:
-                    self._close_position(pos, date, price_data, reason="expiry")
+                    held_days = _held_trading_days(pos, i)
+                    min_hold_eff = _min_hold_effective_for_pos(pos)
+                    if min_hold_eff > 0 and held_days < min_hold_eff:
+                        if _drawdown_exceeded_early_stop(pos, pos.ticker, date):
+                            self._close_position(
+                                pos,
+                                date,
+                                price_data,
+                                exit_price_override=_threshold_exit_price_for_stop(pos),
+                                reason="stop_loss",
+                            )
+                        continue
+                    if is_trade_rebalance_day_current:
+                        self._close_position(pos, date, price_data, reason="expiry")
+                    continue
 
             # --- 1b. Stop-loss / take-profit (before entry loop so freed slots are available same day)
             # 0.0 means disabled for both
@@ -852,6 +1018,21 @@ class Backtester:
                 long_side = pos.direction > 0
                 stop_price = None
                 take_price = None
+
+                # Exception: allow early exit on adverse move > 3% even
+                # if min holding isn't satisfied.
+                held_days = _held_trading_days(pos, i)
+                min_hold_eff = _min_hold_effective_for_pos(pos)
+                if min_hold_eff > 0 and held_days < min_hold_eff and _drawdown_exceeded_early_stop(pos, tk, date):
+                    self._close_position(
+                        pos,
+                        date,
+                        price_data,
+                        exit_price_override=_threshold_exit_price_for_stop(pos),
+                        reason="stop_loss",
+                    )
+                    continue
+
                 if stop_pct > 0:
                     stop_price = pos.entry_price * (1.0 - stop_pct) if long_side else pos.entry_price * (1.0 + stop_pct)
                 if take_pct > 0:
@@ -860,17 +1041,88 @@ class Backtester:
                     self._close_position(pos, date, price_data, exit_price_override=stop_price, reason="stop_loss")
                     continue
                 if take_pct > 0 and take_price is not None and low <= take_price <= high:
+                    min_hold_eff = _min_hold_effective_for_pos(pos)
+                    if min_hold_eff > 0 and held_days < min_hold_eff:
+                        continue
                     self._close_position(pos, date, price_data, exit_price_override=take_price, reason="take_profit")
 
             # --- 2. Execute pending entries at today's open ---
             existing_tickers = {p.ticker for p in self.portfolio.positions}
 
             # Cross-sectional daily rebalance: close positions not in today's target set
-            if cross_sectional and getattr(self.config, "cross_sectional_rebalance_daily", False) and pending_entries:
+            if (
+                cross_sectional
+                and getattr(self.config, "cross_sectional_rebalance_daily", False)
+                and pending_entries
+                and is_trade_rebalance_day_current
+            ):
                 target_tickers = {e["ticker"] for e in pending_entries}
-                for pos in list(self.portfolio.positions):
-                    if pos.ticker not in target_tickers:
-                        self._close_position(pos, date, price_data, reason="rebalance")
+                if getattr(self.config, "no_trade_band_rebalance_enabled", True):
+                    equity_now = float(self.portfolio.equity) if self.portfolio.equity else 0.0
+                    if equity_now > 1e-12:
+                        per_diff = float(getattr(self.config, "no_trade_band_weight_diff", 0.015) or 0.015)
+                        port_drift_thr = float(getattr(self.config, "no_trade_band_total_drift", 0.05) or 0.05)
+                        to_close: list = []
+                        total_drift = 0.0
+                        for pos in list(self.portfolio.positions):
+                            if pos.ticker in target_tickers:
+                                continue
+                            w_to_zero = abs(float(pos.market_value)) / equity_now
+                            if w_to_zero > per_diff:
+                                to_close.append(pos)
+                                total_drift += w_to_zero
+
+                        # Only rebalance if the portfolio-level drift is meaningful.
+                        if total_drift > port_drift_thr:
+                            for pos in to_close:
+                                held_days = _held_trading_days(pos, i)
+                                min_hold_eff = _min_hold_effective_for_pos(pos)
+                                if min_hold_eff > 0 and held_days < min_hold_eff:
+                                    if _drawdown_exceeded_early_stop(pos, pos.ticker, date):
+                                        self._close_position(
+                                            pos,
+                                            date,
+                                            price_data,
+                                            exit_price_override=_threshold_exit_price_for_stop(pos),
+                                            reason="stop_loss",
+                                        )
+                                    continue
+                                self._close_position(
+                                    pos, date, price_data, reason="rebalance_no_trade_band"
+                                )
+                    else:
+                        # If equity is effectively zero, fall back to legacy behaviour.
+                        for pos in list(self.portfolio.positions):
+                            if pos.ticker not in target_tickers:
+                                held_days = _held_trading_days(pos, i)
+                                min_hold_eff = _min_hold_effective_for_pos(pos)
+                                if min_hold_eff > 0 and held_days < min_hold_eff:
+                                    if _drawdown_exceeded_early_stop(pos, pos.ticker, date):
+                                        self._close_position(
+                                            pos,
+                                            date,
+                                            price_data,
+                                            exit_price_override=_threshold_exit_price_for_stop(pos),
+                                            reason="stop_loss",
+                                        )
+                                    continue
+                                self._close_position(pos, date, price_data, reason="rebalance")
+                else:
+                    for pos in list(self.portfolio.positions):
+                        if pos.ticker not in target_tickers:
+                            held_days = _held_trading_days(pos, i)
+                            min_hold_eff = _min_hold_effective_for_pos(pos)
+                            if min_hold_eff > 0 and held_days < min_hold_eff:
+                                if _drawdown_exceeded_early_stop(pos, pos.ticker, date):
+                                    self._close_position(
+                                        pos,
+                                        date,
+                                        price_data,
+                                        exit_price_override=_threshold_exit_price_for_stop(pos),
+                                        reason="stop_loss",
+                                    )
+                                continue
+                            self._close_position(pos, date, price_data, reason="rebalance")
                 existing_tickers = {p.ticker for p in self.portfolio.positions}
 
             # Equal capital per cross-sectional slot: equity divided by batch size (institutional equal-weight),
@@ -883,7 +1135,8 @@ class Backtester:
                 # Regime-aware adjustments for cross-sectional sizing.
                 regime_today = regime_data.get(date, "Sideways")
                 if regime_today == "Crisis":
-                    equal_size *= 0.5  # cut all sizes by 50%
+                    # Crisis risk control is handled by the new vol-scaling + gross cap.
+                    equal_size *= 1.0
                 elif regime_today == "Sideways":
                     # Cap position size at 5% of portfolio per ticker in Sideways regime.
                     equal_size = min(equal_size, self.portfolio.equity * 0.05)
@@ -899,6 +1152,16 @@ class Backtester:
 
             # Current regime for this trading day
             regime_today = regime_data.get(date, "Sideways")
+            vol_scalar_today = float(vol_scalar_series.loc[date]) if date in vol_scalar_series.index else 1.0
+            # Gross exposure caps:
+            # - Normal  : 100% gross (no extra cap)
+            # - Crisis  : 40% gross
+            # - Bear    : 70% gross
+            gross_cap_fraction_today = 1.0
+            if regime_today == "Crisis":
+                gross_cap_fraction_today = 0.4
+            elif regime_today == "Bear":
+                gross_cap_fraction_today = 0.7
 
             # Precompute signal-score pool for volatility-scaled sizing (non-cross-sectional entries only).
             non_cs_entries = [
@@ -919,6 +1182,80 @@ class Backtester:
             # positions do not block re-entry on the same day.
             existing_tickers = {p.ticker for p in self.portfolio.positions}
 
+            # Regime gross exposure cap enforcement (on trade rebalance days).
+            if is_trade_rebalance_day_current and gross_cap_fraction_today < 0.999:
+                equity_now = float(self.portfolio.equity) if self.portfolio.equity else 0.0
+                max_gross_value_now = gross_cap_fraction_today * equity_now
+                gross_now = sum(abs(p.market_value) for p in self.portfolio.positions)
+                if equity_now > 1e-12 and gross_now > max_gross_value_now * 1.0001:
+                    # Close largest positions first to get back under the cap.
+                    positions_sorted = sorted(
+                        list(self.portfolio.positions),
+                        key=lambda p: abs(float(p.market_value)),
+                        reverse=True,
+                    )
+                    for pos in positions_sorted:
+                        gross_now = sum(abs(p.market_value) for p in self.portfolio.positions)
+                        if gross_now <= max_gross_value_now * 1.0001:
+                            break
+                        held_days = _held_trading_days(pos, i)
+                        min_hold_eff = _min_hold_effective_for_pos(pos)
+                        if min_hold_eff > 0 and held_days < min_hold_eff:
+                            if _drawdown_exceeded_early_stop(pos, pos.ticker, date):
+                                self._close_position(
+                                    pos,
+                                    date,
+                                    price_data,
+                                    exit_price_override=_threshold_exit_price_for_stop(pos),
+                                    reason="stop_loss",
+                                )
+                            continue
+                        self._close_position(pos, date, price_data, reason="gross_cap_reduction")
+
+            # --- No-trade band for position updates (reduce churn) ---
+            # If a ticker is already held, we suppress re-entry scheduling when the
+            # candidate's implied target weight is close to the current weight.
+            # This prevents "replace everything" behaviour when signals jitter.
+            no_trade_enabled = bool(getattr(self.config, "no_trade_band_rebalance_enabled", True))
+            per_weight_diff = float(getattr(self.config, "no_trade_band_weight_diff", 0.015) or 0.015)
+            portfolio_drift_thr = float(getattr(self.config, "no_trade_band_total_drift", 0.05) or 0.05)
+            existing_pos_by_ticker = {p.ticker: p for p in self.portfolio.positions}
+            equity_now = float(self.portfolio.equity) if self.portfolio.equity else 0.0
+            implied_weight_diffs: dict[str, float] = {}
+            portfolio_total_drift = 0.0
+            if no_trade_enabled and equity_now > 1e-12:
+                for entry in pending_entries:
+                    tk = entry.get("ticker")
+                    if not tk:
+                        continue
+                    if tk not in existing_pos_by_ticker:
+                        continue
+                    pos = existing_pos_by_ticker[tk]
+                    current_w = abs(float(pos.market_value)) / equity_now
+                    try:
+                        # Match the *actual* target sizing path used in the open
+                        # loop so the no-trade band gates re-entry correctly.
+                        if entry.get("_cross_sectional"):
+                            # Cross-sectional entries use precomputed `equal_size`.
+                            target_size = min(float(equal_size or 0.0), equity_now * 0.99)
+                        else:
+                            target_size = float(
+                                self._compute_position_size(entry, price_data, date)
+                            )
+                    except Exception:
+                        # If we cannot compute target weight reliably, do not suppress.
+                        target_size = float(pos.position_size)
+                    target_w = abs(target_size) / equity_now if equity_now > 0 else 0.0
+                    diff = abs(target_w - current_w)
+                    # If multiple candidate entries exist for the same ticker, keep the max diff.
+                    prev = implied_weight_diffs.get(tk)
+                    if prev is None or diff > prev:
+                        implied_weight_diffs[tk] = diff
+                portfolio_total_drift = sum(
+                    d for d in implied_weight_diffs.values() if d > per_weight_diff
+                )
+            allow_rebalance = (not no_trade_enabled) or (equity_now <= 1e-12) or (portfolio_total_drift > portfolio_drift_thr)
+
             for entry in pending_entries:
                 tk = entry["ticker"]
                 # Shorts gate: do not open short trades when allow_shorts is False.
@@ -937,8 +1274,41 @@ class Backtester:
                 # - Sideways    : allow both
                 if regime_today in ("Bull", "Crisis") and entry.get("signal") == "Bearish":
                     continue
+
+                # Crisis: selective entry (top conviction + low rolling-beta).
+                # This reduces churn while keeping Crisis exposure alive.
+                if regime_today == "Crisis":
+                    entry_score = float(entry.get("adjusted_score", 0.0) or 0.0)
+
+                    # 1) Top 5% of adjusted_score over a rolling 60 trading-day window.
+                    sig_df = signal_data.get(tk) if isinstance(signal_data, dict) else None
+                    if sig_df is not None and not sig_df.empty and "adjusted_score" in sig_df.columns:
+                        try:
+                            s = pd.to_numeric(
+                                sig_df.loc[sig_df.index <= date, "adjusted_score"],
+                                errors="coerce",
+                            ).dropna()
+                            if len(s) >= max(20, int(crisis_signal_window_days * 0.5)):
+                                window = s.tail(crisis_signal_window_days)
+                                thr = float(window.quantile(crisis_signal_quantile))
+                                if entry_score < thr:
+                                    continue
+                        except Exception:
+                            pass
+
+                    # 2) Only low rolling-beta stocks (CAPM 60d beta).
+                    rolling_beta_60d = float(entry.get("capm_beta", 0.0) or 0.0)
+                    if np.isfinite(rolling_beta_60d) and rolling_beta_60d > crisis_beta_cutoff:
+                        continue
+
                 if tk in existing_tickers:
-                    # Reschedule for next trading day if still within exit window
+                    # Reschedule for next trading day if still within exit window,
+                    # but suppress when weight changes are small (no-trade band).
+                    diff = implied_weight_diffs.get(tk, 0.0)
+                    if no_trade_enabled and equity_now > 1e-12:
+                        if (diff <= per_weight_diff) or (not allow_rebalance):
+                            continue
+
                     next_at = i + 1
                     if next_at < len(trading_days):
                         original_exit = entry.get("exit_date")
@@ -977,6 +1347,13 @@ class Backtester:
                 if entry.get("_cross_sectional"):
                     # Cross-sectional portfolios keep their existing equal-weight sizing.
                     size_dollars = min(equal_size or 0, self.portfolio.equity * 0.99)
+                    # Enforce regime gross cap (including already-open positions).
+                    if gross_cap_fraction_today < 0.999:
+                        equity = self.portfolio.equity
+                        gross_exposure = sum(abs(p.market_value) for p in self.portfolio.positions)
+                        max_gross = gross_cap_fraction_today * equity
+                        remaining = max(0.0, max_gross - gross_exposure)
+                        size_dollars = min(size_dollars, remaining) if remaining > 0 else 0.0
                 else:
                     method = getattr(self.config, "position_sizing_method", None) or getattr(
                         self.config, "position_sizing", "equal"
@@ -992,22 +1369,22 @@ class Backtester:
                             size_dollars = min(size_dollars, cap)
                         size_dollars = max(0.0, size_dollars)
                         gross_exposure = sum(abs(p.market_value) for p in self.portfolio.positions)
-                        remaining = max(0.0, 1.5 * equity - gross_exposure)
+                        remaining = max(0.0, gross_cap_fraction_today * equity - gross_exposure)
                         size_dollars = min(size_dollars, remaining) if remaining > 0 else 0.0
                         if regime_today == "Sideways":
                             size_dollars = min(size_dollars, equity * 0.05)
                         if regime_today == "Crisis":
-                            size_dollars *= 0.5
+                            size_dollars *= 1.0
                     elif method in ("equal", "kelly"):
                         size_dollars = self._compute_position_size(entry, price_data, date)
                         equity = self.portfolio.equity
                         gross_exposure = sum(abs(p.market_value) for p in self.portfolio.positions)
-                        remaining = max(0.0, 1.5 * equity - gross_exposure)
+                        remaining = max(0.0, gross_cap_fraction_today * equity - gross_exposure)
                         size_dollars = min(size_dollars, remaining) if remaining > 0 else 0.0
                         if regime_today == "Sideways":
                             size_dollars = min(size_dollars, equity * 0.05)
                         if regime_today == "Crisis":
-                            size_dollars *= 0.5
+                            size_dollars *= 1.0
                     else:
                         # Volatility-scaled position sizing based on signal strength, stock volatility, and regime.
                         score = float(entry.get("adjusted_score", 0.0) or 0.0)
@@ -1020,10 +1397,10 @@ class Backtester:
                                 single_cap = 0.05 * equity
                             size_dollars = min(size_dollars, single_cap)
                             gross_exposure = sum(abs(p.market_value) for p in self.portfolio.positions)
-                            remaining = max(0.0, 1.5 * equity - gross_exposure)
+                            remaining = max(0.0, gross_cap_fraction_today * equity - gross_exposure)
                             size_dollars = min(size_dollars, remaining)
                             if regime_today == "Crisis":
-                                size_dollars *= 0.5
+                                size_dollars *= 1.0
                         else:
                             # Realised volatility (20d) annualized
                             vol_annual = self._annualized_vol(
@@ -1041,10 +1418,10 @@ class Backtester:
                                     single_cap = 0.05 * equity
                                 size_dollars = min(size_dollars, single_cap)
                                 gross_exposure = sum(abs(p.market_value) for p in self.portfolio.positions)
-                                remaining = max(0.0, 1.5 * equity - gross_exposure)
+                                remaining = max(0.0, gross_cap_fraction_today * equity - gross_exposure)
                                 size_dollars = min(size_dollars, remaining)
                                 if regime_today == "Crisis":
-                                    size_dollars *= 0.5
+                                    size_dollars *= 1.0
                             else:
                                 target_vol = float(getattr(self.config, "vol_target_annual", 0.10) or 0.10)
                                 risk_weight = abs(score) / sum_abs_scores
@@ -1060,7 +1437,7 @@ class Backtester:
 
                                 # Cap gross exposure (sum |positions|) at 150% of equity.
                                 gross_exposure = sum(abs(p.market_value) for p in self.portfolio.positions)
-                                max_gross = 1.5 * equity
+                                max_gross = gross_cap_fraction_today * equity
                                 remaining = max_gross - gross_exposure
                                 if remaining <= 0:
                                     size_dollars = 0.0  # no room, will reschedule below
@@ -1073,16 +1450,16 @@ class Backtester:
 
                                 # In Crisis regime, further cut all position sizes by 50%.
                                 if regime_today == "Crisis":
-                                    size_dollars *= 0.5
+                                    size_dollars *= 1.0
                 if size_dollars is None or size_dollars <= 0:
                     # Last-resort: we have slots and entry passed all gates; use minimum size so we actually open
                     if self.portfolio.available_slots > 0:
                         equity = self.portfolio.equity
                         gross = sum(abs(p.market_value) for p in self.portfolio.positions)
-                        remaining = max(0.0, 1.5 * equity - gross)
+                        remaining = max(0.0, gross_cap_fraction_today * equity - gross)
                         size_dollars = min(equity / self.config.max_positions, equity * 0.10, remaining)
                         if regime_today == "Crisis":
-                            size_dollars *= 0.5
+                            size_dollars *= 1.0
                     if size_dollars is None or size_dollars <= 0:
                         next_at = i + 1
                         if next_at < len(trading_days):
@@ -1094,11 +1471,28 @@ class Backtester:
                     # else: we set size_dollars in last-resort, fall through to sector cap and open_position
 
                 # Beta adjustment: scale down high-beta positions to keep portfolio beta ~1
-                beta = float(entry.get("capm_beta", 1.0) or 1.0)
+                beta = float(entry.get("capm_beta", 0.0) or 0.0)
                 beta = max(0.5, min(beta, 2.5))
                 target_beta = 1.0
                 beta_scalar = target_beta / beta
                 size_dollars = size_dollars * beta_scalar
+
+                # Apply volatility scaling after all other size adjustments
+                # so it truly affects the final order sizing.
+                if size_dollars is not None and size_dollars > 0:
+                    size_dollars *= vol_scalar_today
+
+                # Re-apply gross cap after beta/vol adjustments (beta_scalar can
+                # otherwise push us above the regime cap).
+                if gross_cap_fraction_today < 0.999:
+                    equity = self.portfolio.equity
+                    gross_exposure = sum(abs(p.market_value) for p in self.portfolio.positions)
+                    max_gross = gross_cap_fraction_today * equity
+                    remaining = max_gross - gross_exposure
+                    if remaining <= 0:
+                        size_dollars = 0.0
+                    else:
+                        size_dollars = min(size_dollars, remaining)
 
                 # Sector capital exposure cap (fraction of equity/capital)
                 if self.config.sector_enabled:
@@ -1148,10 +1542,10 @@ class Backtester:
                 if size_to_use is None and self.portfolio.available_slots > 0:
                     equity = self.portfolio.equity
                     gross = sum(abs(p.market_value) for p in self.portfolio.positions)
-                    remaining = max(0.0, 1.5 * equity - gross)
+                    remaining = max(0.0, gross_cap_fraction_today * equity - gross)
                     size_to_use = min(equity / self.config.max_positions, equity * 0.10, remaining)
                     if regime_today == "Crisis":
-                        size_to_use *= 0.5
+                        size_to_use *= 1.0
                 size_to_use = size_to_use if size_to_use and size_to_use > 0 else None
 
                 # Portfolio only opens Bullish/Bearish; treat strong Neutral as Bullish when long_only
@@ -1192,6 +1586,47 @@ class Backtester:
                 if pos.ticker in price_data and date in price_data[pos.ticker].index:
                     pos.current_price = float(price_data[pos.ticker].loc[date, "Close"])
 
+            # --- 3.5. Volatility-based position scaling (SPY vol target) ---
+            # Apply the rule: scale all position sizes by min(1, 1/vol_ratio).
+            # This happens after mark-to-market at the daily close so we resize
+            # *existing* exposures (not just new entries).
+            if vol_scalar_today < 0.999:
+                for pos in self.portfolio.positions:
+                    old_market_value = float(pos.market_value)
+                    new_market_value = old_market_value * vol_scalar_today
+                    if old_market_value > 0 and new_market_value >= 0:
+                        # Free the difference back to cash; equity stays unchanged
+                        # at this timestamp, while future P&L scales down.
+                        self.portfolio.cash += (old_market_value - new_market_value)
+                        pos.position_size *= vol_scalar_today
+                        pos.shares = pos.position_size / pos.entry_price if pos.entry_price > 0 else 0.0
+                        # If we're effectively reducing exposure without logging
+                        # an actual trade, we must proportionally reduce the
+                        # pre-charged entry costs so later pnl subtraction
+                        # doesn't over-penalize.
+                        pos.entry_cost *= vol_scalar_today
+                        pos.impact_entry_cost *= vol_scalar_today
+
+            # Enforce regime gross exposure cap continuously (after vol scaling).
+            # For long-only, `invested` ~ gross exposure. We still use abs(...) to
+            # keep behaviour consistent if shorts are enabled later.
+            if gross_cap_fraction_today < 0.999:
+                equity_now = float(self.portfolio.equity)
+                gross_now = sum(abs(p.market_value) for p in self.portfolio.positions)
+                max_gross_value = gross_cap_fraction_today * equity_now
+                if equity_now > 1e-12 and gross_now > max_gross_value * 1.0001 and gross_now > 0:
+                    cap_scalar = max_gross_value / gross_now
+                    for pos in self.portfolio.positions:
+                        old_market_value = float(pos.market_value)
+                        new_market_value = old_market_value * cap_scalar
+                        if old_market_value > 0 and new_market_value >= 0:
+                            self.portfolio.cash += (old_market_value - new_market_value)
+                            pos.position_size *= cap_scalar
+                            pos.shares = pos.position_size / pos.entry_price if pos.entry_price > 0 else 0.0
+                            # Adjust stored costs for remaining notional.
+                            pos.entry_cost *= cap_scalar
+                            pos.impact_entry_cost *= cap_scalar
+
             # --- 4. Record daily equity ---
             regime = regime_data.get(date, "Sideways")
             self.portfolio.record_equity(date, regime)
@@ -1199,6 +1634,12 @@ class Backtester:
             # --- 5. Queue new signals (only inside backtest window) ---
             date_key = _to_calendar_key(date)
             if date > end_ts or date_key not in daily_signals:
+                continue
+            # Rebalance cadence:
+            # Signals are only allowed to generate new entries when the
+            # resulting execution day (i+1+delay) lands on a trade
+            # rebalance day. This prevents turnover on non-rebalance days.
+            if not is_trade_rebalance_day_next:
                 continue
 
             signals_at_date = daily_signals[date_key]

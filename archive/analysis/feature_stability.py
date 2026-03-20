@@ -34,6 +34,8 @@ if str(_root) not in sys.path:
 
 import numpy as np
 import pandas as pd
+import logging
+logging.getLogger("matplotlib").setLevel(logging.WARNING)
 import matplotlib.pyplot as plt
 import seaborn as sns
 

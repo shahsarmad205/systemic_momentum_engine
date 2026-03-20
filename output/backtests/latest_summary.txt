@@ -2,14 +2,15 @@
 ============================================================
   BACKTEST RESULTS SUMMARY
 ============================================================
-  Sharpe Ratio         : 0.741
-  Sortino Ratio        : 0.911
-  CAGR                 : 21.87%
-  Max Drawdown         : -15.24%
-  Win Rate             : 47.7%
-  Trades per Year      : 642
-  Annual Turnover      : 18696%
-  Est. Cost Drag (ann) : 0.00%
-  Long P&L contrib     : 227.50%
+  Sharpe Ratio         : 0.281
+  Net Sharpe Ratio     : 1.187
+  Sortino Ratio        : 0.384
+  CAGR                 : 13.17%
+  Max Drawdown         : -15.19%
+  Win Rate             : 44.9%
+  Trades per Year      : 454
+  Annual Turnover      : 3080%
+  Est. Cost Drag (ann) : 0.01%
+  Long P&L contrib     : 83.18%
   Short P&L contrib    : 0.00%
 ============================================================

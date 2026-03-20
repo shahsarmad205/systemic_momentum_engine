@@ -70,6 +70,11 @@ def parse_args():
                    help="Run transaction cost sensitivity analysis (multiple cost scenarios)")
     p.add_argument("--verbose", action="store_true",
                    help="Enable verbose (DEBUG-level) logging")
+    p.add_argument(
+        "--scan-signal-thresholds",
+        action="store_true",
+        help="Scan std-based abs(adjusted_score) thresholds (0.1σ,0.2σ,0.3σ,0.5σ) and print a comparison table",
+    )
     return p.parse_args()
 
 
@@ -133,6 +138,9 @@ def _print_metrics(m):
     avg_turn = m.get("avg_daily_turnover", 0.0)
     ann_turn = m.get("annualised_turnover", 0.0)
     turn_cost_bps = m.get("turnover_cost_drag_bps", 0.0)
+    ann_turn_old = m.get("annualised_turnover_old", None)
+    if ann_turn_old is None:
+        ann_turn_old = m.get("annualised_turnover_old", 0.0)
     sharpe_ci_low = m.get("sharpe_ci_low", None)
     sharpe_ci_high = m.get("sharpe_ci_high", None)
     sortino_ci_low = m.get("sortino_ci_low", None)
@@ -152,6 +160,8 @@ def _print_metrics(m):
     print(f"  Average Return          : {m['average_return']:.2%}")
     print(f"  Profit Factor           : {m['profit_factor']:.2f}")
     print(f"  Sharpe Ratio            : {m['sharpe_ratio']:.2f}")
+    if "net_sharpe_ratio" in m:
+        print(f"  Net Sharpe Ratio        : {m['net_sharpe_ratio']:.2f}")
     if sharpe_ci_low is not None and sharpe_ci_high is not None:
         print(f"    95% CI                : [{sharpe_ci_low:.2f}, {sharpe_ci_high:.2f}]")
     print(f"  Sortino Ratio           : {m['sortino_ratio']:.2f}")
@@ -167,10 +177,26 @@ def _print_metrics(m):
         print(f"  Avg DD Duration (days)  : {avg_dd_dur:.1f}")
     if avg_turn or ann_turn:
         print()
+        if ann_turn_old is not None:
+            print(f"  Annual Turnover (old)  : {ann_turn_old:.2f}")
         print(f"  Avg Daily Turnover      : {avg_turn:.2f}")
         print(f"  Annual Turnover         : {ann_turn:.2f}")
         if turn_cost_bps:
             print(f"  Turnover Cost Drag (bps): {turn_cost_bps:.1f}")
+
+        # Detailed turnover cross-checks
+        if "turnover_shares_based" in m:
+            print(f"  Turnover (shares-based): {m.get('turnover_shares_based', 0.0):.2f}")
+        if "turnover_changes_over_avg_positions" in m:
+            print(
+                f"  Position changes / avg positions held: "
+                f"{m.get('turnover_changes_over_avg_positions', 0.0):.2f}"
+            )
+        if "turnover_trades_per_year_x_avg_position_size_based" in m:
+            print(
+                "  Turnover (trades_per_year*avg_position_size): "
+                f"{m.get('turnover_trades_per_year_x_avg_position_size_based', 0.0):.2f}"
+            )
     print(f"  Signal Accuracy         : {m['signal_accuracy']:.1%}")
     print(f"  Information Coefficient : {m['information_coefficient']:.4f}")
     print(f"  Rank IC (Spearman)      : {m['rank_ic']:.4f}")
@@ -437,6 +463,64 @@ def main():
     # --- Standard single-window backtest ---
     _print_header(config, tickers)
 
+    if args.scan_signal_thresholds:
+        multipliers = [0.1, 0.2, 0.3, 0.5]
+        orig_std_mult = getattr(config, "signal_threshold_std_multiplier", None)
+
+        # Use the configured window to compute CAGR and trades/year.
+        start_dt = datetime.strptime(config.start_date, "%Y-%m-%d")
+        end_dt = datetime.strptime(config.end_date, "%Y-%m-%d")
+        years = max((end_dt - start_dt).days / 365.25, 1e-6)
+
+        print(f"\n{SEP}")
+        print("  Signal Threshold Scan (std-based abs(adjusted_score))")
+        print(SEP)
+        print(f"  Signal-score std used per run comes from the backtester.")
+        print()
+
+        rows = []
+        for mult in multipliers:
+            config.signal_threshold_std_multiplier = float(mult)
+            engine = BacktestEngine(config=config, config_path=args.config)
+            result = engine.run_backtest(tickers)
+            m = result.metrics
+
+            total_ret = float(m.get("total_return", 0.0) or 0.0)
+            cagr = (1.0 + total_ret) ** (1.0 / years) - 1.0 if total_ret > -1.0 else -1.0
+            win_rate = float(m.get("win_rate", 0.0) or 0.0)
+            trades_per_year = float(m.get("total_trades", 0) or 0) / years
+            sharpe = float(m.get("sharpe_ratio", 0.0) or 0.0)
+            max_dd = float(m.get("max_drawdown", 0.0) or 0.0)
+
+            rows.append({
+                "sigma_mult": mult,
+                "win_rate": win_rate,
+                "trades_per_year": trades_per_year,
+                "sharpe": sharpe,
+                "cagr": cagr,
+                "max_drawdown": max_dd,
+            })
+
+        # Restore config
+        config.signal_threshold_std_multiplier = orig_std_mult
+
+        # Print comparison table
+        print("  Comparison Table")
+        print("  " + "-" * 90)
+        header = (
+            f"{'σ (mult)':>9} | {'win_rate':>9} | {'trades/yr':>10} | {'Sharpe':>7} | "
+            f"{'CAGR':>8} | {'max_drawdown':>14}"
+        )
+        print(header)
+        print("  " + "-" * 90)
+        for r in rows:
+            print(
+                f"  {r['sigma_mult']:>9.1f} | {r['win_rate']*100:>8.2f}% | {r['trades_per_year']:>10.1f} | "
+                f"{r['sharpe']:>7.2f} | {r['cagr']*100:>7.2f}% | {r['max_drawdown']*100:>13.2f}%"
+            )
+        print("  " + "-" * 90)
+        return
+
     engine = BacktestEngine(config=config, config_path=args.config)
     result = engine.run_backtest(tickers)
 
@@ -456,6 +540,7 @@ def main():
     years = max((end_dt - start_dt).days / 365.25, 1e-6)
 
     sharpe = m.get("sharpe_ratio", 0.0)
+    net_sharpe = m.get("net_sharpe_ratio", sharpe)
     sortino = m.get("sortino_ratio", 0.0)
     total_ret = m.get("total_return", 0.0)
     cagr = (1.0 + total_ret) ** (1.0 / years) - 1.0 if total_ret > -1.0 else -1.0
@@ -480,6 +565,7 @@ def main():
         "  BACKTEST RESULTS SUMMARY\n"
         + "=" * 60 + "\n"
         f"  Sharpe Ratio         : {sharpe:.3f}\n"
+        f"  Net Sharpe Ratio     : {net_sharpe:.3f}\n"
         f"  Sortino Ratio        : {sortino:.3f}\n"
         f"  CAGR                 : {cagr:.2%}\n"
         f"  Max Drawdown         : {max_dd:.2%}\n"

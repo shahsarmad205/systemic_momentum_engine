@@ -4,6 +4,7 @@ Ranked daily candidates — extracted from backtester loop (identical logic).
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 MIN_SIGNAL_FLIP_THRESHOLD = 0.15
@@ -33,18 +34,52 @@ def build_ranked_candidates(
 
     candidates: list[dict] = []
     min_strength = getattr(config, "min_signal_strength", 0.3)
+    # Optional std-based signal threshold scan.
+    # Backtester computes `config.signal_score_std` from the signal distribution.
+    std_mult = getattr(config, "signal_threshold_std_multiplier", None)
+    signal_score_std = getattr(config, "signal_score_std", None)
+    use_std_threshold = (
+        std_mult is not None
+        and signal_score_std is not None
+        and np.isfinite(float(signal_score_std))
+        and float(signal_score_std) > 0
+    )
+    threshold_abs = float(std_mult) * float(signal_score_std) if use_std_threshold else None
     for ticker, sig_row in daily_signals_at_date:
-        signal = sig_row["signal"]
-        # Normalize in case it's a numpy/pd scalar
-        signal_str = str(signal).strip() if signal is not None else ""
-        adj_score = float(sig_row["adjusted_score"]) * score_mult
-
-        # Apply min_signal_strength only to Neutral or effectively zero scores; allow directional (Bullish/Bearish) with any non-zero score
-        if signal_str not in ("Bullish", "Bearish") or abs(adj_score) < 1e-9:
-            if abs(adj_score) < min_strength:
-                continue
-        if signal_str == "Bearish" and not config.enable_shorts:
+        adj_raw = float(sig_row["adjusted_score"])
+        if not np.isfinite(adj_raw):
             continue
+
+        if use_std_threshold:
+            # Only enter if abs(signal_score) > threshold_abs
+            if abs(adj_raw) <= float(threshold_abs):
+                continue
+
+            # Override direction from sign(adjusted_score) so the threshold
+            # filtering is independent from upstream "Neutral" labeling.
+            if adj_raw > 0:
+                signal_str = "Bullish"
+            elif adj_raw < 0:
+                signal_str = "Bearish"
+            else:
+                continue
+
+            if signal_str == "Bearish" and not config.enable_shorts:
+                continue
+
+            adj_score = adj_raw * score_mult
+        else:
+            signal = sig_row["signal"]
+            # Normalize in case it's a numpy/pd scalar
+            signal_str = str(signal).strip() if signal is not None else ""
+            adj_score = adj_raw * score_mult
+
+            # Apply min_signal_strength only to Neutral or effectively zero scores; allow directional (Bullish/Bearish) with any non-zero score
+            if signal_str not in ("Bullish", "Bearish") or abs(adj_score) < 1e-9:
+                if abs(adj_score) < min_strength:
+                    continue
+            if signal_str == "Bearish" and not config.enable_shorts:
+                continue
 
         delay = int(getattr(config, "execution_delay_days", 0) or 0)
         next_idx = day_index + 1 + delay
@@ -64,6 +99,11 @@ def build_ranked_candidates(
                     break
             else:
                 holding_days = config.holding_period_by_signal.get(signal_str, config.holding_period_days)
+
+        # Crisis regime: shorten max holding window.
+        # (Positions still can close earlier via stop-loss/take-profit.)
+        if regime == "Crisis":
+            holding_days = min(int(holding_days), 3)
 
         exit_idx = next_idx + holding_days
         if exit_idx >= len(trading_days):

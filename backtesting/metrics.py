@@ -64,6 +64,38 @@ def compute_sharpe_ratio(trades: pd.DataFrame, holding_period_days: int = 5) -> 
     return float((mean_r / std_r) * np.sqrt(periods))
 
 
+def compute_equity_sharpe_ratio(daily_equity: pd.DataFrame, *, ddof: int = 0) -> float:
+    """
+    Net Sharpe based on daily equity curve.
+
+    Unlike `compute_sharpe_ratio()` (which uses trade-level % returns and
+    excludes explicit transaction costs from the Sharpe input), this uses
+    mark-to-market equity changes which already include execution costs.
+    """
+    if daily_equity is None or daily_equity.empty or "equity" not in daily_equity.columns:
+        return 0.0
+
+    eq = daily_equity
+    if "date" in eq.columns:
+        eq = eq.sort_values("date")
+
+    equity_series = pd.to_numeric(eq["equity"], errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+    if len(equity_series) < 3:
+        return 0.0
+
+    rets = equity_series.pct_change().replace([np.inf, -np.inf], np.nan).dropna()
+    if len(rets) < 10:
+        return 0.0
+
+    mean_r = float(rets.mean())
+    std_r = float(rets.std(ddof=ddof))
+    if std_r == 0.0 or not np.isfinite(std_r) or not np.isfinite(mean_r):
+        return 0.0
+
+    sharpe = (mean_r / std_r) * np.sqrt(252.0)
+    return float(sharpe) if np.isfinite(sharpe) else 0.0
+
+
 # ------------------------------------------------------------------
 # Sortino ratio (annualised, downside deviation)
 # ------------------------------------------------------------------
@@ -443,6 +475,173 @@ def compute_turnover(trades: pd.DataFrame, initial_capital: float, avg_cost_bps:
     }
 
 
+def compute_turnover_corrected(
+    trades: pd.DataFrame,
+    daily_equity: pd.DataFrame,
+    config,
+) -> dict:
+    """
+    Corrected turnover estimate based on weight changes:
+      turnover ≈ sum(abs(weight_changes)) / 2 per rebalance, annualised.
+
+    We don't have explicit per-rebalance weight vectors, so we approximate the
+    weight changes for each trade using the implied entry/exit weights from
+    the daily equity curve:
+      w_entry = abs(position_size) / equity(entry_date)
+      w_exit  = abs(position_size * (1 + return)) / equity(exit_date)
+    Then each trade contributes:
+      turnover_trade = (abs(w_entry) + abs(w_exit)) / 2
+    and annualised turnover is sum(turnover_trade) / years.
+    """
+    out = {
+        "annualised_turnover_corrected": 0.0,
+        "avg_daily_turnover_corrected": 0.0,
+        "turnover_cost_drag_bps_corrected": 0.0,
+        # Debug / cross-checks requested by user
+        "turnover_total_shares_traded": 0.0,
+        "turnover_avg_trade_price": 0.0,
+        "turnover_avg_portfolio_value": 0.0,
+        "turnover_shares_based": 0.0,
+        "turnover_position_changes_total": 0.0,
+        "turnover_avg_positions_held": 0.0,
+        "turnover_changes_over_avg_positions": 0.0,
+        "turnover_trades_per_year_x_avg_position_size_based": 0.0,
+    }
+
+    if trades is None or trades.empty or daily_equity is None or daily_equity.empty:
+        return out
+
+    if "position_size" not in trades.columns or "entry_date" not in trades.columns or "exit_date" not in trades.columns:
+        return out
+
+    # Years in the backtest window (calendar-day approximation)
+    try:
+        start = pd.to_datetime(getattr(config, "start_date", None) or getattr(config, "start", "1970-01-01"))
+        end = pd.to_datetime(getattr(config, "end_date", None) or getattr(config, "end", "1970-01-02"))
+        years = max(float((end - start).days) / 365.25, 1e-6)
+    except Exception:
+        years = 1.0
+
+    eq = daily_equity.copy()
+    if "date" in eq.columns:
+        eq = eq.sort_values("date").set_index("date")
+    elif eq.index.name is not None:
+        eq = eq.sort_index()
+    else:
+        eq = eq.sort_index()
+
+    if "equity" not in eq.columns:
+        return out
+
+    eq_series = eq["equity"]
+    # Average portfolio value for the share-based cross-check
+    avg_portfolio_value = float(pd.to_numeric(eq_series, errors="coerce").dropna().mean())
+    out["turnover_avg_portfolio_value"] = avg_portfolio_value
+
+    if avg_portfolio_value <= 0:
+        return out
+
+    # Entry/exit weights
+    # - trades['return'] is per-trade return fraction; for equity-at-exit we use (1 + return)
+    if "return" not in trades.columns:
+        return out
+
+    # Ensure keys are timestamp-like to match daily_equity['date']
+    entry_dates = pd.to_datetime(trades["entry_date"], errors="coerce")
+    exit_dates = pd.to_datetime(trades["exit_date"], errors="coerce")
+    returns = pd.to_numeric(trades["return"], errors="coerce").fillna(0.0)
+    pos_sizes = pd.to_numeric(trades["position_size"], errors="coerce").abs().fillna(0.0)
+
+    valid = (pos_sizes > 0) & entry_dates.notna() & exit_dates.notna()
+    if not bool(valid.any()):
+        return out
+
+    trades_valid_idx = valid[valid].index
+    entry_eq = eq_series.reindex(entry_dates.loc[trades_valid_idx]).values
+    exit_eq = eq_series.reindex(exit_dates.loc[trades_valid_idx]).values
+
+    # Drop trades where the daily equity at entry/exit isn't available
+    w_entry = []
+    w_exit = []
+    for idx, ee, xe, ps, r in zip(
+        trades_valid_idx,
+        entry_eq,
+        exit_eq,
+        pos_sizes.loc[trades_valid_idx].values,
+        returns.loc[trades_valid_idx].values,
+    ):
+        if ee is None or xe is None:
+            continue
+        if not (pd.notna(ee) and pd.notna(xe)):
+            continue
+        ee_f = float(ee)
+        xe_f = float(xe)
+        if ee_f <= 0 or xe_f <= 0:
+            continue
+        we = float(ps) / ee_f
+        # Market value at exit (approx): position_size grows/shrinks by (1+return)
+        mv_exit_abs = float(ps) * (1.0 + float(r))
+        if mv_exit_abs < 0:
+            mv_exit_abs = abs(mv_exit_abs)
+        wx = mv_exit_abs / xe_f
+        w_entry.append(we)
+        w_exit.append(wx)
+
+    if not w_entry:
+        return out
+
+    turnover_trade = (np.array(w_entry) + np.array(w_exit)) / 2.0
+    annualised_turnover_corrected = float(turnover_trade.sum() / years)
+
+    out["annualised_turnover_corrected"] = annualised_turnover_corrected
+    out["avg_daily_turnover_corrected"] = annualised_turnover_corrected / 252.0
+
+    # Cost drag: infer *effective* total bps/leg from observed total costs.
+    total_transaction_costs = 0.0
+    if "total_cost" in trades.columns:
+        total_transaction_costs = float(pd.to_numeric(trades["total_cost"], errors="coerce").fillna(0.0).sum())
+
+    sum_abs_pos = float(pos_sizes.sum())
+    if sum_abs_pos > 0 and total_transaction_costs > 0:
+        # total_transaction_costs = 2 * sum_abs_pos * (effective_total_bps_per_leg / 10_000)
+        effective_total_bps_per_leg = total_transaction_costs * 10_000.0 / (2.0 * sum_abs_pos)
+        # round-trip cost fraction = 2*effective_bps/10_000; convert to bps by *10_000
+        out["turnover_cost_drag_bps_corrected"] = annualised_turnover_corrected * (2.0 * effective_total_bps_per_leg)
+
+    # --- Cross-checks requested by user ---
+    # 1) total_shares_traded * avg_price per year / avg_portfolio_value
+    if "shares" in trades.columns:
+        total_shares_traded = float(pd.to_numeric(trades["shares"], errors="coerce").abs().fillna(0.0).sum())
+        out["turnover_total_shares_traded"] = total_shares_traded
+        avg_trade_price = float(pd.to_numeric(trades["entry_price"], errors="coerce").fillna(0.0).mean()) if "entry_price" in trades.columns else 0.0
+        out["turnover_avg_trade_price"] = avg_trade_price
+        if years > 0 and avg_trade_price > 0 and avg_portfolio_value > 0:
+            traded_notional_per_year = total_shares_traded * avg_trade_price / years
+            out["turnover_shares_based"] = traded_notional_per_year / avg_portfolio_value
+
+    # 2) number_of_position_changes / avg_positions_held
+    if "n_positions" in daily_equity.columns:
+        avg_positions_held = float(pd.to_numeric(daily_equity["n_positions"], errors="coerce").fillna(0.0).mean())
+        out["turnover_avg_positions_held"] = avg_positions_held
+    else:
+        avg_positions_held = float(len(w_entry))  # fallback; shouldn't happen
+        out["turnover_avg_positions_held"] = avg_positions_held
+
+    number_of_position_changes = float(len(trades) * 2)  # entry + exit per trade
+    out["turnover_position_changes_total"] = number_of_position_changes
+    if avg_positions_held > 0:
+        out["turnover_changes_over_avg_positions"] = number_of_position_changes / avg_positions_held
+
+    # 3) trades_per_year * avg_position_size (cross-check)
+    trades_per_year = float(len(trades) / years) if years > 0 else 0.0
+    avg_position_size = float(pos_sizes.mean()) if len(pos_sizes) else 0.0
+    out["turnover_trades_per_year_x_avg_position_size_based"] = (
+        trades_per_year * avg_position_size / avg_portfolio_value if avg_portfolio_value > 0 else 0.0
+    )
+
+    return out
+
+
 # ------------------------------------------------------------------
 # CAPM metrics (portfolio vs SPY)
 # ------------------------------------------------------------------
@@ -530,6 +729,8 @@ def compute_all_metrics(
         eff_holding_days = float(getattr(config, "holding_period_days", 5))
 
     m["sharpe_ratio"] = compute_sharpe_ratio(trades, eff_holding_days)
+    # Net Sharpe: computed from daily equity curve (already net of costs).
+    m["net_sharpe_ratio"] = compute_equity_sharpe_ratio(daily_equity)
     m["sortino_ratio"] = compute_sortino_ratio(trades, eff_holding_days)
     m["calmar_ratio"] = compute_calmar_ratio(daily_equity, config.initial_capital)
     m["max_drawdown"] = compute_max_drawdown(daily_equity)
@@ -542,7 +743,19 @@ def compute_all_metrics(
     m["rank_ic"] = compute_rank_ic(trades)
     m["duration_stats"] = compute_trade_duration_stats(trades)
     to = compute_turnover(trades, config.initial_capital, config.execution_costs_commission_bps)
+    # Keep old turnover for comparison/debugging.
+    m["avg_daily_turnover_old"] = float(to.get("avg_daily_turnover", 0.0) or 0.0)
+    m["annualised_turnover_old"] = float(to.get("annualised_turnover", 0.0) or 0.0)
+    m["turnover_cost_drag_bps_old"] = float(to.get("turnover_cost_drag_bps", 0.0) or 0.0)
     m.update(to)
+
+    # Corrected turnover: based on implied weight changes from trade entry/exit weights.
+    tc = compute_turnover_corrected(trades, daily_equity, config)
+    m.update(tc)
+    m["annualised_turnover"] = float(tc.get("annualised_turnover_corrected", 0.0) or 0.0)
+    m["avg_daily_turnover"] = float(tc.get("avg_daily_turnover_corrected", 0.0) or 0.0)
+    # Replace turnover cost drag estimate with one consistent with observed total costs.
+    m["turnover_cost_drag_bps"] = float(tc.get("turnover_cost_drag_bps_corrected", 0.0) or 0.0)
 
     # Bootstrap confidence intervals for performance metrics (daily returns).
     if not daily_equity.empty and "equity" in daily_equity.columns:

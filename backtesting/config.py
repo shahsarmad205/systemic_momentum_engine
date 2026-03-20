@@ -38,6 +38,16 @@ class BacktestConfig:
     initial_capital: float = 100_000
     max_positions: int = 10
     holding_period_days: int = 5
+    # Minimum time-in-trade (trading days) before we allow expiry/rebalance
+    # exits. This reduces churn from ultra-short round trips.
+    min_holding_period_days: int = 0
+    # If adverse move exceeds this drawdown threshold, we allow early
+    # exit even if min holding isn't satisfied.
+    min_holding_early_exit_drawdown_pct: float = 0.03
+
+    # Rebalance frequency for generating new signals / updates.
+    # Expressed in trading days (1 = daily, 5 = weekly).
+    rebalance_every_trading_days: int = 1
 
     # Cross-sectional ranking portfolio (institutional-style top/bottom selection)
     cross_sectional_ranking: bool = False
@@ -46,6 +56,13 @@ class BacktestConfig:
     market_neutral: bool = False  # if True, add bottom TOP_SHORTS as shorts; else long-only from top
     cross_sectional_rebalance_daily: bool = False  # if True, close positions not in today's target before opens
     daily_positions_csv_path: str = "output/portfolio/daily_positions.csv"
+
+    # No-trade band (reduces churn during cross-sectional daily rebalancing):
+    # - Only close a position if its weight-to-zero exceeds `no_trade_band_weight_diff`.
+    # - Only perform any such closures if total weight drift exceeds `no_trade_band_total_drift`.
+    no_trade_band_rebalance_enabled: bool = True
+    no_trade_band_weight_diff: float = 0.015  # 1.5%
+    no_trade_band_total_drift: float = 0.05   # 5%
 
     # Risk & position management
     position_sizing: str = "equal"           # "equal" | "vol_scaled" | "kelly" | "risk_parity" | "mv_max_sharpe" | "mv_min_variance"
@@ -96,6 +113,11 @@ class BacktestConfig:
 
     # Signal filtering
     min_signal_strength: float = 0.3
+    # Optional: when set, we filter entries by
+    #   abs(adjusted_score) > (signal_threshold_std_multiplier * signal_score_std)
+    # where `signal_score_std` is computed from the backtest's signal_score distribution.
+    signal_threshold_std_multiplier: float | None = None
+    signal_score_std: float | None = None  # computed in Backtester for std-based thresholds
     signal_mode: str = "price"      # "price" = trend+vol, "full" = all agents, "learned" = dynamic weights
     signal_weights: dict = field(default_factory=lambda: {
         "trend": 1.0,
@@ -198,12 +220,19 @@ def load_config(path: str = "backtest_config.yaml") -> BacktestConfig:
     cfg.initial_capital = float(bt.get("initial_capital", cfg.initial_capital))
     cfg.max_positions = int(bt.get("max_positions", cfg.max_positions))
     cfg.holding_period_days = int(bt.get("holding_period_days", cfg.holding_period_days))
+    cfg.min_holding_period_days = int(bt.get("min_holding_period_days", cfg.min_holding_period_days))
+    cfg.rebalance_every_trading_days = int(
+        bt.get("rebalance_every_trading_days", cfg.rebalance_every_trading_days)
+    )
     cs = bt.get("cross_sectional", {})
     cfg.cross_sectional_ranking = cs.get("enabled", cfg.cross_sectional_ranking)
     cfg.top_longs = int(cs.get("top_longs", cfg.top_longs))
     cfg.top_shorts = int(cs.get("top_shorts", cfg.top_shorts))
     cfg.market_neutral = cs.get("market_neutral", cfg.market_neutral)
     cfg.cross_sectional_rebalance_daily = cs.get("rebalance_daily", cfg.cross_sectional_rebalance_daily)
+    cfg.no_trade_band_rebalance_enabled = bool(cs.get("no_trade_band_rebalance_enabled", cfg.no_trade_band_rebalance_enabled))
+    cfg.no_trade_band_weight_diff = float(cs.get("no_trade_band_weight_diff", cfg.no_trade_band_weight_diff))
+    cfg.no_trade_band_total_drift = float(cs.get("no_trade_band_total_drift", cfg.no_trade_band_total_drift))
     cfg.daily_positions_csv_path = cs.get("daily_positions_csv_path", cfg.daily_positions_csv_path)
     dh = bt.get("dynamic_holding", {})
     cfg.dynamic_holding_enabled = dh.get("enabled", cfg.dynamic_holding_enabled)
@@ -228,6 +257,9 @@ def load_config(path: str = "backtest_config.yaml") -> BacktestConfig:
     cfg.kelly_avg_loss_return = float(risk.get("kelly_avg_loss_return", cfg.kelly_avg_loss_return))
     cfg.stop_loss_pct = float(risk.get("stop_loss_pct", cfg.stop_loss_pct))
     cfg.take_profit_pct = float(risk.get("take_profit_pct", cfg.take_profit_pct))
+    cfg.min_holding_early_exit_drawdown_pct = float(
+        risk.get("min_holding_early_exit_drawdown_pct", cfg.min_holding_early_exit_drawdown_pct)
+    )
     cfg.max_position_pct_of_equity = float(risk.get("max_position_pct_of_equity", cfg.max_position_pct_of_equity))
     cfg.max_drawdown_pct = float(risk.get("max_drawdown_pct", cfg.max_drawdown_pct))
     cfg.drawdown_resume_pct = float(risk.get("drawdown_resume_pct", cfg.drawdown_resume_pct))
@@ -269,6 +301,12 @@ def load_config(path: str = "backtest_config.yaml") -> BacktestConfig:
 
     sig = raw.get("signals", {})
     cfg.min_signal_strength = float(sig.get("min_signal_strength", cfg.min_signal_strength))
+    # Optional std-based signal threshold scan (multiplier only; actual std is computed in Backtester).
+    cfg.signal_threshold_std_multiplier = sig.get(
+        "signal_threshold_std_multiplier", cfg.signal_threshold_std_multiplier
+    )
+    if cfg.signal_threshold_std_multiplier is not None:
+        cfg.signal_threshold_std_multiplier = float(cfg.signal_threshold_std_multiplier)
     cfg.signal_mode = sig.get("mode", cfg.signal_mode)
     if "weights" in sig:
         cfg.signal_weights.update(sig["weights"])

@@ -25,6 +25,8 @@ It will:
 import os
 from typing import List
 
+import logging
+logging.getLogger("matplotlib").setLevel(logging.WARNING)
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd

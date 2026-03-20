@@ -30,8 +30,10 @@ import os
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+import logging
 import numpy as np
 import pandas as pd
+logging.getLogger("matplotlib").setLevel(logging.WARNING)
 import matplotlib.pyplot as plt
 
 from backtesting import load_config

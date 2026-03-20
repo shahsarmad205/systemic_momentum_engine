@@ -27,8 +27,10 @@ import argparse
 import os
 from pathlib import Path
 
+import logging
 import numpy as np
 import pandas as pd
+logging.getLogger("matplotlib").setLevel(logging.WARNING)
 import matplotlib.pyplot as plt
 
 

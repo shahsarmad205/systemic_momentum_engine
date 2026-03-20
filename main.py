@@ -38,9 +38,11 @@ Usage:
 """
 
 import os
+import logging
 
 import pandas as pd
 import numpy as np
+logging.getLogger("matplotlib").setLevel(logging.WARNING)
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -51,9 +53,29 @@ from data_loader import download_stock_data
 # --- Agent imports ---
 from agents.trend_agent import build_features, run_trend_model
 from agents.volatility_agent import run_volatility_model
-from agents.regional_news_agent import run_regional_news_model
-from agents.global_news_agent import run_global_news_model
-from agents.social_sentiment_agent import run_social_sentiment_model
+#
+# Some deployments of this repo include only the price-based / volatility
+# components needed for backtesting. The live multi-agent news/sentiment
+# agents are optional; make imports resilient so that signal generation and
+# backtests can run even when those modules are absent.
+#
+try:
+    from agents.regional_news_agent import run_regional_news_model
+except ModuleNotFoundError:  # pragma: no cover
+    def run_regional_news_model(*args, **kwargs):
+        return {"regional_sentiment_score": 0.0, "impact_factor": 1.0}
+
+try:
+    from agents.global_news_agent import run_global_news_model
+except ModuleNotFoundError:  # pragma: no cover
+    def run_global_news_model(*args, **kwargs):
+        return {"global_sentiment_score": 0.0, "impact_factor": 1.0}
+
+try:
+    from agents.social_sentiment_agent import run_social_sentiment_model
+except ModuleNotFoundError:  # pragma: no cover
+    def run_social_sentiment_model(*args, **kwargs):
+        return {"social_sentiment_score": 0.0, "impact_factor": 1.0}
 
 # Volatility helpers for rolling plots
 from agents.volatility_agent.volatility_model import (
@@ -62,8 +84,12 @@ from agents.volatility_agent.volatility_model import (
     compute_rolling_confidence,
 )
 
-# News-impact detection utility
-from utils.news_impact import detect_news_impact
+# News-impact detection utility (optional for backtests)
+try:
+    from utils.news_impact import detect_news_impact
+except ModuleNotFoundError:  # pragma: no cover
+    def detect_news_impact(*args, **kwargs):
+        return {}
 
 
 # ---------------------------------------------------------------------------

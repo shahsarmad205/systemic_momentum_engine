@@ -23,6 +23,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+logging.getLogger("matplotlib").setLevel(logging.WARNING)
 from sklearn.linear_model import Ridge, LogisticRegression
 from sklearn.ensemble import (
     GradientBoostingRegressor,
@@ -70,6 +71,9 @@ COMPOUND_AND_PRICE_FEATURES = [
     "rolling_corr_market_20",
     # Regime / volatility context
     "is_high_vol_regime",
+    # Macro / volatility context (shifted to avoid look-ahead)
+    "vix_zscore",
+    "vol_spike",
 ]
 
 
@@ -90,6 +94,8 @@ class LearnedWeights:
     w_rel_vol: float = 0.0
     w_vol_zscore: float = 0.0
     w_corr_market: float = 0.0
+    w_vix_zscore: float = 0.0
+    w_vol_spike: float = 0.0
     intercept: float = 0.0
 
     model_type: str = "ridge"
@@ -119,6 +125,8 @@ class LearnedWeights:
         relative_volume: float = 0.0,
         volume_zscore: float = 0.0,
         rolling_corr_market: float = 0.0,
+        vix_zscore: float = 0.0,
+        vol_spike: float = 0.0,
     ) -> float:
         raw = (
             self.intercept
@@ -133,6 +141,8 @@ class LearnedWeights:
             + self.w_rel_vol * relative_volume
             + getattr(self, "w_vol_zscore", 0) * volume_zscore
             + getattr(self, "w_corr_market", 0) * rolling_corr_market
+            + getattr(self, "w_vix_zscore", 0) * vix_zscore
+            + getattr(self, "w_vol_spike", 0) * vol_spike
         )
         raw_scaled = getattr(self, "score_scale", 1.0) * raw
         direction = getattr(self, "score_direction", 1)
@@ -157,7 +167,8 @@ class LearnedWeights:
         """Load from a dict (e.g. one entry of regime_models)."""
         for key in (
             "w_ret_5d", "w_ret_10d", "w_vol_10", "w_vol", "w_rel_vol",
-            "w_vol_zscore", "w_corr_market", "score_scale", "score_direction",
+            "w_vol_zscore", "w_corr_market", "w_vix_zscore", "w_vol_spike",
+            "score_scale", "score_direction",
         ):
             if key == "score_scale":
                 data.setdefault(key, 1.0)
@@ -717,6 +728,8 @@ class WeightLearner:
             w_rel_vol=weight_map.get("relative_volume", 0.0),
             w_vol_zscore=weight_map.get("volume_zscore", 0.0),
             w_corr_market=weight_map.get("rolling_corr_market_20", 0.0),
+            w_vix_zscore=weight_map.get("vix_zscore", 0.0),
+            w_vol_spike=weight_map.get("vol_spike", 0.0),
             intercept=round(intercept, 8),
             model_type=self.model_type,
             train_start=train_start,

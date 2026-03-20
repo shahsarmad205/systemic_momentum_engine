@@ -1,7 +1,7 @@
-.env
-output/cache/
 __pycache__/
 *.pyc
-node_modules/
-.DS_Store
+.venv/
+output/cache/
 output/experiments/
+*.DS_Store
+*.ipynb_checkpoints

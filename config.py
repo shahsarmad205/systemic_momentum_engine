@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 
 # Development mode: limit tickers, shorten date range, verbose logging
-DEV_MODE = True
+DEV_MODE = False
 DEV_TICKER_LIMIT = 20
 DEV_DATE_RANGE_DAYS = 730  # ~2 years for faster iteration
 

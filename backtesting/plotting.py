@@ -7,9 +7,11 @@ Decoupled from the backtester — accepts DataFrames and dicts.
 
 import os
 from itertools import groupby
+import logging
 
 import numpy as np
 import pandas as pd
+logging.getLogger("matplotlib").setLevel(logging.WARNING)
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt

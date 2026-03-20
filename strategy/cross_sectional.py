@@ -43,6 +43,16 @@ def build_cross_sectional_candidates(
     top_shorts = getattr(config, "top_shorts", 5)
     market_neutral = getattr(config, "market_neutral", True)
     min_strength = config.min_signal_strength
+    # If std-based threshold scanning is enabled, override `min_strength`
+    # with the equivalent abs(adjusted_score) threshold.
+    std_mult = getattr(config, "signal_threshold_std_multiplier", None)
+    signal_score_std = getattr(config, "signal_score_std", None)
+    if (
+        std_mult is not None
+        and signal_score_std is not None
+        and float(signal_score_std) > 0
+    ):
+        min_strength = float(std_mult) * float(signal_score_std)
 
     regime_adj = config.regime_adjustments.get(regime, {})
     score_mult = regime_adj.get("score_mult", 1.0)
@@ -51,9 +61,11 @@ def build_cross_sectional_candidates(
     # Collect (ticker, adj_score, sig_row) for every ticker with valid score
     rows: list[tuple[str, float, any]] = []
     for ticker, sig_row in daily_signals_at_date:
-        adj_score = float(sig_row["adjusted_score"]) * score_mult
-        # Optional: still require |score| >= min for inclusion in universe
-        if abs(adj_score) < min_strength:
+        signal_raw = float(sig_row["adjusted_score"])
+        adj_score = signal_raw * score_mult
+        # Optional: still require |signal_score| >= threshold for inclusion.
+        # When std-based scanning is enabled, `min_strength` is overridden by the caller.
+        if abs(signal_raw) < min_strength:
             continue
         rows.append((ticker, adj_score, sig_row))
 

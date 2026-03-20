@@ -8,10 +8,14 @@ columns), and optionally render a correlation heatmap for inspection.
 
 from __future__ import annotations
 
+import logging
+
 from typing import Dict, List
 
 import numpy as np
 import pandas as pd
+
+logging.getLogger("matplotlib").setLevel(logging.WARNING)
 
 
 # Columns that must never be dropped automatically, even if highly correlated.

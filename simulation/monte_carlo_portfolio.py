@@ -5,8 +5,12 @@ to simulate distribution of portfolio outcomes.
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
+
+logging.getLogger("matplotlib").setLevel(logging.WARNING)
 
 
 def simulate_portfolio(
