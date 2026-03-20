@@ -13,7 +13,7 @@ import yaml
 
 _DEFAULT_REGIME_ADJ = {
     "Bull":     {"score_mult": 1.2, "position_scale": 1.0},
-    "Bear":     {"score_mult": 0.8, "position_scale": 0.8},
+    "Bear":     {"score_mult": 0.8, "position_scale": 0.5},
     "Sideways": {"score_mult": 1.0, "position_scale": 0.7},
     "Crisis":   {"score_mult": 0.6, "position_scale": 0.5},
 }
@@ -44,6 +44,19 @@ class BacktestConfig:
     # If adverse move exceeds this drawdown threshold, we allow early
     # exit even if min holding isn't satisfied.
     min_holding_early_exit_drawdown_pct: float = 0.03
+
+    # Bear regime: weak historical edge — selective entries + faster exits
+    bear_signal_window_days: int = 60
+    bear_signal_quantile: float = 0.70  # long-only: require score >= this quantile of rolling window
+    bear_max_holding_days: int = 3
+    # When market regime is Bear, exit longs if intraday low breaches this drawdown from entry.
+    bear_regime_intraday_exit_drawdown_pct: float = 0.02
+    # If True (long-only), do not open any new positions on Bear days (signal has no edge).
+    bear_skip_new_entries: bool = False
+    # Long-only: on transition into Bear, close inherited longs (reduces holdthrough losses on Bear days).
+    bear_liquidate_longs_on_regime_entry: bool = False
+    # Max gross exposure (fraction of equity) while market regime is Bear.
+    bear_gross_cap_fraction: float = 0.7
 
     # Rebalance frequency for generating new signals / updates.
     # Expressed in trading days (1 = daily, 5 = weekly).
@@ -118,6 +131,11 @@ class BacktestConfig:
     # where `signal_score_std` is computed from the backtest's signal_score distribution.
     signal_threshold_std_multiplier: float | None = None
     signal_score_std: float | None = None  # computed in Backtester for std-based thresholds
+    # Confidence filter: skip new entry if abs(raw_adjusted_score) < multiplier * rolling_std(adjusted_score).
+    # None or 0 disables. Raw score = entry adjusted_score / regime score_mult (matches signal_data scale).
+    signal_confidence_multiplier: float | None = None  # e.g. 0.8 after sweep (YAML overrides)
+    signal_confidence_std_window: int = 60
+    signal_confidence_min_periods: int = 20
     signal_mode: str = "price"      # "price" = trend+vol, "full" = all agents, "learned" = dynamic weights
     signal_weights: dict = field(default_factory=lambda: {
         "trend": 1.0,
@@ -260,6 +278,17 @@ def load_config(path: str = "backtest_config.yaml") -> BacktestConfig:
     cfg.min_holding_early_exit_drawdown_pct = float(
         risk.get("min_holding_early_exit_drawdown_pct", cfg.min_holding_early_exit_drawdown_pct)
     )
+    cfg.bear_signal_window_days = int(risk.get("bear_signal_window_days", cfg.bear_signal_window_days))
+    cfg.bear_signal_quantile = float(risk.get("bear_signal_quantile", cfg.bear_signal_quantile))
+    cfg.bear_max_holding_days = int(risk.get("bear_max_holding_days", cfg.bear_max_holding_days))
+    cfg.bear_regime_intraday_exit_drawdown_pct = float(
+        risk.get("bear_regime_intraday_exit_drawdown_pct", cfg.bear_regime_intraday_exit_drawdown_pct)
+    )
+    cfg.bear_skip_new_entries = bool(risk.get("bear_skip_new_entries", cfg.bear_skip_new_entries))
+    cfg.bear_gross_cap_fraction = float(risk.get("bear_gross_cap_fraction", cfg.bear_gross_cap_fraction))
+    cfg.bear_liquidate_longs_on_regime_entry = bool(
+        risk.get("bear_liquidate_longs_on_regime_entry", cfg.bear_liquidate_longs_on_regime_entry)
+    )
     cfg.max_position_pct_of_equity = float(risk.get("max_position_pct_of_equity", cfg.max_position_pct_of_equity))
     cfg.max_drawdown_pct = float(risk.get("max_drawdown_pct", cfg.max_drawdown_pct))
     cfg.drawdown_resume_pct = float(risk.get("drawdown_resume_pct", cfg.drawdown_resume_pct))
@@ -307,6 +336,17 @@ def load_config(path: str = "backtest_config.yaml") -> BacktestConfig:
     )
     if cfg.signal_threshold_std_multiplier is not None:
         cfg.signal_threshold_std_multiplier = float(cfg.signal_threshold_std_multiplier)
+    cfg.signal_confidence_multiplier = sig.get(
+        "signal_confidence_multiplier", cfg.signal_confidence_multiplier
+    )
+    if cfg.signal_confidence_multiplier is not None:
+        cfg.signal_confidence_multiplier = float(cfg.signal_confidence_multiplier)
+    cfg.signal_confidence_std_window = int(
+        sig.get("signal_confidence_std_window", cfg.signal_confidence_std_window)
+    )
+    cfg.signal_confidence_min_periods = int(
+        sig.get("signal_confidence_min_periods", cfg.signal_confidence_min_periods)
+    )
     cfg.signal_mode = sig.get("mode", cfg.signal_mode)
     if "weights" in sig:
         cfg.signal_weights.update(sig["weights"])

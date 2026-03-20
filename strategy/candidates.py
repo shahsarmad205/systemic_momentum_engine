@@ -104,6 +104,10 @@ def build_ranked_candidates(
         # (Positions still can close earlier via stop-loss/take-profit.)
         if regime == "Crisis":
             holding_days = min(int(holding_days), 3)
+        # Bear regime: cap max holding (weak edge / faster turnover).
+        if regime == "Bear":
+            bear_cap = int(getattr(config, "bear_max_holding_days", 3) or 3)
+            holding_days = min(int(holding_days), max(1, bear_cap))
 
         exit_idx = next_idx + holding_days
         if exit_idx >= len(trading_days):

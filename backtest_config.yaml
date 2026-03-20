@@ -82,6 +82,14 @@ execution_costs:
 
 # Risk and position management (see docs/INDUSTRY_ROADMAP.md for industry-level settings)
 risk:
+  # Bear: selective long entries + faster exits (see backtester Bear filters)
+  bear_signal_window_days: 60
+  bear_signal_quantile: 0.70
+  bear_max_holding_days: 3
+  bear_regime_intraday_exit_drawdown_pct: 0.02
+  bear_skip_new_entries: false
+  bear_gross_cap_fraction: 0.7
+  bear_liquidate_longs_on_regime_entry: false
   position_sizing: "kelly"      # "equal" | "vol_scaled" | "kelly" — kelly = default (half-Kelly, rolling stats)
   vol_target_annual: 0.12      # target annual vol for vol_scaled sizing (10–15% typical)
   vol_lookback_days: 20        # rolling window for volatility estimate
@@ -109,6 +117,9 @@ signals:
   # This now drives both static and dynamic thresholds. For learned
   # weights with small coefficients, keep this low (e.g. 0.01–0.05).
   min_signal_strength: 0.01   # low so more tickers qualify for strict validation (trades≥300, tickers≥12)
+  # Skip new entry if abs(raw_score) < multiplier * rolling_60d_std(adjusted_score) per ticker (see backtester).
+  # Tuned vs sweep: 0.3 raises win rate modestly; 0.8 hits >48% win, CAGR>11%, net Sharpe>1 on sample config.
+  signal_confidence_multiplier: 0.8
   mode: "learned"              # "price" | "full" | "learned"
   learned_weights_path: "output/learned_weights.json"   # used when mode=learned
   weights:
@@ -152,7 +163,7 @@ regime:
       position_scale: 1.0
     Bear:
       score_mult: 0.8
-      position_scale: 0.8
+      position_scale: 0.5
     Sideways:
       score_mult: 1.0
       position_scale: 0.7

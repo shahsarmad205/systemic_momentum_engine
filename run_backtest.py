@@ -75,6 +75,11 @@ def parse_args():
         action="store_true",
         help="Scan std-based abs(adjusted_score) thresholds (0.1σ,0.2σ,0.3σ,0.5σ) and print a comparison table",
     )
+    p.add_argument(
+        "--scan-signal-confidence",
+        action="store_true",
+        help="Scan signal_confidence_multiplier values (0.1,0.2,0.3,0.5) vs win rate / Sharpe / CAGR",
+    )
     return p.parse_args()
 
 
@@ -519,6 +524,55 @@ def main():
                 f"{r['sharpe']:>7.2f} | {r['cagr']*100:>7.2f}% | {r['max_drawdown']*100:>13.2f}%"
             )
         print("  " + "-" * 90)
+        return
+
+    if args.scan_signal_confidence:
+        multipliers = [0.1, 0.2, 0.3, 0.5, 0.65, 0.8]
+        orig_scm = getattr(config, "signal_confidence_multiplier", None)
+
+        start_dt = datetime.strptime(config.start_date, "%Y-%m-%d")
+        end_dt = datetime.strptime(config.end_date, "%Y-%m-%d")
+        years = max((end_dt - start_dt).days / 365.25, 1e-6)
+
+        print(f"\n{SEP}")
+        print("  Signal confidence scan (abs(raw_score) vs mult × rolling 60d std)")
+        print(SEP)
+
+        rows = []
+        for mult in multipliers:
+            config.signal_confidence_multiplier = float(mult)
+            engine = BacktestEngine(config=config, config_path=args.config)
+            result = engine.run_backtest(tickers)
+            m = result.metrics
+
+            total_ret = float(m.get("total_return", 0.0) or 0.0)
+            cagr = (1.0 + total_ret) ** (1.0 / years) - 1.0 if total_ret > -1.0 else -1.0
+            win_rate = float(m.get("win_rate", 0.0) or 0.0)
+            trades_per_year = float(m.get("total_trades", 0) or 0) / years
+            sharpe = float(m.get("sharpe_ratio", 0.0) or 0.0)
+            net_sharpe = float(m.get("net_sharpe_ratio", sharpe) or 0.0)
+            max_dd = float(m.get("max_drawdown", 0.0) or 0.0)
+
+            rows.append({
+                "mult": mult,
+                "win_rate": win_rate,
+                "trades_per_year": trades_per_year,
+                "sharpe": sharpe,
+                "net_sharpe": net_sharpe,
+                "cagr": cagr,
+                "max_drawdown": max_dd,
+            })
+
+        config.signal_confidence_multiplier = orig_scm
+
+        print("  mult | win_rate | trades/yr | Sharpe | NetSharpe |   CAGR |   maxDD")
+        print("  " + "-" * 72)
+        for r in rows:
+            print(
+                f"  {r['mult']:.1f} | {r['win_rate']*100:7.2f}% | {r['trades_per_year']:9.1f} | "
+                f"{r['sharpe']:6.2f} | {r['net_sharpe']:9.2f} | {r['cagr']*100:6.2f}% | {r['max_drawdown']*100:7.2f}%"
+            )
+        print("  " + "-" * 72)
         return
 
     engine = BacktestEngine(config=config, config_path=args.config)

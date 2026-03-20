@@ -258,6 +258,9 @@ class Backtester:
         # Phase 4 — metrics
         print("Phase 4: Computing metrics…\n")
         metrics = compute_all_metrics(trades, daily_equity, self.config)
+        metrics["crisis_entries_blocked_days_1_3"] = int(
+            getattr(self, "_crisis_entries_blocked_days_1_3", 0)
+        )
 
         # Phase 4b — trade-level diagnostics and P&L decomposition
         self._run_trade_diagnostics(trades, daily_equity)
@@ -525,6 +528,9 @@ class Backtester:
             trades.sort_values("entry_date", inplace=True)
             trades.reset_index(drop=True, inplace=True)
         metrics = compute_all_metrics(trades, daily_equity, self.config)
+        metrics["crisis_entries_blocked_days_1_3"] = int(
+            getattr(self, "_crisis_entries_blocked_days_1_3", 0)
+        )
         result = BacktestResult(trades, daily_equity, metrics, self.config)
         result.price_data = price_data
         result.signal_data = signal_data
@@ -713,6 +719,8 @@ class Backtester:
         crisis_beta_cutoff = float(getattr(self.config, "crisis_beta_cutoff", 0.8) or 0.8)
         crisis_signal_window_days = int(getattr(self.config, "crisis_signal_window_days", 60) or 60)
         crisis_signal_quantile = float(getattr(self.config, "crisis_signal_quantile", 0.95) or 0.95)
+        bear_signal_window_days = int(getattr(self.config, "bear_signal_window_days", 60) or 60)
+        bear_signal_quantile = float(getattr(self.config, "bear_signal_quantile", 0.70) or 0.70)
         early_exit_drawdown_pct = float(
             getattr(self.config, "min_holding_early_exit_drawdown_pct", 0.03) or 0.03
         )
@@ -739,6 +747,9 @@ class Backtester:
             # (candidates.py shortens holding_days to <= 3). This disables the
             # global min-holding constraint for Crisis positions.
             if getattr(pos, "regime", None) == "Crisis":
+                return 0
+            # Bear: shortened planned holds (see candidates); allow expiry/stops without min-hold block.
+            if getattr(pos, "regime", None) == "Bear":
                 return 0
             return min_hold
 
@@ -859,6 +870,10 @@ class Backtester:
         pending_entries: list[dict] = []
         daily_allocation_rows: list[dict] = []  # for output/portfolio/daily_positions.csv
 
+        crisis_consecutive_days = 0
+        prev_regime: str | None = None
+        crisis_entries_blocked_days_1_3 = 0
+
         for i, date in enumerate(trading_days):
             # Trade rebalance day (used to gate expiry exits and new signal updates).
             is_trade_rebalance_day_current = (rebalance_every == 1) or (i % rebalance_every == 0)
@@ -871,6 +886,33 @@ class Backtester:
             # --- 0. Pull entries scheduled for today (repopulate every day from due scheduled entries) ---
             pending_entries = [e for (at, e) in scheduled_entries if at <= i]
             scheduled_entries = [(at, e) for (at, e) in scheduled_entries if at > i]
+
+            # Today's market regime (used for risk exits and entry filters).
+            regime_today = regime_data.get(date, "Sideways")
+            prev_reg_before = prev_regime
+
+            # Long-only: first day of a Bear spell — exit inherited longs (holdthrough drag on Bear days).
+            if (
+                bool(getattr(self.config, "bear_liquidate_longs_on_regime_entry", False))
+                and getattr(self.config, "long_only", False)
+                and regime_today == "Bear"
+                and prev_reg_before is not None
+                and prev_reg_before != "Bear"
+            ):
+                for pos in list(self.portfolio.positions):
+                    if pos.direction > 0:
+                        self._close_position(
+                            pos,
+                            date,
+                            price_data,
+                            reason="bear_regime_entry_liquidate",
+                        )
+
+            if regime_today == "Crisis":
+                crisis_consecutive_days = (crisis_consecutive_days + 1) if prev_regime == "Crisis" else 1
+            else:
+                crisis_consecutive_days = 0
+            prev_regime = regime_today
 
             # --- 0a. Mean-Variance weights (rebalance every rebalance_days; no lookahead) ---
             method = getattr(self.config, "position_sizing_method", None) or getattr(
@@ -1019,6 +1061,27 @@ class Backtester:
                 stop_price = None
                 take_price = None
 
+                # Bear regime: exit longs on a tighter intraday drawdown (holdthrough + new risk).
+                bear_exit_pct = float(
+                    getattr(self.config, "bear_regime_intraday_exit_drawdown_pct", 0.02) or 0.0
+                )
+                if (
+                    regime_today == "Bear"
+                    and bear_exit_pct > 0
+                    and long_side
+                    and float(pos.entry_price or 0.0) > 0
+                ):
+                    bear_thr = float(pos.entry_price) * (1.0 - bear_exit_pct)
+                    if np.isfinite(low) and low <= bear_thr <= high:
+                        self._close_position(
+                            pos,
+                            date,
+                            price_data,
+                            exit_price_override=bear_thr,
+                            reason="bear_regime_drawdown",
+                        )
+                        continue
+
                 # Exception: allow early exit on adverse move > 3% even
                 # if min holding isn't satisfied.
                 held_days = _held_trading_days(pos, i)
@@ -1133,7 +1196,6 @@ class Backtester:
             )
             if equal_size is not None:
                 # Regime-aware adjustments for cross-sectional sizing.
-                regime_today = regime_data.get(date, "Sideways")
                 if regime_today == "Crisis":
                     # Crisis risk control is handled by the new vol-scaling + gross cap.
                     equal_size *= 1.0
@@ -1150,8 +1212,6 @@ class Backtester:
                 )
                 pending_entries = []
 
-            # Current regime for this trading day
-            regime_today = regime_data.get(date, "Sideways")
             vol_scalar_today = float(vol_scalar_series.loc[date]) if date in vol_scalar_series.index else 1.0
             # Gross exposure caps:
             # - Normal  : 100% gross (no extra cap)
@@ -1161,7 +1221,9 @@ class Backtester:
             if regime_today == "Crisis":
                 gross_cap_fraction_today = 0.4
             elif regime_today == "Bear":
-                gross_cap_fraction_today = 0.7
+                gross_cap_fraction_today = float(
+                    getattr(self.config, "bear_gross_cap_fraction", 0.7) or 0.7
+                )
 
             # Precompute signal-score pool for volatility-scaled sizing (non-cross-sectional entries only).
             non_cs_entries = [
@@ -1275,8 +1337,21 @@ class Backtester:
                 if regime_today in ("Bull", "Crisis") and entry.get("signal") == "Bearish":
                     continue
 
-                # Crisis: selective entry (top conviction + low rolling-beta).
-                # This reduces churn while keeping Crisis exposure alive.
+                # Bear + long-only: optional hard block — no new entries (weak / no edge).
+                if (
+                    regime_today == "Bear"
+                    and getattr(self.config, "long_only", False)
+                    and bool(getattr(self.config, "bear_skip_new_entries", False))
+                ):
+                    continue
+
+                # Crisis day 1-3 hard block:
+                # avoid opening fresh risk in the initial shock window.
+                if regime_today == "Crisis" and crisis_consecutive_days <= 3:
+                    crisis_entries_blocked_days_1_3 += 1
+                    continue
+
+                # Crisis (day >= 4): selective entry (top conviction + low rolling-beta).
                 if regime_today == "Crisis":
                     entry_score = float(entry.get("adjusted_score", 0.0) or 0.0)
 
@@ -1300,6 +1375,58 @@ class Backtester:
                     rolling_beta_60d = float(entry.get("capm_beta", 0.0) or 0.0)
                     if np.isfinite(rolling_beta_60d) and rolling_beta_60d > crisis_beta_cutoff:
                         continue
+
+                # Bear (long-only): only enter longs above rolling-window score quantile — weak edge in Bear.
+                if regime_today == "Bear" and getattr(self.config, "long_only", False):
+                    if entry.get("signal") == "Bullish":
+                        reg_entry = str(entry.get("regime") or regime_today)
+                        smult = float(
+                            self.config.regime_adjustments.get(reg_entry, {}).get("score_mult", 1.0)
+                            or 1.0
+                        )
+                        entry_adj = float(entry.get("adjusted_score", 0.0) or 0.0)
+                        raw_score = entry_adj / smult if abs(smult) > 1e-12 else entry_adj
+                        sig_df = signal_data.get(tk) if isinstance(signal_data, dict) else None
+                        if sig_df is not None and not sig_df.empty and "adjusted_score" in sig_df.columns:
+                            try:
+                                s = pd.to_numeric(
+                                    sig_df.loc[sig_df.index <= date, "adjusted_score"],
+                                    errors="coerce",
+                                ).dropna()
+                                if len(s) >= max(20, int(bear_signal_window_days * 0.5)):
+                                    window = s.tail(bear_signal_window_days)
+                                    thr = float(window.quantile(bear_signal_quantile))
+                                    if raw_score < thr:
+                                        continue
+                            except Exception:
+                                pass
+
+                # Optional: rolling score volatility confidence — skip weak signals vs recent dispersion.
+                scm = getattr(self.config, "signal_confidence_multiplier", None)
+                if scm is not None and float(scm) > 0:
+                    sc_window = int(getattr(self.config, "signal_confidence_std_window", 60) or 60)
+                    sc_min = int(getattr(self.config, "signal_confidence_min_periods", 20) or 20)
+                    sig_df_conf = signal_data.get(tk) if isinstance(signal_data, dict) else None
+                    if sig_df_conf is not None and not sig_df_conf.empty and "adjusted_score" in sig_df_conf.columns:
+                        try:
+                            s_hist = pd.to_numeric(
+                                sig_df_conf.loc[sig_df_conf.index <= date, "adjusted_score"],
+                                errors="coerce",
+                            ).dropna()
+                            if len(s_hist) >= sc_min:
+                                tail = s_hist.tail(sc_window)
+                                rs = float(tail.std(ddof=1))
+                                reg_e = str(entry.get("regime") or regime_today)
+                                smult_c = float(
+                                    self.config.regime_adjustments.get(reg_e, {}).get("score_mult", 1.0)
+                                    or 1.0
+                                )
+                                adj_e = float(entry.get("adjusted_score", 0.0) or 0.0)
+                                raw_abs = abs(adj_e / smult_c) if abs(smult_c) > 1e-12 else abs(adj_e)
+                                if np.isfinite(rs) and rs > 1e-12 and raw_abs < float(scm) * rs:
+                                    continue
+                        except Exception:
+                            pass
 
                 if tk in existing_tickers:
                     # Reschedule for next trading day if still within exit window,
@@ -1629,7 +1756,11 @@ class Backtester:
 
             # --- 4. Record daily equity ---
             regime = regime_data.get(date, "Sideways")
-            self.portfolio.record_equity(date, regime)
+            self.portfolio.record_equity(
+                date,
+                regime,
+                crisis_consecutive_days=int(crisis_consecutive_days),
+            )
 
             # --- 5. Queue new signals (only inside backtest window) ---
             date_key = _to_calendar_key(date)
@@ -1700,6 +1831,7 @@ class Backtester:
 
         # --- Factor neutralization diagnostics (report with IC written from run() after metrics) ---
         self._factor_diagnostics = factor_diagnostics
+        self._crisis_entries_blocked_days_1_3 = int(crisis_entries_blocked_days_1_3)
         if factor_diagnostics and write_exposure_diagnostics is not None:
             exposures_path = getattr(
                 self.config, "factor_exposures_path", "output/research/factor_exposures.csv"
