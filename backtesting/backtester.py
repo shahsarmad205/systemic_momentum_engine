@@ -38,6 +38,11 @@ from .metrics import compute_all_metrics, compute_capm_metrics
 from utils.sectors import SECTOR_MAP
 from utils.sector_aggregates import compute_sector_aggregates, apply_sector_adjustment
 from utils.market_data import get_ohlcv
+
+try:
+    from agents.weight_learning_agent.feature_builder import sector_relative_features_by_ticker
+except ImportError:  # pragma: no cover
+    sector_relative_features_by_ticker = None  # type: ignore[misc,assignment]
 from strategy.candidates import build_ranked_candidates
 from strategy.cross_sectional import build_cross_sectional_candidates
 from . import position_sizing
@@ -548,6 +553,7 @@ class Backtester:
 
         price_data: dict[str, pd.DataFrame] = {}
         signal_data: dict[str, pd.DataFrame] = {}
+        pending_prices: dict[str, pd.DataFrame] = {}
         min_history_days = int(getattr(self.config, "min_history_days", 252))
         excluded_for_history: list[str] = []
 
@@ -622,13 +628,47 @@ class Backtester:
                     )
                     continue
 
-                signals = self.signal_engine.generate_signals(data)
+                pending_prices[ticker] = data
+
+            except Exception as exc:
+                print(f"ERROR: {exc}")
+                logger.exception("Error preparing data for %s: %s", ticker, exc)
+
+        # Cross-sectional sector-relative momentum needs the full universe; compute once
+        # then pass per-ticker series into generate_signals so learned adjusted_score matches training.
+        sr_map: dict[str, pd.DataFrame] = {}
+        if pending_prices and sector_relative_features_by_ticker is not None:
+            try:
+                sr_map = sector_relative_features_by_ticker(
+                    pending_prices,
+                    exclude_tickers=frozenset({"SPY"}),
+                )
+            except Exception:
+                logger.exception(
+                    "sector_relative_features_by_ticker failed; using zeros for sector-relative features"
+                )
+                sr_map = {}
+
+        n_pending = len(pending_prices)
+        for j, (ticker, data) in enumerate(pending_prices.items(), 1):
+            print(f"  [signals {j}/{n_pending}] {ticker}…", end=" ")
+            try:
+                sr20_s = None
+                sr60_s = None
+                blk = sr_map.get(ticker)
+                if blk is not None and not blk.empty:
+                    sr20_s = blk["sector_relative_20d"]
+                    sr60_s = blk["sector_relative_60d"]
+                signals = self.signal_engine.generate_signals(
+                    data,
+                    sector_relative_20d=sr20_s,
+                    sector_relative_60d=sr60_s,
+                )
                 if signals.empty:
                     print("no signals")
                     logger.warning("No signals generated for %s; skipping.", ticker)
                     continue
 
-                # In "full" mode, enrich with live news/social sentiment
                 if self.config.signal_mode == "full":
                     sentiments = self.signal_engine.fetch_ticker_sentiments(ticker)
                     signals = self.signal_engine.apply_sentiment_overlay(signals, sentiments)
@@ -654,10 +694,9 @@ class Backtester:
                     len(data),
                     non_neutral,
                 )
-
             except Exception as exc:
                 print(f"ERROR: {exc}")
-                logger.exception("Error preparing data for %s: %s", ticker, exc)
+                logger.exception("Error generating signals for %s: %s", ticker, exc)
 
         # Always load SPY for volatility-based risk scaling.
         # Regime detection downloads SPY separately, but the simulation's

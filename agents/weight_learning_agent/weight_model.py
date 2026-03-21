@@ -55,7 +55,9 @@ COMPOUND_AND_PRICE_FEATURES = [
     "f_social",
     "ret_5d",
     "ret_10d",
-    "sector_relative_strength",
+    "sector_relative_20d",
+    "sector_relative_60d",
+    "ma_crossover",
     "cs_momentum_percentile",
     # Volatility term-structure
     "rolling_vol_5",
@@ -74,7 +76,14 @@ COMPOUND_AND_PRICE_FEATURES = [
     # Macro / volatility context (shifted to avoid look-ahead)
     "vix_zscore",
     "vol_spike",
-    "vix_term",
+    "vix_term_zscore",
+    # Mean-reversion (CS z-scored + shift(1) in feature_builder; inference uses TS z proxy in SignalEngine)
+    "rsi_zscore",
+    "bb_position",
+    "dist_high",
+    "dist_low",
+    "overnight_gap",
+    "intraday_rev",
 ]
 
 
@@ -90,14 +99,34 @@ class LearnedWeights:
     w_social: float = 0.0
     w_ret_5d: float = 0.0
     w_ret_10d: float = 0.0
+    w_ret_20d: float = 0.0
+    w_ret_60d: float = 0.0
+    w_cs_momentum: float = 0.0
+    w_momentum_3m: float = 0.0
+    w_momentum_6m: float = 0.0
+    w_ma_crossover: float = 0.0
+    w_rolling_vol_5: float = 0.0
     w_vol_10: float = 0.0
     w_vol: float = 0.0
+    w_relative_volume: float = 0.0
     w_rel_vol: float = 0.0
+    w_volume_zscore: float = 0.0
     w_vol_zscore: float = 0.0
+    w_vol_of_vol: float = 0.0
+    w_jump_indicator: float = 0.0
+    w_capm_beta: float = 0.0
     w_corr_market: float = 0.0
     w_vix_zscore: float = 0.0
     w_vol_spike: float = 0.0
-    w_vix_term: float = 0.0
+    w_vix_term_zscore: float = 0.0
+    w_rsi_zscore: float = 0.0
+    w_bb_position: float = 0.0
+    w_dist_high: float = 0.0
+    w_dist_low: float = 0.0
+    w_overnight_gap: float = 0.0
+    w_intraday_rev: float = 0.0
+    w_sector_relative_20d: float = 0.0
+    w_sector_relative_60d: float = 0.0
     intercept: float = 0.0
 
     model_type: str = "ridge"
@@ -122,15 +151,43 @@ class LearnedWeights:
         f_social: float = 0.0,
         ret_5d: float = 0.0,
         ret_10d: float = 0.0,
+        ret_20d: float = 0.0,
+        ret_60d: float = 0.0,
+        cs_momentum_percentile: float = 0.0,
+        momentum_3m: float = 0.0,
+        momentum_6m: float = 0.0,
+        ma_crossover: float = 0.0,
+        rolling_vol_5: float = 0.0,
         rolling_vol_10: float = 0.0,
         rolling_vol: float = 0.0,
+        vol_of_vol_20: float = 0.0,
+        jump_indicator: float = 0.0,
         relative_volume: float = 0.0,
         volume_zscore: float = 0.0,
         rolling_corr_market: float = 0.0,
+        capm_beta: float = 0.0,
         vix_zscore: float = 0.0,
         vol_spike: float = 0.0,
-        vix_term: float = 0.0,
+        vix_term_zscore: float = 0.0,
+        rsi_zscore: float = 0.0,
+        bb_position: float = 0.0,
+        dist_high: float = 0.0,
+        dist_low: float = 0.0,
+        overnight_gap: float = 0.0,
+        intraday_rev: float = 0.0,
+        sector_relative_20d: float = 0.0,
+        sector_relative_60d: float = 0.0,
     ) -> float:
+        rel_vol_coef = (
+            getattr(self, "w_relative_volume", 0.0)
+            if abs(getattr(self, "w_relative_volume", 0.0)) > 1e-12
+            else getattr(self, "w_rel_vol", 0.0)
+        )
+        vol_z_coef = (
+            getattr(self, "w_volume_zscore", 0.0)
+            if abs(getattr(self, "w_volume_zscore", 0.0)) > 1e-12
+            else getattr(self, "w_vol_zscore", 0.0)
+        )
         raw = (
             self.intercept
             + self.w_trend * f_trend
@@ -139,14 +196,27 @@ class LearnedWeights:
             + self.w_social * f_social
             + self.w_ret_5d * ret_5d
             + self.w_ret_10d * ret_10d
+            + getattr(self, "w_cs_momentum", 0) * cs_momentum_percentile
+            + getattr(self, "w_ma_crossover", 0) * ma_crossover
+            + getattr(self, "w_rolling_vol_5", 0) * rolling_vol_5
             + getattr(self, "w_vol_10", 0) * rolling_vol_10
             + self.w_vol * rolling_vol
-            + self.w_rel_vol * relative_volume
-            + getattr(self, "w_vol_zscore", 0) * volume_zscore
+            + getattr(self, "w_vol_of_vol", 0) * vol_of_vol_20
+            + getattr(self, "w_jump_indicator", 0) * jump_indicator
+            + rel_vol_coef * relative_volume
+            + vol_z_coef * volume_zscore
             + getattr(self, "w_corr_market", 0) * rolling_corr_market
             + getattr(self, "w_vix_zscore", 0) * vix_zscore
             + getattr(self, "w_vol_spike", 0) * vol_spike
-            + getattr(self, "w_vix_term", 0) * vix_term
+            + getattr(self, "w_vix_term_zscore", 0) * vix_term_zscore
+            + getattr(self, "w_rsi_zscore", 0) * rsi_zscore
+            + getattr(self, "w_bb_position", 0) * bb_position
+            + getattr(self, "w_dist_high", 0) * dist_high
+            + getattr(self, "w_dist_low", 0) * dist_low
+            + getattr(self, "w_overnight_gap", 0) * overnight_gap
+            + getattr(self, "w_intraday_rev", 0) * intraday_rev
+            + getattr(self, "w_sector_relative_20d", 0) * sector_relative_20d
+            + getattr(self, "w_sector_relative_60d", 0) * sector_relative_60d
         )
         raw_scaled = getattr(self, "score_scale", 1.0) * raw
         direction = getattr(self, "score_direction", 1)
@@ -169,9 +239,21 @@ class LearnedWeights:
     @classmethod
     def from_dict(cls, data: dict) -> LearnedWeights:
         """Load from a dict (e.g. one entry of regime_models)."""
+        data = dict(data)
+        if "w_vix_term_zscore" not in data and "w_vix_term" in data:
+            data["w_vix_term_zscore"] = float(data.get("w_vix_term") or 0.0)
+        if "w_relative_volume" not in data and "w_rel_vol" in data:
+            data["w_relative_volume"] = float(data.get("w_rel_vol") or 0.0)
+        if "w_volume_zscore" not in data and "w_vol_zscore" in data:
+            data["w_volume_zscore"] = float(data.get("w_vol_zscore") or 0.0)
         for key in (
-            "w_ret_5d", "w_ret_10d", "w_vol_10", "w_vol", "w_rel_vol",
-            "w_vol_zscore", "w_corr_market", "w_vix_zscore", "w_vol_spike", "w_vix_term",
+            "w_ret_5d", "w_ret_10d", "w_ret_20d", "w_ret_60d",
+            "w_cs_momentum", "w_momentum_3m", "w_momentum_6m", "w_ma_crossover",
+            "w_rolling_vol_5", "w_vol_10", "w_vol", "w_vol_of_vol", "w_jump_indicator",
+            "w_relative_volume", "w_rel_vol", "w_volume_zscore", "w_vol_zscore",
+            "w_corr_market", "w_capm_beta", "w_vix_zscore", "w_vol_spike", "w_vix_term_zscore",
+            "w_rsi_zscore", "w_bb_position", "w_dist_high", "w_dist_low", "w_overnight_gap", "w_intraday_rev",
+            "w_sector_relative_20d", "w_sector_relative_60d",
             "score_scale", "score_direction",
         ):
             if key == "score_scale":
@@ -727,14 +809,31 @@ class WeightLearner:
             w_social=weight_map.get("f_social", 0.0),
             w_ret_5d=weight_map.get("ret_5d", 0.0),
             w_ret_10d=weight_map.get("ret_10d", 0.0),
+            w_cs_momentum=weight_map.get("cs_momentum_percentile", 0.0),
+            w_ma_crossover=weight_map.get("ma_crossover", 0.0),
+            w_rolling_vol_5=weight_map.get("rolling_vol_5", 0.0),
             w_vol_10=weight_map.get("rolling_vol_10", 0.0),
             w_vol=weight_map.get("rolling_vol_20", 0.0),
+            w_vol_of_vol=weight_map.get("vol_of_vol_20", 0.0),
+            w_jump_indicator=weight_map.get("jump_indicator", 0.0),
+            w_relative_volume=weight_map.get("relative_volume", 0.0),
             w_rel_vol=weight_map.get("relative_volume", 0.0),
+            w_volume_zscore=weight_map.get("volume_zscore", 0.0),
             w_vol_zscore=weight_map.get("volume_zscore", 0.0),
             w_corr_market=weight_map.get("rolling_corr_market_20", 0.0),
             w_vix_zscore=weight_map.get("vix_zscore", 0.0),
             w_vol_spike=weight_map.get("vol_spike", 0.0),
-            w_vix_term=weight_map.get("vix_term", 0.0),
+            w_vix_term_zscore=weight_map.get(
+                "vix_term_zscore", weight_map.get("vix_term", 0.0)
+            ),
+            w_rsi_zscore=weight_map.get("rsi_zscore", 0.0),
+            w_bb_position=weight_map.get("bb_position", 0.0),
+            w_dist_high=weight_map.get("dist_high", 0.0),
+            w_dist_low=weight_map.get("dist_low", 0.0),
+            w_overnight_gap=weight_map.get("overnight_gap", 0.0),
+            w_intraday_rev=weight_map.get("intraday_rev", 0.0),
+            w_sector_relative_20d=weight_map.get("sector_relative_20d", 0.0),
+            w_sector_relative_60d=weight_map.get("sector_relative_60d", 0.0),
             intercept=round(intercept, 8),
             model_type=self.model_type,
             train_start=train_start,

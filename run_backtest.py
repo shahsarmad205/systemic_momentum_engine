@@ -54,6 +54,20 @@ def parse_args():
     )
     p.add_argument("--config", default="backtest_config.yaml",
                    help="Path to YAML config (default: backtest_config.yaml)")
+    p.add_argument(
+        "--learned-weights",
+        default=None,
+        metavar="PATH",
+        help="Override learned_weights_path (JSON). Use when comparing saved weight files.",
+    )
+    p.add_argument(
+        "--signal-confidence-mult",
+        type=float,
+        default=None,
+        metavar="X",
+        help="Override signal_confidence_multiplier (and bull/bear/crisis variants) e.g. 0.5 vs 0.8 so "
+        "learned-score magnitude affects trade selection.",
+    )
     p.add_argument("--tickers", nargs="+", default=None,
                    help="Override tickers (space-separated)")
     p.add_argument("--mode", choices=["price", "full", "learned"], default=None,
@@ -442,6 +456,20 @@ def main():
     # Verbose flag overrides DEV_MODE; otherwise use DEV_MODE for convenience.
     setup_logging(verbose=args.verbose or DEV_MODE)
     config = load_config(args.config)
+
+    if args.learned_weights:
+        config.learned_weights_path = args.learned_weights
+
+    if args.signal_confidence_mult is not None:
+        m = float(args.signal_confidence_mult)
+        config.signal_confidence_multiplier = m
+        for attr in (
+            "signal_confidence_multiplier_bull",
+            "signal_confidence_multiplier_bear",
+            "signal_confidence_multiplier_crisis",
+        ):
+            if hasattr(config, attr):
+                setattr(config, attr, m)
 
     if args.tickers:
         config.tickers = args.tickers

@@ -12,7 +12,21 @@ weights.  All features use only past data (no look-ahead bias).
     Crisis / macro:
         vix_zscore: z-scored VIX level (shifted by 1)
         vol_spike: SPY vol(5d)/vol(60d) ratio (shifted by 1)
-        vix_term: VIX spot / VIX3M term structure (shifted by 1)
+        vix_term_zscore: rolling 252d z-score of lagged VIX/VIX3M ratio (shifted; scale-aligned with other features)
+    Mean-reversion (panel):
+        Raw per-ticker series are built in workers (mr_*_raw), then in
+        build_feature_matrix: cross_sectional_zscore (dates × tickers) then
+        shift(1) → rsi_zscore, bb_position, dist_high, dist_low, overnight_gap,
+        intraday_rev. Live SignalEngine uses per-ticker rolling z-score as proxy.
+    Sector-relative momentum (panel):
+        ret_20d/ret_60d minus sector median (same date), then shift(1), then
+        cross_sectional z-score → sector_relative_20d, sector_relative_60d.
+        SECTOR_MAP / get_sector from utils.sectors. Backtests inject panel values
+        via inject_sector_relative_panel_into_signals.
+    Cross-sectional ranking (panel):
+        ret_5d, ret_10d, rolling_vol_20, rolling_vol_60, volume_zscore, vix_zscore,
+        vol_spike → per-date z-score across tickers (population std, ddof=0).
+        is_high_vol_regime is not cross-sectionally normalized; vix_term_zscore is time-series z-scored (not CS).
     Target: forward_return, direction
 """
 
@@ -30,13 +44,207 @@ from agents.volatility_agent.volatility_model import (
     compute_vol_term_structure,
 )
 from agents.weight_learning_agent.regime_detection import get_regime_series_for_dates
+from agents.weight_learning_agent.feature_flags import feature_columns_to_zero_for_ablation
 from execution.cost_model import TransactionCostModel
 from main import CONFIDENCE_MULTIPLIER, compute_rolling_trend_scores
-from utils.sectors import get_sector
+from utils.sectors import SECTOR_MAP, get_sector
 from utils.market_data import get_ohlcv
 
 HISTORY_BUFFER_DAYS = 400
 MARKET_TICKER = "SPY"  # for rolling correlation feature
+
+# Re-export: canonical ticker→sector lives in utils.sectors (covers full learning universe).
+# Use get_sector(ticker) in workers; SECTOR_MAP is the static mapping dict.
+
+# Mean-reversion raw columns (per ticker) → cross-sectional z-score + shift(1) in build_feature_matrix
+_MR_RAW_TO_OUT = {
+    "mr_rsi_raw": "rsi_zscore",
+    "mr_bb_raw": "bb_position",
+    "mr_dist_high_raw": "dist_high",
+    "mr_dist_low_raw": "dist_low",
+    "mr_overnight_raw": "overnight_gap",
+    "mr_intraday_raw": "intraday_rev",
+}
+
+# Panel CS z-score applied in-place; skip redundant ``{col}_cs_z`` suffix pass.
+_CS_Z_PANEL_INPLACE_COLS = frozenset(
+    {
+        "ret_5d",
+        "ret_10d",
+        "rolling_vol_20",
+        "rolling_vol_60",
+        "volume_zscore",
+        "vix_zscore",
+        "vol_spike",
+    }
+)
+
+
+def cross_sectional_zscore(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Cross-sectional z-score: tickers as columns, dates as index.
+    (x - row_mean) / row_std; std=0 → NaN.
+    """
+    row_mean = df.mean(axis=1)
+    row_std = df.std(axis=1).replace(0, np.nan)
+    return df.sub(row_mean, axis=0).div(row_std, axis=0)
+
+
+def cross_sectional_zscore_ddof0(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Same as cross_sectional z-score but population std (ddof=0), matching
+    ``groupby('date')[col].transform(lambda x: (x - x.mean()) / x.std(ddof=0))``.
+    """
+    row_mean = df.mean(axis=1, skipna=True)
+    row_std = df.std(axis=1, ddof=0, skipna=True).replace(0, np.nan)
+    return df.sub(row_mean, axis=0).div(row_std, axis=0)
+
+
+def _apply_cross_sectional_zscore_columns(
+    result: pd.DataFrame,
+    columns: list[str],
+) -> pd.DataFrame:
+    """
+    Replace each column with cross-sectional z-scores across tickers on each date.
+    Missing pivot cells become NaN then 0 after merge.
+    """
+    out = result
+    for col in columns:
+        if col not in out.columns:
+            continue
+        pivot = out.pivot(index="date", columns="ticker", values=col)
+        z = cross_sectional_zscore_ddof0(pivot)
+        z_long = z.stack(future_stack=True).reset_index()
+        z_long.columns = ["date", "ticker", col]
+        out = out.drop(columns=[col], errors="ignore")
+        out = out.merge(z_long, on=["date", "ticker"], how="left")
+        out[col] = pd.to_numeric(out[col], errors="coerce").fillna(0.0)
+    return out
+
+
+def compute_sector_relative_shifted_cs_long(long_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Sector-relative momentum: for each (date, ticker),
+      raw = ret_Nd - median(ret_Nd | same date & sector),
+    then pivot → shift(1) along time → cross-sectional z-score across tickers.
+
+    Input columns: date, ticker, ret_20d, ret_60d, sector.
+    Output adds: sector_relative_20d, sector_relative_60d (CS z-scored, lagged 1 day).
+    """
+    need = {"date", "ticker", "ret_20d", "ret_60d", "sector"}
+    if not need.issubset(long_df.columns):
+        out = long_df.copy()
+        out["sector_relative_20d"] = 0.0
+        out["sector_relative_60d"] = 0.0
+        return out
+    out = long_df.copy()
+    out["date"] = pd.to_datetime(out["date"])
+    m20 = out.groupby(["date", "sector"])["ret_20d"].transform("median")
+    m60 = out.groupby(["date", "sector"])["ret_60d"].transform("median")
+    out["_sr20_raw"] = out["ret_20d"] - m20
+    out["_sr60_raw"] = out["ret_60d"] - m60
+    for raw_col, out_col in [("_sr20_raw", "sector_relative_20d"), ("_sr60_raw", "sector_relative_60d")]:
+        pivot = out.pivot(index="date", columns="ticker", values=raw_col)
+        z = cross_sectional_zscore(pivot).shift(1)
+        z_long = z.stack().reset_index()
+        z_long.columns = ["date", "ticker", out_col]
+        out = out.drop(columns=[out_col], errors="ignore")
+        out = out.merge(z_long, on=["date", "ticker"], how="left")
+        out[out_col] = pd.to_numeric(out[out_col], errors="coerce").fillna(0.0)
+    out = out.drop(columns=["_sr20_raw", "_sr60_raw"], errors="ignore")
+    return out
+
+
+def sector_relative_features_by_ticker(
+    price_data: dict[str, pd.DataFrame],
+    *,
+    exclude_tickers: frozenset[str] | None = None,
+) -> dict[str, pd.DataFrame]:
+    """
+    Build sector_relative_20d / sector_relative_60d (CS z-scored, lagged 1d) per ticker,
+    using the same panel logic as training. Benchmarks (e.g. SPY) should be excluded from
+    the cross-section via exclude_tickers.
+
+    Returns:
+        ticker -> DataFrame indexed by date with columns sector_relative_20d, sector_relative_60d.
+    """
+    ex = frozenset(exclude_tickers or ())
+    tickers = [tk for tk in price_data.keys() if tk not in ex]
+    if not tickers:
+        return {}
+    rows: list[dict] = []
+    for tk in tickers:
+        df = price_data[tk]
+        price_col = "AdjClose" if "AdjClose" in df.columns else "Close"
+        if price_col not in df.columns:
+            continue
+        close = pd.to_numeric(df[price_col], errors="coerce")
+        r20 = close.pct_change(20)
+        r60 = close.pct_change(60)
+        sector = get_sector(tk)
+        for dt in df.index:
+            rows.append(
+                {
+                    "date": pd.Timestamp(dt),
+                    "ticker": tk,
+                    "ret_20d": float(r20.loc[dt]) if pd.notna(r20.loc[dt]) else np.nan,
+                    "ret_60d": float(r60.loc[dt]) if pd.notna(r60.loc[dt]) else np.nan,
+                    "sector": sector,
+                }
+            )
+    if not rows:
+        return {}
+    long = pd.DataFrame(rows)
+    long = compute_sector_relative_shifted_cs_long(long)
+    out: dict[str, pd.DataFrame] = {}
+    for tk in tickers:
+        sub = long.loc[long["ticker"] == tk, ["date", "sector_relative_20d", "sector_relative_60d"]]
+        if sub.empty:
+            continue
+        out[tk] = sub.set_index("date").sort_index()
+    return out
+
+
+def inject_sector_relative_panel_into_signals(
+    price_data: dict[str, pd.DataFrame],
+    signal_data: dict[str, pd.DataFrame],
+) -> None:
+    """
+    After per-ticker signals exist, add sector_relative_20d / 60d using the same
+    panel logic as training (mutates signal_data in place).
+    """
+    sr_map = sector_relative_features_by_ticker(
+        price_data,
+        exclude_tickers=frozenset({"SPY"}),
+    )
+    for tk, sig in signal_data.items():
+        if tk not in sr_map:
+            continue
+        sub = sr_map[tk]
+        sig_idx = pd.to_datetime(sig.index)
+        s20 = sub["sector_relative_20d"].reindex(sig_idx)
+        s60 = sub["sector_relative_60d"].reindex(sig_idx)
+        sig["sector_relative_20d"] = s20.fillna(0.0).to_numpy(dtype=float)
+        sig["sector_relative_60d"] = s60.fillna(0.0).to_numpy(dtype=float)
+
+
+def _attach_mr_cross_sectional_zscore_shifted(result: pd.DataFrame) -> pd.DataFrame:
+    """Attach rsi_zscore, bb_position, … from raw MR columns; CS z-score then shift(1)."""
+    for raw_col, out_col in _MR_RAW_TO_OUT.items():
+        if raw_col not in result.columns:
+            result[out_col] = 0.0
+            continue
+        pivot = result.pivot(index="date", columns="ticker", values=raw_col)
+        z = cross_sectional_zscore(pivot).shift(1)
+        z_long = z.stack().reset_index()
+        z_long.columns = ["date", "ticker", out_col]
+        result = result.drop(columns=[out_col], errors="ignore")
+        result = result.merge(z_long, on=["date", "ticker"], how="left")
+        result[out_col] = result[out_col].fillna(0.0)
+    for raw_col in _MR_RAW_TO_OUT:
+        if raw_col in result.columns:
+            result = result.drop(columns=[raw_col])
+    return result
 
 
 def _download(ticker: str, start, end) -> pd.DataFrame:
@@ -165,37 +373,31 @@ def _build_features_for_ticker(
                 pass
 
         # ------------------------------------------------------------------
-        # Short-horizon / mean-reversion features (1–5 day horizon)
+        # Mean-reversion raw inputs (CS z-score + shift(1) applied in build_feature_matrix)
         # ------------------------------------------------------------------
-        # 1) RSI(14) on close
         delta = close.diff()
         gain = delta.clip(lower=0)
         loss = -delta.clip(upper=0)
         avg_gain = gain.rolling(14, min_periods=14).mean()
         avg_loss = loss.rolling(14, min_periods=14).mean()
         rs = avg_gain / avg_loss.replace(0, np.nan)
-        rsi_14 = 100 - (100 / (1 + rs))
+        mr_rsi_raw = 100 - (100 / (1 + rs))
 
-        # 2) Distance from 20-day high/low
         rolling_max_20 = close.rolling(20, min_periods=10).max()
         rolling_min_20 = close.rolling(20, min_periods=10).min()
-        dist_20d_high = (close - rolling_max_20) / rolling_max_20.replace(0, np.nan)
-        dist_20d_low = (close - rolling_min_20) / rolling_min_20.replace(0, np.nan)
+        mr_dist_high_raw = (close - rolling_max_20) / rolling_max_20.replace(0, np.nan)
+        mr_dist_low_raw = (close - rolling_min_20) / rolling_min_20.replace(0, np.nan)
 
-        # 3) Overnight gap: (open - prev_close) / prev_close
         prev_close = close.shift(1)
-        overnight_gap = (open_px - prev_close) / prev_close.replace(0, np.nan)
+        mr_overnight_raw = (open_px - prev_close) / prev_close.replace(0, np.nan)
+        mr_intraday_raw = (close - open_px) / open_px.replace(0, np.nan)
 
-        # 4) Intraday reversal: (close - open) / open
-        intraday_reversal = (close - open_px) / open_px.replace(0, np.nan)
-
-        # 5) Bollinger Band position (20-day)
         bb_mid = close.rolling(20, min_periods=20).mean()
         bb_std = close.rolling(20, min_periods=20).std()
         bb_upper = bb_mid + 2 * bb_std
         bb_lower = bb_mid - 2 * bb_std
         bb_width = (bb_upper - bb_lower).replace(0, np.nan)
-        bb_pos_20 = (close - bb_lower) / bb_width
+        mr_bb_raw = (close - bb_lower) / bb_width
 
         forward_ret = close.shift(-holding_period) / close - 1
 
@@ -226,13 +428,13 @@ def _build_features_for_ticker(
                 "capm_alpha": capm_alpha,
                 "capm_beta": capm_beta,
                 "capm_residual_vol": capm_residual_vol,
-                # Mean-reversion / short-horizon signals
-                "rsi_14": rsi_14,
-                "dist_20d_high": dist_20d_high,
-                "dist_20d_low": dist_20d_low,
-                "overnight_gap": overnight_gap,
-                "intraday_reversal": intraday_reversal,
-                "bb_pos_20": bb_pos_20,
+                # Mean-reversion raw (panel CS z + shift(1) applied in build_feature_matrix)
+                "mr_rsi_raw": mr_rsi_raw,
+                "mr_bb_raw": mr_bb_raw,
+                "mr_dist_high_raw": mr_dist_high_raw,
+                "mr_dist_low_raw": mr_dist_low_raw,
+                "mr_overnight_raw": mr_overnight_raw,
+                "mr_intraday_raw": mr_intraday_raw,
                 "trend_score": trend_scores,
                 "confidence_mult": conf_mult,
                 "momentum_3m": features["momentum_3m"] if "momentum_3m" in features else 0.0,
@@ -303,7 +505,7 @@ def build_feature_matrix(
     spy = None
     vix_zscore = pd.Series(dtype=float)
     vol_spike = pd.Series(dtype=float)
-    vix_term = pd.Series(dtype=float)
+    vix_term_zscore_series = pd.Series(dtype=float)
     try:
         spy = _download(MARKET_TICKER, dl_start, dl_end)
         if not spy.empty and len(spy) >= 25:
@@ -348,9 +550,15 @@ def build_feature_matrix(
             if vix3m_raw is not None and not vix3m_raw.empty and "Close" in vix3m_raw.columns:
                 vix3m_close = pd.to_numeric(vix3m_raw["Close"], errors="coerce").dropna().sort_index()
                 vix3m_aligned = vix3m_close.reindex(vix_close.index).ffill()
-                vix_term = (vix_close / vix3m_aligned.replace(0.0, np.nan)).replace(
+                # Lagged spot/3M ratio (no same-day look-ahead), then TS z-score vs 252d history, lagged 1d.
+                vix_ratio_lag = (vix_close / vix3m_aligned.replace(0.0, np.nan)).replace(
                     [np.inf, -np.inf], np.nan
                 ).shift(1)
+                vt_m = vix_ratio_lag.rolling(252, min_periods=60).mean()
+                vt_s = vix_ratio_lag.rolling(252, min_periods=60).std(ddof=0).replace(0, np.nan)
+                vix_term_zscore_series = (
+                    ((vix_ratio_lag - vt_m) / vt_s).replace([np.inf, -np.inf], np.nan).shift(1)
+                )
     except Exception:
         # If downloads/derivations fail, keep defaults (features will be 0.0 later).
         pass
@@ -393,6 +601,17 @@ def build_feature_matrix(
     result.sort_values(["date", "ticker"], inplace=True)
     result.reset_index(drop=True, inplace=True)
 
+    # Rank tickers vs each other on the same date (raw time-series features first).
+    result = _apply_cross_sectional_zscore_columns(
+        result,
+        ["ret_5d", "ret_10d", "rolling_vol_20", "rolling_vol_60", "volume_zscore"],
+    )
+    if "volume_surprise" in result.columns:
+        result["volume_surprise"] = result["volume_zscore"]
+
+    # Mean-reversion: cross-sectional z-score per date, then shift(1) (no lookahead).
+    result = _attach_mr_cross_sectional_zscore_shifted(result)
+
     # Attach VIX / macro features to every (ticker, date) row.
     # We fill NaNs with 0.0 so WeightLearner won't drop rows purely due to
     # early rolling-window warmup.
@@ -407,27 +626,38 @@ def build_feature_matrix(
             result["vol_spike"] = result["date"].map(vol_spike.to_dict()).astype(float).fillna(0.0)
         else:
             result["vol_spike"] = 0.0
-        if not vix_term.empty:
-            result["vix_term"] = result["date"].map(vix_term.to_dict()).astype(float).fillna(0.0)
+        if not vix_term_zscore_series.empty:
+            result["vix_term_zscore"] = (
+                result["date"].map(vix_term_zscore_series.to_dict()).astype(float).fillna(0.0)
+            )
         else:
-            result["vix_term"] = 0.0
+            result["vix_term_zscore"] = 0.0
 
-    # Sector-relative momentum: stock 20d/60d return minus sector-median 20d/60d return (no look-ahead).
-    if {"ret_20d", "sector"}.issubset(result.columns):
-        sector_median_20 = (
-            result.groupby(["date", "sector"])["ret_20d"]
-            .transform("median")
-        )
-        result["sector_relative_mom_20d"] = result["ret_20d"] - sector_median_20
-        # Backwards-compatible name used earlier in the project.
-        result["sector_relative_strength"] = result["sector_relative_mom_20d"]
+        # Macro levels are identical across tickers per date; CS z collapses to ~0 — kept for spec / symmetry.
+        result = _apply_cross_sectional_zscore_columns(result, ["vix_zscore", "vol_spike"])
 
-    if {"ret_60d", "sector"}.issubset(result.columns):
-        sector_median_60 = (
-            result.groupby(["date", "sector"])["ret_60d"]
-            .transform("median")
+    # Sector-relative momentum: (ret - sector median) → shift(1) → CS z-score (panel).
+    if {"ret_20d", "ret_60d", "sector", "ticker", "date"}.issubset(result.columns):
+        for c in (
+            "sector_relative_mom_20d",
+            "sector_relative_strength",
+            "sector_relative_mom_60d",
+            "sector_relative_20d",
+            "sector_relative_60d",
+        ):
+            result = result.drop(columns=[c], errors="ignore")
+        sector_long = result[["date", "ticker", "ret_20d", "ret_60d", "sector"]].copy()
+        sector_fe = compute_sector_relative_shifted_cs_long(sector_long)
+        result = result.merge(
+            sector_fe[["date", "ticker", "sector_relative_20d", "sector_relative_60d"]],
+            on=["date", "ticker"],
+            how="left",
         )
-        result["sector_relative_mom_60d"] = result["ret_60d"] - sector_median_60
+        result["sector_relative_20d"] = result["sector_relative_20d"].fillna(0.0)
+        result["sector_relative_60d"] = result["sector_relative_60d"].fillna(0.0)
+    else:
+        result["sector_relative_20d"] = 0.0
+        result["sector_relative_60d"] = 0.0
 
     # Cross-sectional momentum percentile (0–1) based on 6m return excluding last month.
     if "cs_momentum_raw" in result.columns:
@@ -477,11 +707,26 @@ def build_feature_matrix(
             result["forward_return_excess"] = result["forward_return"]
 
     # Cross-sectional z-scores: for each numeric feature, normalise across tickers per date.
+    # MR + sector-relative + panel-inplace columns are already CS-treated; do not duplicate.
+    _precomputed_cs_z = (
+        set(_MR_RAW_TO_OUT.values())
+        | {"sector_relative_20d", "sector_relative_60d"}
+        | set(_CS_Z_PANEL_INPLACE_COLS)
+        | {"vix_term_zscore"}  # already TS z-scored; identical across tickers per date
+    )
     num_cols = result.select_dtypes(include=["number"]).columns
     for col in num_cols:
+        if col in _precomputed_cs_z:
+            continue
         cs = result.groupby("date")[col].transform(
             lambda x: (x - x.mean()) / (x.std(ddof=0) if x.std(ddof=0) not in (0, 0.0) else 1.0)
         )
         result[f"{col}_cs_z"] = cs.fillna(0.0)
+
+    # Phase 1 / Phase 2 ablation: zero disabled COMPOUND columns (TSE_ABLATION_STEP env).
+    _zero_cols = feature_columns_to_zero_for_ablation()
+    for col in _zero_cols:
+        if col in result.columns:
+            result[col] = 0.0
 
     return result
