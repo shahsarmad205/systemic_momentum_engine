@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 import datetime
+import math
 from datetime import date as date_type, timedelta
 import logging
 
@@ -49,6 +50,11 @@ except ImportError:  # pragma: no cover
     vol_rank_features_by_ticker = None  # type: ignore[misc,assignment]
 from strategy.candidates import build_ranked_candidates
 from strategy.cross_sectional import build_cross_sectional_candidates
+try:
+    from strategy.regime_multipliers import load_regime_multipliers, get_multiplier
+except ImportError:  # pragma: no cover
+    load_regime_multipliers = None  # type: ignore[misc,assignment]
+    get_multiplier = None  # type: ignore[misc,assignment]
 from . import position_sizing
 
 try:
@@ -119,6 +125,19 @@ class Backtester:
     def __init__(self, config: BacktestConfig):
         self.config = config
         self.portfolio = Portfolio(config.initial_capital, config.max_positions)
+        # Regime-specific confidence multipliers (safe defaults to 1.0 if loader unavailable).
+        self.regime_multipliers: dict[str, float] = {
+            "Bull": 1.0,
+            "Bear": 1.0,
+            "Sideways": 1.0,
+            "Crisis": 1.0,
+        }
+        if load_regime_multipliers is not None:
+            try:
+                self.regime_multipliers = load_regime_multipliers()
+                logger.info("Regime multipliers loaded: %s", self.regime_multipliers)
+            except Exception as exc:
+                logger.warning("Failed to load regime multipliers (%s). Using defaults.", exc)
         # When True: use TransactionCostModel (execution_costs_* bps) and ExecutionEngine(commission=0).
         # When False: use config.slippage_bps + config.commission_per_trade (e.g. for cost sensitivity).
         self._execution_costs_enabled = getattr(config, "execution_costs_enabled", False)
@@ -761,6 +780,9 @@ class Backtester:
 
     def _simulate(self, price_data, signal_data, regime_data):
         self._factor_diagnostics = []
+        # Precompute regime-level score dispersion once for fragmented-regime fallback
+        # in the rolling-std confidence gate.
+        self._precompute_regime_score_stats(signal_data, regime_data)
         # Build unified trading calendar
         all_dates: set[pd.Timestamp] = set()
         for df in price_data.values():
@@ -1506,6 +1528,21 @@ class Backtester:
                 )
             allow_rebalance = (not no_trade_enabled) or (equity_now <= 1e-12) or (portfolio_total_drift > portfolio_drift_thr)
 
+            # Rolling-std gate: threshold = scm × σ × regime_threshold_aggressiveness (per day).
+            scm = self._signal_confidence_multiplier_for_regime(regime_today)
+            th_agg = self._threshold_aggressiveness_for_regime(regime_today)
+            if (
+                regime_today == "Sideways"
+                and pending_entries
+                and scm is not None
+                and float(scm) > 0
+            ):
+                logger.info(
+                    "SIDEWAYS: rolling-std gate scm=%.2f, aggressiveness=%.2f (threshold = scm×σ×aggr)",
+                    float(scm),
+                    float(th_agg),
+                )
+
             for entry in pending_entries:
                 tk = entry["ticker"]
                 # Shorts gate: do not open short trades when allow_shorts is False.
@@ -1596,7 +1633,6 @@ class Backtester:
                                 pass
 
                 # Optional: rolling score volatility confidence — skip weak signals vs recent dispersion.
-                scm = self._signal_confidence_multiplier_for_regime(regime_today)
                 if scm is not None and float(scm) > 0:
                     sc_window = int(getattr(self.config, "signal_confidence_std_window", 60) or 60)
                     sc_min = int(getattr(self.config, "signal_confidence_min_periods", 20) or 20)
@@ -1607,17 +1643,38 @@ class Backtester:
                                 sig_df_conf.loc[sig_df_conf.index <= date, "adjusted_score"],
                                 errors="coerce",
                             ).dropna()
+                            rs = float("nan")
                             if len(s_hist) >= sc_min:
                                 tail = s_hist.tail(sc_window)
                                 rs = float(tail.std(ddof=1))
-                                reg_e = str(entry.get("regime") or regime_today)
-                                smult_c = float(
-                                    self.config.regime_adjustments.get(reg_e, {}).get("score_mult", 1.0)
-                                    or 1.0
-                                )
-                                adj_e = float(entry.get("adjusted_score", 0.0) or 0.0)
-                                raw_abs = abs(adj_e / smult_c) if abs(smult_c) > 1e-12 else abs(adj_e)
-                                if np.isfinite(rs) and rs > 1e-12 and raw_abs < float(scm) * rs:
+                            else:
+                                # Fragmented regimes can have sparse per-ticker history.
+                                # Fall back to global regime-level score std.
+                                reg_key = str(regime_today or "Sideways")
+                                rs = float((getattr(self, "_regime_score_std", {}) or {}).get(reg_key, np.nan))
+
+                            reg_e = str(entry.get("regime") or regime_today)
+                            smult_c = float(
+                                self.config.regime_adjustments.get(reg_e, {}).get("score_mult", 1.0)
+                                or 1.0
+                            )
+                            adj_e = float(entry.get("adjusted_score", 0.0) or 0.0)
+                            raw_abs = abs(adj_e / smult_c) if abs(smult_c) > 1e-12 else abs(adj_e)
+                            if np.isfinite(rs) and rs > 1e-12:
+                                base_threshold = float(scm) * rs
+                                final_threshold = base_threshold * float(th_agg)
+                                if regime_today == "Sideways":
+                                    logger.info(
+                                        "SIDEWAYS GATE: ticker=%s, raw_abs=%.4f, base_thresh=%.4f, "
+                                        "aggressiveness=%.4f, final_thresh=%.4f, enter=%s",
+                                        tk,
+                                        raw_abs,
+                                        base_threshold,
+                                        float(th_agg),
+                                        final_threshold,
+                                        str(bool(raw_abs >= final_threshold)),
+                                    )
+                                if raw_abs < final_threshold:
                                     continue
                         except Exception:
                             pass
@@ -1667,7 +1724,9 @@ class Backtester:
 
                 if entry.get("_cross_sectional"):
                     # Cross-sectional portfolios keep their existing equal-weight sizing.
+                    _mxp_cs = float(getattr(self.config, "max_position_pct_of_equity", 0.12))
                     size_dollars = min(equal_size or 0, self.portfolio.equity * 0.99)
+                    size_dollars = min(size_dollars, self.portfolio.equity * _mxp_cs)
                     # Enforce regime gross cap (including already-open positions).
                     if gross_cap_fraction_today < 0.999:
                         equity = self.portfolio.equity
@@ -1713,9 +1772,10 @@ class Backtester:
                             # Fallback to equal-weight so entries still open when score pool is empty (e.g. long_only filtered all)
                             equity = self.portfolio.equity
                             size_dollars = equity / self.config.max_positions
-                            single_cap = 0.10 * equity
+                            _mx_pct = float(getattr(self.config, "max_position_pct_of_equity", 0.12))
+                            single_cap = _mx_pct * equity
                             if regime_today == "Sideways":
-                                single_cap = 0.05 * equity
+                                single_cap = min(single_cap, 0.05 * equity)
                             size_dollars = min(size_dollars, single_cap)
                             gross_exposure = sum(abs(p.market_value) for p in self.portfolio.positions)
                             remaining = max(0.0, gross_cap_fraction_today * equity - gross_exposure)
@@ -1734,9 +1794,10 @@ class Backtester:
                                 # Fallback to equal-weight so missing vol does not block entry
                                 equity = self.portfolio.equity
                                 size_dollars = equity / self.config.max_positions
-                                single_cap = 0.10 * equity
+                                _mx_pct = float(getattr(self.config, "max_position_pct_of_equity", 0.12))
+                                single_cap = _mx_pct * equity
                                 if regime_today == "Sideways":
-                                    single_cap = 0.05 * equity
+                                    single_cap = min(single_cap, 0.05 * equity)
                                 size_dollars = min(size_dollars, single_cap)
                                 gross_exposure = sum(abs(p.market_value) for p in self.portfolio.positions)
                                 remaining = max(0.0, gross_cap_fraction_today * equity - gross_exposure)
@@ -1749,11 +1810,11 @@ class Backtester:
                                 equity = self.portfolio.equity
                                 # position_size_i ≈ equity * ( |score_i| / sum|scores| ) * (target_vol / vol_i )
                                 raw_size = equity * risk_weight * (target_vol / max(vol_annual, 1e-3))
-                                # Base single-position cap: 10% of portfolio equity,
-                                # tightened to 5% in Sideways regime.
-                                single_cap = 0.10 * equity
+                                # Single-position cap from config; Sideways capped tighter at 5%.
+                                _mx_pct = float(getattr(self.config, "max_position_pct_of_equity", 0.12))
+                                single_cap = _mx_pct * equity
                                 if regime_today == "Sideways":
-                                    single_cap = 0.05 * equity
+                                    single_cap = min(single_cap, 0.05 * equity)
                                 size_dollars = min(raw_size, single_cap)
 
                                 # Cap gross exposure (sum |positions|) at 150% of equity.
@@ -1766,19 +1827,29 @@ class Backtester:
                                     size_dollars = min(size_dollars, remaining)
                                     # Ensure we don't zero out due to rounding: use at least a small equal-weight slice
                                     min_size = (equity / self.config.max_positions) * 0.5
-                                    if size_dollars > 0 and size_dollars < min_size and remaining >= min_size:
+                                    if (
+                                        size_dollars > 0
+                                        and size_dollars < min_size
+                                        and remaining >= min_size
+                                    ):
                                         size_dollars = min(min_size, remaining)
 
                                 # In Crisis regime, further cut all position sizes by 50%.
                                 if regime_today == "Crisis":
                                     size_dollars *= 1.0
+
                 if size_dollars is None or size_dollars <= 0:
                     # Last-resort: we have slots and entry passed all gates; use minimum size so we actually open
                     if self.portfolio.available_slots > 0:
                         equity = self.portfolio.equity
                         gross = sum(abs(p.market_value) for p in self.portfolio.positions)
                         remaining = max(0.0, gross_cap_fraction_today * equity - gross)
-                        size_dollars = min(equity / self.config.max_positions, equity * 0.10, remaining)
+                        _mx_pct = float(getattr(self.config, "max_position_pct_of_equity", 0.12))
+                        size_dollars = min(
+                            equity / self.config.max_positions,
+                            equity * _mx_pct,
+                            remaining,
+                        )
                         if regime_today == "Crisis":
                             size_dollars *= 1.0
                     if size_dollars is None or size_dollars <= 0:
@@ -1814,6 +1885,12 @@ class Backtester:
                         size_dollars = 0.0
                     else:
                         size_dollars = min(size_dollars, remaining)
+
+                # Final hard cap vs equity (beta/vol scaling must not exceed max_position_pct_of_equity).
+                _eq_mx = float(self.portfolio.equity)
+                _pct_mx = float(getattr(self.config, "max_position_pct_of_equity", 0.12))
+                if _eq_mx > 1e-12 and size_dollars is not None and float(size_dollars) > 0:
+                    size_dollars = min(float(size_dollars), _eq_mx * _pct_mx)
 
                 # Sector capital exposure cap (fraction of equity/capital)
                 if self.config.sector_enabled:
@@ -1864,7 +1941,12 @@ class Backtester:
                     equity = self.portfolio.equity
                     gross = sum(abs(p.market_value) for p in self.portfolio.positions)
                     remaining = max(0.0, gross_cap_fraction_today * equity - gross)
-                    size_to_use = min(equity / self.config.max_positions, equity * 0.10, remaining)
+                    _pct_mx = float(getattr(self.config, "max_position_pct_of_equity", 0.12))
+                    size_to_use = min(
+                        equity / self.config.max_positions,
+                        equity * _pct_mx,
+                        remaining,
+                    )
                     if regime_today == "Crisis":
                         size_to_use *= 1.0
                 size_to_use = size_to_use if size_to_use and size_to_use > 0 else None
@@ -1888,6 +1970,9 @@ class Backtester:
                     impact_entry_cost=impact_cost,
                     position_scale=entry.get("position_scale", 1.0),
                     size_dollars=size_to_use,
+                    max_position_pct_of_equity=float(
+                        getattr(self.config, "max_position_pct_of_equity", 0.12)
+                    ),
                 )
                 if pos is None:
                     # Reschedule so we retry tomorrow (e.g. entry_price was 0 or size 0 this bar)
@@ -2228,18 +2313,116 @@ class Backtester:
     # helpers
     # ------------------------------------------------------------------
 
+    def _precompute_regime_score_stats(self, signal_data, regime_data) -> None:
+        """Precompute global score std per regime for fallback in confidence gate."""
+        self._regime_score_std = {}
+        all_scores_by_regime: dict[str, list[float]] = {
+            "Bull": [],
+            "Bear": [],
+            "Sideways": [],
+            "Crisis": [],
+        }
+
+        if isinstance(signal_data, dict):
+            for _tk, df in signal_data.items():
+                if df is None or df.empty or "adjusted_score" not in df.columns:
+                    continue
+                for date, row in df.iterrows():
+                    reg = "Sideways"
+                    if regime_data:
+                        try:
+                            reg = str(regime_data.get(date, "Sideways"))
+                        except Exception:
+                            reg = "Sideways"
+                    if reg not in all_scores_by_regime:
+                        all_scores_by_regime[reg] = []
+                    score = pd.to_numeric(row.get("adjusted_score"), errors="coerce")
+                    if pd.notna(score):
+                        all_scores_by_regime[reg].append(float(score))
+
+        for reg, scores in all_scores_by_regime.items():
+            if len(scores) >= 10:
+                self._regime_score_std[reg] = float(np.std(scores, ddof=1))
+            else:
+                self._regime_score_std[reg] = 0.1  # default fallback
+
+        logger.info("Precomputed regime score std: %s", self._regime_score_std)
+
     def _signal_confidence_multiplier_for_regime(self, regime_today: str) -> float | None:
         """Rolling-std confidence gate: regime-specific σ multiplier, else global signal_confidence_multiplier."""
-        m = {
-            "Bull": getattr(self.config, "signal_confidence_multiplier_bull", None),
-            "Sideways": getattr(self.config, "signal_confidence_multiplier_sideways", None),
-            "Bear": getattr(self.config, "signal_confidence_multiplier_bear", None),
-            "Crisis": getattr(self.config, "signal_confidence_multiplier_crisis", None),
-        }.get(regime_today)
-        if m is not None:
-            return float(m)
-        base = getattr(self.config, "signal_confidence_multiplier", None)
-        return float(base) if base is not None else None
+        regime_key = str(regime_today or "Sideways")
+        cfg_attrs = {
+            "Bull": "signal_confidence_multiplier_bull",
+            "Bear": "signal_confidence_multiplier_bear",
+            "Sideways": "signal_confidence_multiplier_sideways",
+            "Crisis": "signal_confidence_multiplier_crisis",
+        }
+        attr = cfg_attrs.get(regime_key)
+        multiplier: float | None = None
+        # Source of truth: BacktestConfig (load_config + CLI overrides). Applies to all regimes equally.
+        if attr:
+            raw = getattr(self.config, attr, None)
+            if raw is not None:
+                try:
+                    fv = float(raw)
+                    if math.isfinite(fv) and fv > 0:
+                        multiplier = fv
+                except (TypeError, ValueError):
+                    pass
+
+        if multiplier is None and get_multiplier is not None:
+            try:
+                multiplier = float(get_multiplier(regime_key, self.regime_multipliers, default=1.0))
+            except Exception as exc:
+                logger.warning(
+                    "Regime multiplier helper failed for regime=%s (%s). Falling back to config attrs.",
+                    regime_key,
+                    exc,
+                )
+                multiplier = None
+
+        if multiplier is None:
+            fallback = {
+                "Bull": getattr(self.config, "signal_confidence_multiplier_bull", None),
+                "Sideways": getattr(self.config, "signal_confidence_multiplier_sideways", None),
+                "Bear": getattr(self.config, "signal_confidence_multiplier_bear", None),
+                "Crisis": getattr(self.config, "signal_confidence_multiplier_crisis", None),
+            }.get(regime_key)
+            if fallback is not None:
+                try:
+                    multiplier = float(fallback)
+                except (TypeError, ValueError):
+                    multiplier = None
+
+        if multiplier is None:
+            base = getattr(self.config, "signal_confidence_multiplier", None)
+            multiplier = float(base) if base is not None else 1.0
+
+        if regime_key != "Sideways" and abs(multiplier - 1.0) > 1e-12:
+            logger.debug(
+                "Regime %s: applying multiplier %.2f to confidence threshold",
+                regime_key,
+                multiplier,
+            )
+        return multiplier
+
+    def _threshold_aggressiveness_for_regime(self, regime_today: str) -> float:
+        """Scale rolling-std gate threshold (scm × σ); values > 1.0 require stronger |score| to enter."""
+        regime_key = str(regime_today or "Sideways")
+        raw_map = getattr(self.config, "regime_threshold_aggressiveness", None)
+        if not isinstance(raw_map, dict):
+            return 1.0
+        v = raw_map.get(regime_key)
+        if v is None:
+            return 1.0
+        try:
+            a = float(v)
+        except (TypeError, ValueError):
+            return 1.0
+        if not math.isfinite(a) or a <= 0:
+            return 1.0
+        # Avoid absurd values that would block essentially all entries.
+        return float(min(a, 20.0))
 
     def _crisis_transition_exit_price(self, pos, date, price_data) -> float | None:
         """Exit at Open when enabled; else None (caller uses Close in _close_position)."""

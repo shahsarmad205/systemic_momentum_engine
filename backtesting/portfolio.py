@@ -35,6 +35,8 @@ class Position:
     actual_exit_date: pd.Timestamp | None = None
     actual_holding_days: int = 0
     current_price: float = 0.0
+    # Total portfolio equity immediately before this leg opens (for % of book diagnostics).
+    entry_book_equity: float = 0.0
     # Set when Crisis transition shortens planned_exit — min-hold must not block expiry.
     crisis_accelerated_exit: bool = False
 
@@ -85,7 +87,7 @@ class Portfolio:
         kelly_win_rate: float = 0.55,
         kelly_avg_win_return: float = 0.02,
         kelly_avg_loss_return: float = 0.015,
-        max_position_pct_of_equity: float = 0.25,
+        max_position_pct_of_equity: float = 0.12,
     ) -> float:
         """
         Compute dollar position size. Equal weight by default; optional vol-scaled or Kelly.
@@ -134,6 +136,7 @@ class Portfolio:
         impact_entry_cost: float = 0.0,
         position_scale: float = 1.0,
         size_dollars: float | None = None,
+        max_position_pct_of_equity: float = 0.12,
     ) -> Position | None:
         if self.available_slots <= 0:
             return None
@@ -142,12 +145,20 @@ class Portfolio:
             return None  # do not trade Neutral signals
 
         if size_dollars is not None and size_dollars > 0:
-            size = min(size_dollars, self.equity * 0.99)  # never allocate more than equity
+            _pct = float(max_position_pct_of_equity)
+            _cap = self.equity * max(0.0, min(_pct, 1.0))
+            # Explicit dollars from backtester: still enforce single-name vs equity cap.
+            size = min(float(size_dollars), self.equity * 0.99, _cap)
         else:
-            size = self.compute_position_size(position_scale)
+            size = self.compute_position_size(
+                position_scale,
+                max_position_pct_of_equity=max_position_pct_of_equity,
+            )
 
         if size <= 0 or entry_price <= 0:
             return None
+
+        entry_book_equity = float(self.equity)
 
         if signal == "Bullish":
             direction = 1
@@ -173,6 +184,7 @@ class Portfolio:
             entry_cost=entry_cost,
             impact_entry_cost=impact_entry_cost,
             current_price=entry_price,
+            entry_book_equity=entry_book_equity,
         )
 
         self.cash -= size + entry_cost
@@ -213,6 +225,7 @@ class Portfolio:
             "entry_price": round(pos.entry_price, 4),
             "exit_price": round(exit_price, 4),
             "position_size": round(pos.position_size, 2),
+            "entry_book_equity": round(pos.entry_book_equity, 2),
             "shares": round(pos.shares, 4),
             "return": round(trade_return, 6),
             "pnl": round(pnl, 2),

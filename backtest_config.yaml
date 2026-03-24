@@ -47,6 +47,8 @@ backtest:
   holding_period_days: 3   # shorter = more turnover, more trades and days with positions
   min_holding_period_days: 5
   rebalance_every_trading_days: 5
+  # Base rolling-std gate multiplier (overrides signals.signal_confidence_multiplier if both set — see load_config)
+  signal_confidence_multiplier: 0.8
   signal_confidence_multiplier_sideways: 0.3
   # Cross-sectional ranking (top/bottom portfolio). When enabled, execution.enable_shorts is forced on if market_neutral.
   cross_sectional:
@@ -114,7 +116,7 @@ risk:
   kelly_avg_loss_return: 0.015 # average losing return (positive number)
   stop_loss_pct: 0.03          # 3% per-position stop (0 = disabled); cuts tail losses
   take_profit_pct: 0.0         # 0 = disabled; e.g. 0.05 = +5% exit
-  max_position_pct_of_equity: 0.25  # max single position (e.g. 0.25 = 25% of equity)
+  max_position_pct_of_equity: 0.12  # max single position as fraction of equity (hard cap after beta/vol)
   max_drawdown_pct: 0.0       # disable circuit breaker (research backtest; use in live only)
   drawdown_resume_pct: 0.0
   min_holding_early_exit_drawdown_pct: 0.03
@@ -176,6 +178,14 @@ monte_carlo:
 
 regime:
   enabled: true
+  # Rolling-std entry gate: threshold = signal_confidence_multiplier × σ × aggressiveness
+  # (>1 = stricter). Default 1.0 = same as pre-v1.4 behavior. Sideways 2.5 filters hard (re-tune Net Sharpe).
+  # Optional: Crisis: 2.0 for stricter crisis-day entries.
+  threshold_aggressiveness:
+    Bull: 1.0
+    Bear: 1.0
+    Sideways: 1.0
+    Crisis: 1.0
   adjustments:
     Bull:
       score_mult: 1.2

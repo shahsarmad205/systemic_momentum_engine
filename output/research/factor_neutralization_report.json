@@ -1,22 +1,22 @@
 {
   "n_dates": 301,
   "factor_correlations_before": {
+    "sector_Energy": 0.04171575628345912,
+    "sector_Consumer Staples": -0.18349783622213645,
+    "sector_Healthcare": -0.14063054505529013,
     "market_beta": 0.34833524765859336,
     "sector_Financials": -0.0029139547375618665,
     "size_factor": 0.14846580438433069,
-    "sector_Consumer Staples": -0.18349783622213645,
-    "sector_Technology": 0.17862268423299923,
-    "sector_Healthcare": -0.14063054505529013,
-    "sector_Energy": 0.04171575628345912
+    "sector_Technology": 0.17862268423299923
   },
   "factor_correlations_after": {
+    "sector_Energy": -3.4722310384899026e-17,
+    "sector_Consumer Staples": 1.485076710521173e-16,
+    "sector_Healthcare": 3.6309641576865244e-16,
     "market_beta": -3.6129127934799474e-16,
     "sector_Financials": 2.5514630291865794e-16,
     "size_factor": -3.78104171506812e-16,
-    "sector_Consumer Staples": 1.485076710521173e-16,
-    "sector_Technology": -4.643103991586706e-16,
-    "sector_Healthcare": 3.6309641576865244e-16,
-    "sector_Energy": -3.4722310384899026e-17
+    "sector_Technology": -4.643103991586706e-16
   },
-  "signal_ic_after_neutralization": 0.006245819668932484
+  "signal_ic_after_neutralization": 0.004970030942694515
 }

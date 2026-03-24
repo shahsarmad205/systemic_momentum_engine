@@ -117,7 +117,7 @@ class BacktestConfig:
     kelly_avg_loss_return: float = 0.015   # average losing return (positive number)
     stop_loss_pct: float = 0.0             # 0 = disabled; e.g. 0.02 = -2% exit
     take_profit_pct: float = 0.0           # 0 = disabled; e.g. 0.05 = +5% exit
-    max_position_pct_of_equity: float = 0.25  # max single position as fraction of equity (e.g. 0.25 = 25%)
+    max_position_pct_of_equity: float = 0.12  # single-name cap vs equity; enforced in backtester after beta/vol
     vol_scaling_enabled: bool = True
     vol_scaling_target: float = 0.15
     max_drawdown_pct: float = 0.20         # circuit breaker: halt new trades beyond this DD (e.g. 0.20 = -20%)
@@ -182,6 +182,15 @@ class BacktestConfig:
     regime_enabled: bool = True
     regime_adjustments: dict = field(default_factory=lambda: dict(_DEFAULT_REGIME_ADJ))
     regime_exit_on_change: bool = False
+    # Rolling-std entry gate: final threshold = scm * σ * aggressiveness (higher = stricter / more selective).
+    regime_threshold_aggressiveness: dict[str, float] = field(
+        default_factory=lambda: {
+            "Bull": 1.0,
+            "Bear": 1.0,
+            "Sideways": 1.0,
+            "Crisis": 1.0,
+        }
+    )
 
     # Sector allocation and signal adjustment
     sector_enabled: bool = False
@@ -427,6 +436,9 @@ def load_config(path: str = "backtest_config.yaml") -> BacktestConfig:
         _v = getattr(cfg, _scm_attr)
         if _v is not None:
             setattr(cfg, _scm_attr, float(_v))
+    # Backtest section can set the base multiplier (health-check / single source of truth for runs).
+    if bt.get("signal_confidence_multiplier") is not None:
+        cfg.signal_confidence_multiplier = float(bt["signal_confidence_multiplier"])
     cfg.signal_confidence_std_window = int(
         sig.get("signal_confidence_std_window", cfg.signal_confidence_std_window)
     )
@@ -454,6 +466,32 @@ def load_config(path: str = "backtest_config.yaml") -> BacktestConfig:
     cfg.regime_enabled = reg.get("enabled", cfg.regime_enabled)
     cfg.regime_adjustments = reg.get("adjustments", cfg.regime_adjustments)
     cfg.regime_exit_on_change = reg.get("exit_on_change", cfg.regime_exit_on_change)
+    _thr_agg_default = {
+        "Bull": 1.0,
+        "Bear": 1.0,
+        "Sideways": 1.0,
+        "Crisis": 1.0,
+    }
+    _thr_merged = dict(_thr_agg_default)
+    _thr_raw = reg.get("threshold_aggressiveness", {})
+    if isinstance(_thr_raw, dict):
+        _canon_reg = {
+            "bull": "Bull",
+            "bear": "Bear",
+            "sideways": "Sideways",
+            "crisis": "Crisis",
+        }
+        for _k, _v in _thr_raw.items():
+            _rk = _canon_reg.get(str(_k).strip().lower(), _k if _k in _thr_agg_default else None)
+            if _rk is None or _rk not in _thr_agg_default:
+                continue
+            try:
+                _fv = float(_v)
+            except (TypeError, ValueError):
+                continue
+            if _fv > 0.0 and _fv <= 20.0:
+                _thr_merged[_rk] = float(_fv)
+    cfg.regime_threshold_aggressiveness = _thr_merged
 
     sec = raw.get("sectors", {})
     cfg.sector_enabled = sec.get("enabled", cfg.sector_enabled)
