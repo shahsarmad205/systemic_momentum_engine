@@ -2,15 +2,15 @@
 ============================================================
   WEIGHT LEARNING SUMMARY
 ============================================================
-  Model              : ridge
+  Model              : ensemble
   Target task        : regression
   Return target      : raw
-  Train IC           : 0.0429
-  Train R²           : 0.0034
-  Train MAE          : 0.026791
-  Train Dir. Acc.    : 54.7%
-  WF mean IC         : 0.0589
-  WF mean R²         : -0.0070
-  WF mean Dir. Acc.  : 53.8%
-  WF mean AUC        : 0.5213
+  Train IC           : 0.1833
+  Train R²           : 0.0616
+  Train MAE          : 0.026173
+  Train Dir. Acc.    : 56.8%
+  WF mean IC         : 0.0718
+  WF mean R²         : -0.0047
+  WF mean Dir. Acc.  : 54.0%
+  WF mean AUC        : 0.5225
 ============================================================

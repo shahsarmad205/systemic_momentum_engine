@@ -37,8 +37,12 @@ def parse_args():
     p = argparse.ArgumentParser(
         description="Trend Signal Engine — Weight Learning",
     )
-    p.add_argument("--model", choices=["ridge", "gbr", "rf", "logistic", "xgb"],
-                   default="ridge", help="Model type (default: ridge)")
+    p.add_argument(
+        "--model",
+        choices=["ridge", "gbr", "rf", "logistic", "xgb", "ensemble"],
+        default="ridge",
+        help="Model type (default: ridge). 'ensemble' = stacked RidgeCV+GBR+XGB (regression only).",
+    )
     p.add_argument("--alpha", type=float, default=0.01,
                    help="Ridge/Logistic regularisation (default 0.01 for non-zero weights)")
     p.add_argument("--decay", type=float, default=0.001,

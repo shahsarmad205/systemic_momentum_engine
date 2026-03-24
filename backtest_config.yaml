@@ -47,6 +47,7 @@ backtest:
   holding_period_days: 3   # shorter = more turnover, more trades and days with positions
   min_holding_period_days: 5
   rebalance_every_trading_days: 5
+  signal_confidence_multiplier_sideways: 0.3
   # Cross-sectional ranking (top/bottom portfolio). When enabled, execution.enable_shorts is forced on if market_neutral.
   cross_sectional:
     enabled: false

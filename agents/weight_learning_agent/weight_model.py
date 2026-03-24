@@ -614,44 +614,34 @@ class WeightLearner:
                 self.ensemble_weights = None
 
             elif self.model_type == "ensemble":
-                # Regression ensemble: ridge + gradient boosting regressor.
-                ridge = Ridge(alpha=self.alpha, fit_intercept=True)
-                gbr = GradientBoostingRegressor(
-                    n_estimators=200,
-                    max_depth=3,
-                    learning_rate=0.05,
-                    subsample=0.8,
-                    random_state=42,
-                )
-                ridge.fit(X_scaled, y, sample_weight=sample_weight)
-                gbr.fit(X_scaled, y, sample_weight=sample_weight)
+                # Stacked ensemble: RidgeCV + GBR + XGB; blend weights maximize val IC.
+                from agents.weight_learning_agent.ensemble_model import StackedEnsemble
 
-                self.ensemble_models = {"ridge": ridge, "gbr": gbr}
-                self.ensemble_weights = {"ridge": 0.5, "gbr": 0.5}
+                n_obs = len(train_df)
+                if "date" in train_df.columns:
+                    order = np.argsort(pd.to_datetime(train_df["date"]).values)
+                else:
+                    order = np.arange(n_obs)
+                split = int(0.8 * n_obs)
+                if n_obs - split < 10:
+                    split = max(1, n_obs - 10)
+                train_idx = order[:split]
+                val_idx = order[split:]
+                X_tr = X_scaled[train_idx]
+                X_va = X_scaled[val_idx]
+                y_tr = y[train_idx]
+                y_va = y[val_idx]
 
-                # Use ridge for deployable linear weights
-                self.model = ridge
-                self.ridge_for_weights = ridge
+                stack = StackedEnsemble()
+                # Inner fit uses unweighted arrays; validation IC is still meaningful.
+                stack.fit(X_tr, y_tr, X_va, y_va)
+                self.model = stack
+                self.ensemble_models = stack.base_models
+                self.ensemble_weights = stack.blend_weights
 
-                # Ensemble predictions for metrics and score scaling
-                y_pred_ridge = ridge.predict(X_scaled)
-                y_pred_gbr = gbr.predict(X_scaled)
-                y_pred = 0.5 * y_pred_ridge + 0.5 * y_pred_gbr
-
-                corr = float(np.corrcoef(y_pred, y)[0, 1]) if len(y) > 2 else 0.0
-                self._train_metrics = {
-                    "r2": round(float(r2_score(y, y_pred)), 4),
-                    "mae": round(float(mean_absolute_error(y, y_pred)), 6),
-                    "directional_accuracy": round(float((np.sign(y_pred) == np.sign(y)).mean()), 4),
-                    "ic": round(corr, 4),
-                    "auc_score": 0.0,
-                    "ensemble_model_types": ["ridge", "gbr"],
-                    "ensemble_weights": self.ensemble_weights,
-                }
-
-                std_pred = float(np.std(y_pred)) + 1e-8
-                self._score_scale = 0.5 / std_pred
-                return self.get_weights(df)
+                # Deployable linear weights (same pattern as GBR/XGB).
+                self.ridge_for_weights = Ridge(alpha=0.01, fit_intercept=True)
+                self.ridge_for_weights.fit(X_scaled, y, sample_weight=sample_weight)
 
             elif self.model_type == "xgb":
                 if XGBRegressor is None:

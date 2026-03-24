@@ -1,0 +1,2 @@
+run_id,high_conviction_threshold,portfolio_top_k,crisis_portfolio_top_k,normal_exposure,crisis_exposure,vol_kill_switch_cut_factor,status,error
+c2e32302b9af,0.5,4,3,0.8,0.2,0.4,failed,Can't get local object 'run_sweep.<locals>._worker'

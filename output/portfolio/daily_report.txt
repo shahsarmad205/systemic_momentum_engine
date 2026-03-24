@@ -1,0 +1,22 @@
+============================================================
+Daily Performance Report — 2026-03-24
+============================================================
+Open positions:           10
+Book value:               1768.11
+Daily P&L:                0.00
+Daily return:             0.0000%
+
+Running metrics:
+  Running Sharpe:         N/A (need 20+ days)
+  Running Max Drawdown:   0.00%
+  Win rate (closed):      N/A
+  Signal accuracy:        100.00%
+
+Expected (backtest):
+  Sharpe:                 1.505
+  CAGR:                   12.35%
+  Win rate:               48.30%
+
+Alerts:
+No critical alerts.
+============================================================
