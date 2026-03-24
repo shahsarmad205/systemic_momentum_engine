@@ -40,9 +40,13 @@ from utils.sector_aggregates import compute_sector_aggregates, apply_sector_adju
 from utils.market_data import get_ohlcv
 
 try:
-    from agents.weight_learning_agent.feature_builder import sector_relative_features_by_ticker
+    from agents.weight_learning_agent.feature_builder import (
+        sector_relative_features_by_ticker,
+        vol_rank_features_by_ticker,
+    )
 except ImportError:  # pragma: no cover
     sector_relative_features_by_ticker = None  # type: ignore[misc,assignment]
+    vol_rank_features_by_ticker = None  # type: ignore[misc,assignment]
 from strategy.candidates import build_ranked_candidates
 from strategy.cross_sectional import build_cross_sectional_candidates
 from . import position_sizing
@@ -649,6 +653,19 @@ class Backtester:
                 )
                 sr_map = {}
 
+        vr_map: dict[str, pd.DataFrame] = {}
+        if pending_prices and vol_rank_features_by_ticker is not None:
+            try:
+                vr_map = vol_rank_features_by_ticker(
+                    pending_prices,
+                    exclude_tickers=frozenset({"SPY"}),
+                )
+            except Exception:
+                logger.exception(
+                    "vol_rank_features_by_ticker failed; using neutral vol_rank for learned signals"
+                )
+                vr_map = {}
+
         n_pending = len(pending_prices)
         for j, (ticker, data) in enumerate(pending_prices.items(), 1):
             print(f"  [signals {j}/{n_pending}] {ticker}…", end=" ")
@@ -659,10 +676,15 @@ class Backtester:
                 if blk is not None and not blk.empty:
                     sr20_s = blk["sector_relative_20d"]
                     sr60_s = blk["sector_relative_60d"]
+                vr_s = None
+                vblk = vr_map.get(ticker)
+                if vblk is not None and not vblk.empty and "vol_rank" in vblk.columns:
+                    vr_s = vblk["vol_rank"]
                 signals = self.signal_engine.generate_signals(
                     data,
                     sector_relative_20d=sr20_s,
                     sector_relative_60d=sr60_s,
+                    vol_rank=vr_s,
                 )
                 if signals.empty:
                     print("no signals")
@@ -1320,6 +1342,63 @@ class Backtester:
                     len(pending_entries),
                 )
                 pending_entries = []
+
+            # Correlation-aware position selection before entry processing.
+            corr_window_days = int(getattr(self.config, "correlation_window_days", 60) or 60)
+            corr_threshold = float(getattr(self.config, "max_pairwise_correlation", 0.70) or 0.70)
+            if pending_entries and corr_threshold > 0:
+                candidate_tickers: list[str] = []
+                for e in pending_entries:
+                    tk = e.get("ticker")
+                    if tk and tk not in candidate_tickers:
+                        candidate_tickers.append(tk)
+
+                returns_60d: dict[str, pd.Series] = {}
+                for tk in candidate_tickers:
+                    if tk in price_data:
+                        pxf = price_data[tk]
+                        close_col = "close" if "close" in pxf.columns else "Close"
+                        if close_col in pxf.columns:
+                            p = pd.to_numeric(
+                                pxf.loc[pxf.index <= date, close_col],
+                                errors="coerce",
+                            ).dropna()
+                            returns_60d[tk] = p.pct_change().tail(corr_window_days)
+
+                if len(returns_60d) >= 2:
+                    ret_df = pd.DataFrame(returns_60d).dropna()
+                    corr_matrix = ret_df.corr() if not ret_df.empty else pd.DataFrame()
+                else:
+                    corr_matrix = pd.DataFrame()
+
+                sorted_by_signal = sorted(
+                    pending_entries,
+                    key=lambda e: -abs(float(e.get("adjusted_score", 0.0) or 0.0)),
+                )
+                selected: list[str] = []
+                selected_entries: list[dict] = []
+                for candidate in sorted_by_signal:
+                    tk = candidate.get("ticker")
+                    if not tk:
+                        continue
+                    if len(selected) == 0:
+                        selected.append(tk)
+                        selected_entries.append(candidate)
+                        continue
+
+                    max_corr = 0.0
+                    if not corr_matrix.empty:
+                        for already in selected:
+                            if tk in corr_matrix.index and already in corr_matrix.columns:
+                                c = abs(float(corr_matrix.loc[tk, already]))
+                                if np.isfinite(c):
+                                    max_corr = max(max_corr, c)
+
+                    if max_corr <= corr_threshold:
+                        selected.append(tk)
+                        selected_entries.append(candidate)
+
+                pending_entries = selected_entries
 
             vol_scalar_today = float(vol_scalar_series.loc[date]) if date in vol_scalar_series.index else 1.0
             # Gross exposure caps:

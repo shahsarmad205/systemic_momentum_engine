@@ -163,6 +163,7 @@ class SignalEngine:
         stock_data: pd.DataFrame,
         sector_relative_20d: pd.Series | None = None,
         sector_relative_60d: pd.Series | None = None,
+        vol_rank: pd.Series | None = None,
     ) -> pd.DataFrame:
         """
         Compute trend_score, confidence, adjusted_score, signal for every bar.
@@ -188,6 +189,11 @@ class SignalEngine:
             sr60 = pd.to_numeric(sector_relative_60d, errors="coerce").reindex(ix).fillna(0.0).astype(float)
         else:
             sr60 = pd.Series(0.0, index=ix, dtype=float)
+
+        if vol_rank is not None:
+            vr_series = pd.to_numeric(vol_rank, errors="coerce").reindex(ix).fillna(0.5).astype(float)
+        else:
+            vr_series = pd.Series(0.5, index=ix, dtype=float)
 
         logger.debug(
             "SignalEngine: features built: shape=%s, dates=%s→%s, cols=%s",
@@ -403,6 +409,7 @@ class SignalEngine:
                     + getattr(lw, "w_vol", 0) * rolling_vol_20.loc[mask].fillna(0)
                     + getattr(lw, "w_vol_of_vol", 0) * vol_of_vol_20.loc[mask].fillna(0)
                     + getattr(lw, "w_jump_indicator", 0) * jump_indicator.loc[mask].fillna(0)
+                    + getattr(lw, "w_vol_rank", 0) * vr_series.loc[mask].fillna(0.5)
                     + _learned_rel_vol_coef(lw) * relative_volume.loc[mask]
                     + _learned_volume_zscore_coef(lw) * volume_zscore.loc[mask]
                     + getattr(lw, "w_corr_market", 0) * rolling_corr_market_20.loc[mask]
@@ -433,6 +440,7 @@ class SignalEngine:
                     + getattr(default_lw, "w_vol", 0) * rolling_vol_20[still_missing].fillna(0)
                     + getattr(default_lw, "w_vol_of_vol", 0) * vol_of_vol_20[still_missing].fillna(0)
                     + getattr(default_lw, "w_jump_indicator", 0) * jump_indicator[still_missing].fillna(0)
+                    + getattr(default_lw, "w_vol_rank", 0) * vr_series[still_missing].fillna(0.5)
                     + _learned_rel_vol_coef(default_lw) * relative_volume[still_missing]
                     + _learned_volume_zscore_coef(default_lw) * volume_zscore[still_missing]
                     + getattr(default_lw, "w_corr_market", 0) * rolling_corr_market_20[still_missing]
@@ -470,6 +478,7 @@ class SignalEngine:
                 + getattr(lw, "w_vol", 0) * rolling_vol_20.fillna(0)
                 + getattr(lw, "w_vol_of_vol", 0) * vol_of_vol_20.fillna(0)
                 + getattr(lw, "w_jump_indicator", 0) * jump_indicator.fillna(0)
+                + getattr(lw, "w_vol_rank", 0) * vr_series.fillna(0.5)
                 + _learned_rel_vol_coef(lw) * relative_volume
                 + _learned_volume_zscore_coef(lw) * volume_zscore
                 + getattr(lw, "w_corr_market", 0) * rolling_corr_market_20

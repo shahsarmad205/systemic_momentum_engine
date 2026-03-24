@@ -65,6 +65,7 @@ COMPOUND_AND_PRICE_FEATURES = [
     "rolling_vol_20",
     "rolling_vol_60",
     "vol_of_vol_20",
+    "vol_rank",  # cross-sectional rank of 20d realised vol (ARE 1.2 / 1.3)
     "jump_indicator",
     # Volume / liquidity proxies
     "relative_volume",
@@ -114,6 +115,7 @@ class LearnedWeights:
     w_vol_zscore: float = 0.0
     w_vol_of_vol: float = 0.0
     w_jump_indicator: float = 0.0
+    w_vol_rank: float = 0.0
     w_capm_beta: float = 0.0
     w_corr_market: float = 0.0
     w_vix_zscore: float = 0.0
@@ -162,6 +164,7 @@ class LearnedWeights:
         rolling_vol: float = 0.0,
         vol_of_vol_20: float = 0.0,
         jump_indicator: float = 0.0,
+        vol_rank: float = 0.0,
         relative_volume: float = 0.0,
         volume_zscore: float = 0.0,
         rolling_corr_market: float = 0.0,
@@ -203,6 +206,7 @@ class LearnedWeights:
             + self.w_vol * rolling_vol
             + getattr(self, "w_vol_of_vol", 0) * vol_of_vol_20
             + getattr(self, "w_jump_indicator", 0) * jump_indicator
+            + getattr(self, "w_vol_rank", 0) * vol_rank
             + rel_vol_coef * relative_volume
             + vol_z_coef * volume_zscore
             + getattr(self, "w_corr_market", 0) * rolling_corr_market
@@ -249,7 +253,7 @@ class LearnedWeights:
         for key in (
             "w_ret_5d", "w_ret_10d", "w_ret_20d", "w_ret_60d",
             "w_cs_momentum", "w_momentum_3m", "w_momentum_6m", "w_ma_crossover",
-            "w_rolling_vol_5", "w_vol_10", "w_vol", "w_vol_of_vol", "w_jump_indicator",
+            "w_rolling_vol_5", "w_vol_10", "w_vol", "w_vol_of_vol", "w_jump_indicator", "w_vol_rank",
             "w_relative_volume", "w_rel_vol", "w_volume_zscore", "w_vol_zscore",
             "w_corr_market", "w_capm_beta", "w_vix_zscore", "w_vol_spike", "w_vix_term_zscore",
             "w_rsi_zscore", "w_bb_position", "w_dist_high", "w_dist_low", "w_overnight_gap", "w_intraday_rev",
@@ -816,6 +820,7 @@ class WeightLearner:
             w_vol=weight_map.get("rolling_vol_20", 0.0),
             w_vol_of_vol=weight_map.get("vol_of_vol_20", 0.0),
             w_jump_indicator=weight_map.get("jump_indicator", 0.0),
+            w_vol_rank=weight_map.get("vol_rank", 0.0),
             w_relative_volume=weight_map.get("relative_volume", 0.0),
             w_rel_vol=weight_map.get("relative_volume", 0.0),
             w_volume_zscore=weight_map.get("volume_zscore", 0.0),

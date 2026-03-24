@@ -26,6 +26,9 @@ weights.  All features use only past data (no look-ahead bias).
     Cross-sectional ranking (panel):
         ret_5d, ret_10d, rolling_vol_20, rolling_vol_60, volume_zscore, vix_zscore,
         vol_spike → per-date z-score across tickers (population std, ddof=0).
+    Volatility rank (panel, ARE 1.3):
+        vol_rank — cross-sectional percentile rank of 20d realised vol (std of daily
+        returns) across tickers per date, then shift(1). Matches IC screen in feature_search.
         is_high_vol_regime is not cross-sectionally normalized; vix_term_zscore is time-series z-scored (not CS).
     Target: forward_return, direction
 """
@@ -205,6 +208,54 @@ def sector_relative_features_by_ticker(
     return out
 
 
+def vol_rank_features_by_ticker(
+    price_data: dict[str, pd.DataFrame],
+    *,
+    exclude_tickers: frozenset[str] | None = None,
+) -> dict[str, pd.DataFrame]:
+    """
+    Cross-sectional volatility rank (0–1) per date, lagged 1 trading day per ticker.
+    Matches training: rank of 20d realised vol (std of daily returns) across the
+    universe, then shift(1). Used at inference so learned w_vol_rank aligns with Ridge.
+    """
+    ex = frozenset(exclude_tickers or ())
+    tickers = [tk for tk in price_data.keys() if tk not in ex]
+    if len(tickers) < 2:
+        return {}
+    rows: list[dict] = []
+    for tk in tickers:
+        df = price_data[tk]
+        price_col = "AdjClose" if "AdjClose" in df.columns else "Close"
+        if price_col not in df.columns:
+            continue
+        close = pd.to_numeric(df[price_col], errors="coerce")
+        daily_ret = close.pct_change()
+        vol_20_simple = daily_ret.rolling(20).std()
+        for dt in vol_20_simple.index:
+            v = vol_20_simple.loc[dt]
+            if pd.isna(v):
+                continue
+            rows.append(
+                {
+                    "date": pd.Timestamp(dt),
+                    "ticker": tk,
+                    "vol_20_simple": float(v),
+                }
+            )
+    if not rows:
+        return {}
+    long = pd.DataFrame(rows)
+    long["vol_rank"] = long.groupby("date")["vol_20_simple"].rank(pct=True, method="average")
+    long["vol_rank"] = long.groupby("ticker")["vol_rank"].shift(1)
+    out: dict[str, pd.DataFrame] = {}
+    for tk in tickers:
+        sub = long.loc[long["ticker"] == tk, ["date", "vol_rank"]]
+        if sub.empty:
+            continue
+        out[tk] = sub.set_index("date").sort_index()
+    return out
+
+
 def inject_sector_relative_panel_into_signals(
     price_data: dict[str, pd.DataFrame],
     signal_data: dict[str, pd.DataFrame],
@@ -358,6 +409,8 @@ def _build_features_for_ticker(
         capm_alpha = pd.Series(np.nan, index=features.index)
         capm_beta = pd.Series(1.0, index=features.index)
         capm_residual_vol = pd.Series(np.nan, index=features.index)
+        # Raw 20d realised vol (std of daily returns) — used for cross-sectional vol_rank (ARE 1.3).
+        vol_20_simple = daily_ret.rolling(20).std()
         if market_ret is not None:
             market_aligned = market_ret.reindex(features.index).ffill().bfill().fillna(0.0)
             rolling_corr_market_20 = daily_ret.rolling(20).corr(market_aligned)
@@ -442,6 +495,7 @@ def _build_features_for_ticker(
                 "ma_crossover": features["ma_crossover_signal"] if "ma_crossover_signal" in features else 0.0,
                 "cs_momentum_raw": cs_mom_raw,
                 "daily_return": daily_ret,
+                "vol_20_simple": vol_20_simple,
                 "forward_return": forward_ret,
             },
             index=features.index,
@@ -601,6 +655,16 @@ def build_feature_matrix(
     result.sort_values(["date", "ticker"], inplace=True)
     result.reset_index(drop=True, inplace=True)
 
+    # Cross-sectional volatility rank (0–1); lag 1d per ticker (no lookahead).
+    if "vol_20_simple" in result.columns:
+        result["vol_rank"] = result.groupby("date")["vol_20_simple"].rank(
+            pct=True,
+            method="average",
+        )
+        result["vol_rank"] = result.groupby("ticker")["vol_rank"].shift(1).fillna(0.5)
+    else:
+        result["vol_rank"] = 0.5
+
     # Rank tickers vs each other on the same date (raw time-series features first).
     result = _apply_cross_sectional_zscore_columns(
         result,
@@ -713,6 +777,7 @@ def build_feature_matrix(
         | {"sector_relative_20d", "sector_relative_60d"}
         | set(_CS_Z_PANEL_INPLACE_COLS)
         | {"vix_term_zscore"}  # already TS z-scored; identical across tickers per date
+        | {"vol_rank", "vol_20_simple"}  # vol_rank is percentile; vol_20_simple is raw input only
     )
     num_cols = result.select_dtypes(include=["number"]).columns
     for col in num_cols:
