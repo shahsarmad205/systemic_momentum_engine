@@ -1,0 +1,10 @@
+# Copy to config/alpaca_config.yaml and fill in keys (that file is gitignored).
+# Get keys: https://alpaca.markets — Paper trading dashboard → API Keys
+
+alpaca:
+  api_key: "YOUR_PAPER_API_KEY"
+  secret_key: "YOUR_PAPER_SECRET_KEY"
+  base_url: "https://paper-api.alpaca.markets"
+  paper_trading: true
+  max_order_value: 10000
+  order_type: "market"

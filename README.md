@@ -216,12 +216,71 @@ The backtest universe is limited to nine large-cap US technology names, so resul
 
 ---
 
+## Live paper trading (added)
+
+The project now includes an after-close paper trading workflow that generates signals and (optionally) submits paper orders for next-day execution via Alpaca.
+
+### Daily runner
+
+Run at ~4:15pm ET after market close:
+
+```bash
+# Dry run (safe; no orders)
+python run_live_trading.py
+
+# Place orders (paper only)
+python run_live_trading.py --execute
+
+# Emergency: close all positions (interactive confirm)
+python run_live_trading.py --close-all
+```
+
+### Execution engine + drawdown-based deleveraging
+
+`brokers/execution_engine.py` constructs a target book from ranked signals, reconciles it vs current Alpaca positions, and logs every run to JSONL. It also supports **dynamic deleveraging**:
+
+- Reads `output/live/daily_pnl.csv` (written by `run_performance_tracker.py` when Alpaca is configured)
+- Computes current drawdown from peak equity
+- Scales target notionals by a multiplier:
+  - drawdown < 5% → 1.0
+  - 5–10% → 0.8
+  - 10–15% → 0.6
+  - ≥15% → 0.4
+
+The multiplier and drawdown are written to `output/live/execution_log.jsonl`.
+
+### Performance tracker
+
+Run daily to append equity snapshots and compare live metrics vs backtest expectations:
+
+```bash
+python run_performance_tracker.py
+```
+
+### Outputs and logs
+
+- `output/live/execution_log.jsonl` — execution audit log (includes drawdown multiplier)
+- `output/live/signal_history.csv` — live signal history
+- `output/live/daily_pnl.csv` — daily equity history (from tracker)
+
+### Operations / cron
+
+- Runbook: `../docs/DAILY_OPERATIONS.md`
+- Cron helper (prints example `crontab` lines): `../scripts/setup_cron.sh`
+
+### Investor doc
+
+- `../docs/INVESTMENT_THESIS.md`
+
+---
+
 ## Future work
 
-- Regime-adaptive signal gating using HMM (replace hardcoded SPY+VIX thresholds)
-- Multi-sector universe expansion for cross-sectional breadth
-- Factor neutralization (market beta, sector, size) to isolate stock-specific momentum
-- Live paper trading integration via `pipeline/daily_runner.py`
+- Universe expansion + robust “tradeable universe” filtering (handle insufficient-history tickers automatically)
+- Faster data/feature builds for large universes (parallel fetching, retries, caching policy)
+- Portfolio-level factor risk limits (hard constraints in addition to neutralized scores)
+- Execution improvements (order types, slippage estimation, post-trade analysis)
+- Live monitoring upgrades (live IC tracking, alerting thresholds, dashboarding)
 
 ---
 

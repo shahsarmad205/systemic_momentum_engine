@@ -1,0 +1,54 @@
+{
+  "model_name": "GradientBoostingClassifier",
+  "horizon_days": 1,
+  "target": "forward_return",
+  "n_rows": 220133,
+  "n_tickers": 149,
+  "feature_columns": [
+    "f_trend",
+    "ret_5d",
+    "ret_10d",
+    "ret_20d",
+    "rolling_vol_20",
+    "cs_momentum_percentile"
+  ],
+  "selected_by": "oos_sharpe_chained",
+  "windows": [
+    {
+      "train_start": "2018-01-01",
+      "train_end": "2020-12-31",
+      "test_start": "2021-01-01",
+      "test_end": "2021-06-30"
+    },
+    {
+      "train_start": "2018-07-01",
+      "train_end": "2021-06-30",
+      "test_start": "2021-07-01",
+      "test_end": "2021-12-31"
+    },
+    {
+      "train_start": "2019-01-01",
+      "train_end": "2021-12-31",
+      "test_start": "2022-01-01",
+      "test_end": "2022-06-30"
+    },
+    {
+      "train_start": "2019-07-01",
+      "train_end": "2022-06-30",
+      "test_start": "2022-07-01",
+      "test_end": "2022-12-31"
+    },
+    {
+      "train_start": "2020-01-01",
+      "train_end": "2022-12-31",
+      "test_start": "2023-01-01",
+      "test_end": "2023-06-30"
+    },
+    {
+      "train_start": "2020-07-01",
+      "train_end": "2023-06-30",
+      "test_start": "2023-07-01",
+      "test_end": "2023-12-31"
+    }
+  ]
+}

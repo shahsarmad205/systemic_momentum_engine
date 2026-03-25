@@ -535,6 +535,7 @@ def build_feature_matrix(
     start_date: str,
     end_date: str,
     holding_period: int = 5,
+    feature_subset: list[str] | None = None,
 ) -> pd.DataFrame:
     """
     Build a DataFrame of (ticker, date, features, target) rows suitable
@@ -793,5 +794,24 @@ def build_feature_matrix(
     for col in _zero_cols:
         if col in result.columns:
             result[col] = 0.0
+
+    # Optional feature selection: keep only requested feature columns, but always
+    # preserve identifiers and targets for downstream training/backtesting.
+    subset = [str(c) for c in (feature_subset or []) if str(c).strip()]
+    if subset:
+        always_keep = [
+            "date",
+            "ticker",
+            "sector",
+            "regime_label",
+            "forward_return",
+            "forward_return_excess",
+            "direction",
+        ]
+        keep = []
+        for c in always_keep + subset:
+            if c in result.columns and c not in keep:
+                keep.append(c)
+        result = result[keep].copy()
 
     return result

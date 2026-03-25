@@ -5,32 +5,158 @@
 # All values shown are defaults; delete any line to use its default.
 
 # Tickers to backtest. Any list of symbols (e.g. ["AAPL", "MSFT", "NVDA"]).
-# 24 names from main.TICKERS so validation "tickers traded >= 12" can pass even if only ~half get signals.
+# Universe: Top 150 S&P 500 stocks by trailing-average daily volume (ranked via yfinance Volume).
 tickers:
-  - AAPL
   - NVDA
-  - MSFT
-  - GOOG
-  - AMZN
-  - META
-  - AMD
-  - AVGO
-  - ADBE
-  - CRM
-  - JPM
-  - BAC
-  - JNJ
-  - UNH
-  - LLY
-  - COST
-  - WMT
-  - NKE
-  - XOM
-  - CVX
   - INTC
-  - ORCL
+  - TSLA
+  - "F"
+  - NFLX
+  - AMZN
   - PFE
+  - AAPL
+  - PLTR
+  - "T"
+  - BAC
+  - KVUE
+  - CMCSA
+  - WBD
+  - AMD
+  - MU
+  - GOOGL
+  - MSFT
+  - HBAN
+  - SMCI
+  - AVGO
+  - VZ
+  - ORCL
+  - WMT
+  - HOOD
+  - CCL
+  - CSCO
+  - PCG
+  - GOOG
+  - PYPL
+  - UBER
+  - NCLH
+  - XOM
+  - HPE
+  - FCX
+  - SLB
+  - CMG
+  - KO
+  - HPQ
+  - NKE
+  - TTD
+  - SW
+  - KEY
+  - WFC
+  - NOW
+  - KHC
+  - META
+  - "C"
+  - BMY
+  - HAL
+  - RF
+  - KMI
+  - OXY
+  - BSX
+  - DOW
+  - CSX
+  - MRK
+  - CAG
+  - DVN
+  - KDP
+  - CVX
+  - DIS
+  - VICI
+  - CRM
+  - PG
+  - LRCX
+  - MDLZ
+  - PSKY
+  - COIN
+  - AES
+  - MRNA
+  - FITB
+  - JPM
+  - USB
+  - LUV
+  - QCOM
+  - CTRA
+  - SCHW
+  - NEM
+  - MO
+  - VTRS
+  - DAL
+  - ABT
+  - NEE
+  - EQT
+  - GLW
+  - BAX
+  - APH
+  - FISV
+  - BKR
+  - SBUX
+  - CPRT
+  - WDC
+  - TFC
+  - MCHP
+  - PANW
+  - COP
+  - "ON"
+  - JNJ
+  - GM
+  - UNH
+  - DOC
+  - MOS
+  - CVS
+  - PPL
+  - EXC
+  - FAST
+  - HST
+  - GIS
+  - XYZ
+  - PEP
+  - CPB
+  - DELL
+  - BA
+  - MDT
+  - CARR
+  - "V"
+  - VRT
+  - TXN
+  - CRH
+  - AMAT
+  - ANET
+  - LYB
+  - GILD
+  - WMB
+  - KR
+  - WY
+  - APA
+  - BX
+  - MS
+  - TGT
   - ABBV
+  - CL
+  - INVH
+  - "O"
+  - KKR
+  - CNC
+  - UPS
+  - FTNT
+  - TSCO
+  - COHR
+  - IP
+  - UAL
+  - CTSH
+  - "D"
+  - SO
+  - CSGP
+  - GEN
+  - SATS
+  - ORLY
 
 # Market data: provider and local cache (avoids repeated API calls)
 data:
@@ -38,6 +164,23 @@ data:
   cache_ohlcv: true
   cache_dir: "data/cache/ohlcv"
   cache_ttl_days: 0              # 0 = use cache indefinitely
+
+# Optional: restrict the feature matrix columns returned by build_feature_matrix.
+# If omitted or empty, the full feature set is returned (backward compatible).
+feature_selection:
+  feature_subset:
+    - f_trend
+    - ret_5d
+    - ret_10d
+    - ret_20d
+    - rolling_vol_20
+    - cs_momentum_percentile
+
+# Model selection runner settings (trend_signal_engine/run_model_selection.py)
+model_selection:
+  max_positions: 10
+  min_positions: 3
+  lookahead_horizon_days: 1   # forward return horizon (1 = next day)
 
 backtest:
   start_date: "2018-01-01"
@@ -211,9 +354,9 @@ sectors:
 research:
   # Walk-forward validation (calendar-year windows)
   walk_forward_enabled: true
-  train_years: 5
-  test_years: 1
-  step_years: 1
+  train_years: 3
+  test_years: 0.5
+  step_years: 0.5
   walk_forward_windows: 4
   walk_forward_train_ratio: 0.70
   # Train weight model on train window, backtest OOS (when signals.mode=learned)

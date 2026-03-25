@@ -1,0 +1,10 @@
+# Environment variables
+ALPACA_API_KEY=PKD6LV2JUJYS7A2U432TN55T6M
+ALPACA_SECRET_KEY=Fa9X6NZuH2dp5KMPpcAsPiPpCPBZPBuuuvjgGLp6iBQm
+
+# Daily jobs – Monday–Friday at 4:15pm and 4:30pm
+15 16 * * 1-5 cd /Users/sarmad/Desktop/Quant-project/trend_signal_engine && /opt/anaconda3/bin/python run_live_trading.py --execute >> /Users/sarmad/Desktop/Quant-project/trend_signal_engine/output/live/cron.log 2>&1
+30 16 * * 1-5 cd /Users/sarmad/Desktop/Quant-project/trend_signal_engine && /opt/anaconda3/bin/python run_live_trading.py --execute >> /Users/sarmad/Desktop/Quant-project/trend_signal_engine/output/live/cron.log 2>&1
+
+# Optional: run performance tracker daily at 5:00pm
+0 17 * * 1-5 cd /Users/sarmad/Desktop/Quant-project/trend_signal_engine && /opt/anaconda3/bin/python run_performance_tracker.py >> /Users/sarmad/Desktop/Quant-project/trend_signal_engine/output/live/tracker.log 2>&1

@@ -5,3 +5,9 @@ output/cache/
 output/experiments/
 *.DS_Store
 *.ipynb_checkpoints
+
+# Alpaca & local secrets — never commit real keys
+config/alpaca_config.yaml
+.env
+config/*.yaml
+!config/alpaca_config.example.yaml
