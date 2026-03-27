@@ -1,0 +1,38 @@
+{
+  "timestamp": "2026-03-25T22:19:57.404734",
+  "model_type": "learned_weights",
+  "train_end": "2026-03-24",
+  "matrix_start": "2021-03-24",
+  "train_window_years": 5.0,
+  "validation_holdout_calendar_days": 252,
+  "validation_walk_forward_windows": 3,
+  "status": "ok",
+  "validation_mode": "oos_holdout",
+  "validation_windows": [
+    [
+      "2025-07-15",
+      "2025-10-06"
+    ],
+    [
+      "2025-10-07",
+      "2025-12-29"
+    ],
+    [
+      "2025-12-30",
+      "2026-03-24"
+    ]
+  ],
+  "validation_new_sharpe_per_window": [
+    1.7571071392255957,
+    0.31951356087041416,
+    2.162556783381437
+  ],
+  "validation_previous_sharpe_per_window": [
+    1.6366279071991612,
+    0.4188100245675321,
+    1.4849000022570489
+  ],
+  "validation_mean_new_sharpe": 1.413059161159149,
+  "validation_mean_previous_sharpe": 1.1801126446745807,
+  "validation_better_windows_count": 2
+}

@@ -8,7 +8,6 @@ Run from repo root (directory containing run_weight_learning.py):
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 import shutil

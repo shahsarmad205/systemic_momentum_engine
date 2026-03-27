@@ -4,10 +4,9 @@ Market API: overview (top longs/shorts), search by ticker, and price history.
 
 from __future__ import annotations
 
-import pandas as pd
 from datetime import datetime, timedelta, timezone
-from typing import Any
 
+import pandas as pd
 from fastapi import APIRouter, HTTPException, Query
 
 from api.services.cache_reader import CacheReader
@@ -61,8 +60,8 @@ def search_tickers(q: str = Query(..., min_length=1, description="Search query (
 
 
 def _get_loader():
-    from data import MarketDataLoader
     from config import load_config
+    from data import MarketDataLoader
     cfg = load_config("backtest_config.yaml")
     return MarketDataLoader(
         provider=getattr(cfg, "data_provider", "yahoo"),
@@ -89,7 +88,7 @@ def get_price_history(
         loader = _get_loader()
         df = loader.load_price_history(ticker.upper(), start_date, end_date)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
     if df is None or df.empty:
         raise HTTPException(status_code=404, detail=f"No price data for {ticker}")
     # Normalize: flatten MultiIndex columns if present

@@ -1,0 +1,11 @@
+[Unit]
+Description=Trend Signal Engine daily pipeline
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/trend_signal_engine/trend_signal_engine
+EnvironmentFile=/opt/trend_signal_engine/env/prod.env
+ExecStart=/opt/trend_signal_engine/venv/bin/python run_daily_pipeline.py
+

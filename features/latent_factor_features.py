@@ -198,7 +198,7 @@ def extract_latent_factors_walk_forward(
     full_comps = pca.transform(X_full_scaled)
 
     comp_scaler = StandardScaler()
-    comps_train_scaled = comp_scaler.fit_transform(train_comps)
+    comp_scaler.fit(train_comps)
     comps_full_scaled = comp_scaler.transform(full_comps)
 
     columns = [f"latent_factor_{i+1}" for i in range(n_components)]
@@ -328,7 +328,7 @@ def extract_latent_factors_expanding(
         row_comp = pca.transform(X_row_scaled)
 
         comp_scaler = StandardScaler()
-        train_comps_scaled = comp_scaler.fit_transform(train_comps)
+        comp_scaler.fit(train_comps)
         row_scaled = comp_scaler.transform(row_comp)
 
         idx = row_df.index[0]

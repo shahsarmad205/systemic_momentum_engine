@@ -10,7 +10,8 @@ from __future__ import annotations
 import threading
 import time
 from collections import deque
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 SignalCallback = Callable[[str, dict[str, Any]], None]
 

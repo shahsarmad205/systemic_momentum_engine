@@ -10,9 +10,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import sys
-import logging
 
 import numpy as np
 import pandas as pd
@@ -40,8 +40,8 @@ def run_comparison(
     tickers: list[str] | None = None,
     frontier_path: str = "output/research/efficient_frontier.png",
 ) -> None:
-    from backtesting.config import load_config
     from backtest.engine import BacktestEngine
+    from backtesting.config import load_config
     from config import get_effective_tickers
 
     config = load_config(config_path)

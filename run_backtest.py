@@ -26,23 +26,21 @@ import math
 import os
 from datetime import datetime
 
+from backtest.engine import BacktestEngine
 from backtesting import (
-    load_config,
+    best_ic_horizon,
     compute_ic_decay,
     compute_rank_ic_decay,
-    best_ic_horizon,
-    run_walk_forward,
-    run_transaction_cost_sensitivity,
-    run_execution_costs_sensitivity,
+    load_config,
     plot_equity_curve,
     plot_ic_decay,
-    plot_regime_returns,
     plot_position_count,
+    plot_regime_returns,
+    run_execution_costs_sensitivity,
+    run_transaction_cost_sensitivity,
+    run_walk_forward,
 )
-
-from backtest.engine import BacktestEngine
-from config import DEV_MODE, setup_logging, get_effective_tickers, apply_dev_mode
-
+from config import DEV_MODE, apply_dev_mode, get_effective_tickers, setup_logging
 
 # ------------------------------------------------------------------
 # CLI
@@ -70,8 +68,8 @@ def parse_args():
     )
     p.add_argument("--tickers", nargs="+", default=None,
                    help="Override tickers (space-separated)")
-    p.add_argument("--mode", choices=["price", "full", "learned"], default=None,
-                   help="Signal mode: 'price' | 'full' | 'learned' (dynamic weights)")
+    p.add_argument("--mode", choices=["price", "full", "learned", "ml", "ensemble"], default=None,
+                   help="Signal mode: 'price' | 'full' | 'learned' | 'ml' | 'ensemble'")
     p.add_argument("--holding-period", type=int, default=None,
                    help="Override holding_period_days in backtest config")
     p.add_argument("--long-only", action="store_true",
@@ -111,6 +109,8 @@ def _print_header(config, tickers):
         "price": "Trend + Volatility",
         "full": "All agents",
         "learned": "Learned weights",
+        "ml": "Single ML model",
+        "ensemble": "ML ensemble",
     }
     mode_lbl = mode_labels.get(config.signal_mode, config.signal_mode)
 
@@ -264,7 +264,7 @@ def _print_metrics(m):
 
 
 def _print_signal_breakdown(trades):
-    from backtesting import compute_win_rate, compute_average_return
+    from backtesting import compute_average_return, compute_win_rate
 
     bullish = trades[trades["signal"] == "Bullish"]
     bearish = trades[trades["signal"] == "Bearish"]
@@ -294,7 +294,7 @@ def _run_ic_decay(result, config):
     print(f"\n  IC decay (horizons: {lags})")
     print(f"  {'Lag':>5}  {'Pearson IC':>12}  {'Rank IC':>12}")
     print(f"  {'─'*5}  {'─'*12}  {'─'*12}")
-    for lag, pic, ric in zip(lags, pearson_ic, spearman_ic):
+    for lag, pic, ric in zip(lags, pearson_ic, spearman_ic, strict=False):
         print(f"  {lag:>5}  {pic:>12.4f}  {ric:>12.4f}")
     print()
 
@@ -508,7 +508,7 @@ def main():
         print(f"\n{SEP}")
         print("  Signal Threshold Scan (std-based abs(adjusted_score))")
         print(SEP)
-        print(f"  Signal-score std used per run comes from the backtester.")
+        print("  Signal-score std used per run comes from the backtester.")
         print()
 
         rows = []

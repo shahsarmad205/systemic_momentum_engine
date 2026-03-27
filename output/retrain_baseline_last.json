@@ -1,12 +1,15 @@
 {
-  "timestamp": "2026-03-25T15:54:46.348612",
-  "train_end": "2026-03-24",
-  "start_date": "2018-01-01",
+  "timestamp": "2026-03-26T12:13:38.748885",
+  "train_end": "2026-03-25",
+  "training_last_date_included": "2026-03-25",
+  "holdout_calendar_days": 0,
+  "start_date": "2013-01-01",
   "horizon": 1,
-  "n_rows": 303919,
-  "n_tickers": 150,
+  "n_rows": 945660,
+  "n_tickers": 300,
   "feature_subset_mode": "full",
   "weights_path": "output/learned_weights.json",
   "scaler_path": "output/learned_weights_scaler.json",
-  "backup_path": "output/learned_weights.json.before_retrain"
+  "backup_path": "output/learned_weights.json.before_retrain",
+  "backup_scaler_path": "output/learned_weights_scaler.json.before_retrain"
 }

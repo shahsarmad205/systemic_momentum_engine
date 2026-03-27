@@ -10,11 +10,9 @@ from __future__ import annotations
 
 import copy
 import itertools
-from collections import defaultdict
 
 import numpy as np
 import pandas as pd
-
 
 # ------------------------------------------------------------------
 # IC Decay Analysis
@@ -193,6 +191,7 @@ def run_walk_forward(
          directional accuracy, information coefficient per window.)
     """
     import os
+
     from .backtester import Backtester
 
     splits = walk_forward_splits(
@@ -225,7 +224,7 @@ def run_walk_forward(
         weights_path = None
         if train_weights and getattr(config, "signal_mode", "") == "learned":
             try:
-                from agents.weight_learning_agent import build_feature_matrix, WeightLearner
+                from agents.weight_learning_agent import WeightLearner, build_feature_matrix
 
                 # Build features from train start through test end (rows in train range used for fit only)
                 features_df = build_feature_matrix(
@@ -306,7 +305,7 @@ def parameter_grid(param_ranges: dict[str, list]) -> list[dict]:
         })
     """
     keys = list(param_ranges.keys())
-    return [dict(zip(keys, combo)) for combo in itertools.product(*param_ranges.values())]
+    return [dict(zip(keys, combo, strict=False)) for combo in itertools.product(*param_ranges.values())]
 
 
 def run_parameter_sweep(
@@ -436,6 +435,7 @@ def run_execution_costs_sensitivity(
     scenarios: list of total bps per leg (e.g. [5, 10, 20]); cost is split as commission/spread/slippage.
     """
     import copy
+
     from .backtester import Backtester
 
     scenarios = scenarios or getattr(config, "execution_costs_scenarios", [5.0, 10.0, 20.0])

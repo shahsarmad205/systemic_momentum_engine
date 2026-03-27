@@ -7,8 +7,6 @@ transaction costs, expected holding period and volatility regime.
 
 from __future__ import annotations
 
-from typing import Tuple
-
 
 def compute_cost_adjusted_threshold(
     commission_bps: float = 10.0,
@@ -55,7 +53,7 @@ def compute_cost_adjusted_threshold(
     return max(float(base_threshold), threshold)
 
 
-def compute_dynamic_thresholds(config, vol_percentile: float = 0.5) -> Tuple[float, float]:
+def compute_dynamic_thresholds(config, vol_percentile: float = 0.5) -> tuple[float, float]:
     """
     Return (bullish_threshold, bearish_threshold) using BacktestConfig.
 
@@ -74,7 +72,7 @@ def compute_dynamic_thresholds(config, vol_percentile: float = 0.5) -> Tuple[flo
     # back to base_signal_threshold (and finally to 0.5). This keeps the
     # effective thresholds tunable from YAML instead of hard-coded.
     if hasattr(config, "min_signal_strength"):
-        base = float(getattr(config, "min_signal_strength"))
+        base = float(config.min_signal_strength)
     else:
         base = float(getattr(config, "base_signal_threshold", 0.5))
     if not getattr(config, "dynamic_thresholds_enabled", True):

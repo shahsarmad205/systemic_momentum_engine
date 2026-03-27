@@ -1,0 +1,7 @@
+# Local dev: unpinned runtime deps from requirements.txt + tooling.
+# CI uses: pip install -r requirements-lock.txt && pip install -r requirements-dev-after-lock.txt
+-r requirements.txt
+pytest>=7.4
+ruff>=0.6
+pip-audit>=2.7
+asgiref>=3.8

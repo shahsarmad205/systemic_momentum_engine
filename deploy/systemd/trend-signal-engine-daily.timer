@@ -1,0 +1,11 @@
+[Unit]
+Description=Trend Signal Engine daily pipeline timer
+
+[Timer]
+OnCalendar=Mon..Fri 16:15
+Persistent=true
+Unit=trend-signal-engine-daily.service
+
+[Install]
+WantedBy=timers.target
+

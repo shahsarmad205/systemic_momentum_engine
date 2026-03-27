@@ -15,6 +15,7 @@ From Quant-project/: ../trend_signal_engine/run_live_trading.py or use repo run_
 Pre-flight (before orders): non-empty signals (else prior snapshot), score dispersion,
 then net cash flow: sum(target_value for to_open) − sum(market_value for to_close).
 Abort only if net_cash_required > 0 and net_cash_required > buying_power + cash.
+Optional ``risk.var_check`` (OHLCV cache): abort if one-day VaR exceeds ``max_var_pct``.
 Otherwise print ``Net cash required: … – proceeding.`` and continue.
 """
 
@@ -36,6 +37,15 @@ _ROOT = Path(__file__).resolve().parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from utils.run_context import ensure_run_id_in_env, format_ctx
+
+
+def _require_python311() -> None:
+    if sys.version_info[:2] != (3, 11):
+        raise SystemExit(
+            f"Python 3.11 required (CI/prod standard). Detected: {sys.version.split()[0]}"
+        )
+
 
 def _chdir_root() -> None:
     os.chdir(_ROOT)
@@ -50,6 +60,159 @@ def _append_execution_skip_log(entry: dict[str, Any]) -> Path:
     return log_file
 
 
+def _preflight_var_check(
+    *,
+    config: dict[str, Any],
+    account: dict[str, float],
+    current_positions: pd.DataFrame,
+    target: pd.DataFrame,
+) -> tuple[bool, dict[str, Any]]:
+    """
+    One-day portfolio VaR from cached OHLCV vs ``risk.var_check.max_var_pct``.
+
+    Returns (ok, extras) where extras are merged into ``execution_log.jsonl``.
+    """
+    from risk.var import portfolio_var
+    from utils.returns import load_aligned_returns
+
+    risk = config.get("risk") or {}
+    vc = risk.get("var_check") or {}
+    out: dict[str, Any] = {}
+    if not bool(vc.get("enabled", False)):
+        return True, out
+
+    out["var_check_enabled"] = True
+    confidence = float(vc.get("confidence", 0.95))
+    lookback = int(vc.get("lookback_days", 60))
+    max_var = float(vc.get("max_var_pct", 0.05))
+    method = str(vc.get("method", "historical")).lower().strip()
+    if method not in ("historical", "parametric", "monte_carlo"):
+        method = "historical"
+    check_target = bool(vc.get("check_target", False))
+    strict_coverage = bool(vc.get("strict_coverage", False))
+    min_w = float(vc.get("min_weight_coverage", 0.002))
+
+    out.update(
+        {
+            "var_confidence": confidence,
+            "var_lookback_days": lookback,
+            "var_max_var_pct": max_var,
+            "var_method": method,
+        }
+    )
+
+    bt = config.get("backtest", config) or {}
+    cache_dir = _ROOT / str(bt.get("cache_dir", "data/cache/ohlcv"))
+
+    equity = float(account.get("equity") or 0.0)
+    if equity <= 0:
+        out["var_note"] = "skip_nonpositive_equity"
+        out["var_preflight_passed"] = True
+        return True, out
+
+    def weights_current() -> dict[str, float]:
+        w: dict[str, float] = {}
+        if current_positions is None or current_positions.empty:
+            return w
+        for _, row in current_positions.iterrows():
+            t = str(row.get("ticker", "")).strip().upper()
+            mv = float(pd.to_numeric(row.get("market_value"), errors="coerce") or 0.0)
+            if t and mv > 0:
+                w[t] = w.get(t, 0.0) + mv / equity
+        return w
+
+    def weights_target() -> dict[str, float]:
+        w: dict[str, float] = {}
+        if target is None or target.empty:
+            return w
+        for _, row in target.iterrows():
+            t = str(row.get("ticker", "")).strip().upper()
+            tv = float(pd.to_numeric(row.get("target_value"), errors="coerce") or 0.0)
+            if t and tv > 0:
+                w[t] = w.get(t, 0.0) + tv / equity
+        return w
+
+    def eval_book(label: str, wmap: dict[str, float]) -> tuple[float | None, str]:
+        if not wmap:
+            return 0.0, ""
+        tickers = list(wmap.keys())
+        re_df, _ = load_aligned_returns(tickers, cache_dir, lookback)
+        if re_df.empty:
+            return None, "empty_returns"
+        missing = [t for t, w in wmap.items() if w >= min_w and t not in re_df.columns]
+        if missing:
+            out[f"var_{label}_missing_tickers"] = missing[:30]
+            if strict_coverage:
+                return None, "strict_missing"
+        w_eff = {t: float(wmap[t]) for t in re_df.columns if t in wmap}
+        if sum(abs(v) for v in w_eff.values()) < 1e-9:
+            return 0.0, ""
+        var_pct, _ = portfolio_var(
+            list(w_eff.keys()),
+            w_eff,
+            re_df,
+            confidence=confidence,
+            method=method,  # type: ignore[arg-type]
+        )
+        if var_pct != var_pct:
+            return None, "nan_var"
+        return float(var_pct), ""
+
+    ok = True
+    cw = weights_current()
+    if cw:
+        v_c, err = eval_book("current", cw)
+        if v_c is None:
+            out["var_current_pct"] = None
+            print(f"  Pre-flight VaR: could not compute current book ({err}).")
+            if strict_coverage:
+                ok = False
+                out["var_fail_reason"] = err
+            else:
+                out["var_note"] = "current_unavailable_pass"
+        else:
+            out["var_current_pct"] = v_c
+            if v_c > max_var:
+                ok = False
+                out["var_breach_book"] = "current"
+                print(
+                    f"  ABORT: VaR (current) {v_c:.2%} > cap {max_var:.2%} "
+                    f"({method}, {lookback}d, {confidence:.0%})."
+                )
+            else:
+                print(
+                    f"  Pre-flight VaR (current): {v_c:.2%} ≤ {max_var:.2%} — ok ({method})."
+                )
+    else:
+        out["var_current_pct"] = 0.0
+        print("  Pre-flight VaR: no positions — current VaR 0.")
+
+    if ok and check_target:
+        tw = weights_target()
+        if tw:
+            v_t, err = eval_book("target", tw)
+            if v_t is None:
+                out["var_target_pct"] = None
+                print(f"  Pre-flight VaR: could not compute target book ({err}).")
+                if strict_coverage:
+                    ok = False
+                    out["var_fail_reason"] = err
+            elif v_t > max_var:
+                ok = False
+                out["var_breach_book"] = "target"
+                print(
+                    f"  ABORT: VaR (target) {v_t:.2%} > cap {max_var:.2%} ({method})."
+                )
+            else:
+                out["var_target_pct"] = v_t
+                print(
+                    f"  Pre-flight VaR (target):  {v_t:.2%} ≤ {max_var:.2%} — ok."
+                )
+
+    out["var_preflight_passed"] = ok
+    return ok, out
+
+
 def generate_signals(as_of_date: str) -> pd.DataFrame | None:
     """
     Build features through as_of_date, score all tickers with LearnedWeights,
@@ -57,7 +220,6 @@ def generate_signals(as_of_date: str) -> pd.DataFrame | None:
     """
     from agents.weight_learning_agent.feature_builder import build_feature_matrix
     from agents.weight_learning_agent.weight_model import LearnedWeights
-
     from run_daily_signals import _detect_regime, compute_score
 
     config_path = _ROOT / "backtest_config.yaml"
@@ -218,7 +380,11 @@ def save_signal_history(
 
 
 def main() -> None:
+    _require_python311()
     _chdir_root()
+    ensure_run_id_in_env()
+
+    from brokers.alpaca_broker import AlpacaAPIError
 
     parser = argparse.ArgumentParser(description="Live paper trading (signals + Alpaca execution)")
     parser.add_argument(
@@ -242,10 +408,27 @@ def main() -> None:
     as_of = args.date or datetime.now().strftime("%Y-%m-%d")
     dry_run = not args.execute
 
+    # Even if --execute is supplied, respect global trading halt gates.
+    try:
+        from utils.trading_control import is_live_trading_allowed, trading_halt_reason
+
+        cfg_path = _ROOT / "backtest_config.yaml"
+        with open(cfg_path, encoding="utf-8") as fh:
+            _cfg = yaml.safe_load(fh) or {}
+        if args.execute and not is_live_trading_allowed(_cfg):
+            reason = trading_halt_reason(_cfg) or "trading halted"
+            print()
+            print(f"  [Trading] HALTED — {reason}; forcing DRY RUN despite --execute.")
+            dry_run = True
+    except Exception:
+        # Never fail startup just because the halt-check can't be evaluated.
+        pass
+
     print()
     print(f"{'=' * 55}")
     print(f"  LIVE PAPER TRADING — {as_of}")
     print(f"  Mode: {'DRY RUN' if dry_run else 'EXECUTE (live orders)'}")
+    print(f"  {format_ctx()}")
     print(f"{'=' * 55}")
 
     from brokers.alpaca_broker import AlpacaBroker
@@ -469,9 +652,57 @@ def main() -> None:
 
             print(f"  Net cash required: {net_cash_required:,.2f} – proceeding.")
 
+        cfg_path = _ROOT / "backtest_config.yaml"
+        full_config: dict[str, Any] = {}
+        if cfg_path.is_file():
+            with open(cfg_path, encoding="utf-8") as fh:
+                full_config = yaml.safe_load(fh) or {}
+
+        print()
+        var_ok, var_log = _preflight_var_check(
+            config=full_config,
+            account=account,
+            current_positions=current_positions,
+            target=target,
+        )
+        var_log["as_of"] = as_of
+        var_log["run_id"] = (os.environ.get("RUN_ID") or "").strip() or None
+        try:
+            from utils.hashes import sha256_yaml_obj
+
+            var_log["config_hash"] = sha256_yaml_obj(full_config)
+        except Exception:
+            pass
+        if not var_ok:
+            entry = {
+                "timestamp": datetime.now().isoformat(),
+                "dry_run": dry_run,
+                "skipped": True,
+                "reason": "preflight_var_breach",
+                "detail": str(var_log.get("var_breach_book") or var_log.get("var_fail_reason") or ""),
+                "as_of": as_of,
+                "fallback_source": fallback_label,
+                "orders_placed": [],
+                "orders_skipped": [],
+            }
+            entry.update(var_log)
+            print()
+            print("  Stopped before execution engine (VaR pre-flight).")
+            _append_execution_skip_log(entry)
+            save_signal_history(signals, as_of, entry)
+            print()
+            print(f"{'=' * 55}")
+            print("  execution_log: output/live/execution_log.jsonl")
+            print(f"{'=' * 55}")
+            return
+
         print()
         print(f"  Step 2: Execution ({'DRY RUN' if dry_run else 'LIVE'})...")
-        result = engine.execute(signals, dry_run=dry_run)
+        result = engine.execute(
+            signals,
+            dry_run=dry_run,
+            extra_execution_log=var_log,
+        )
 
         save_signal_history(signals, as_of, result)
 
@@ -499,6 +730,55 @@ def main() -> None:
         print(f"{'=' * 55}")
         print("  Done. execution_log: output/live/execution_log.jsonl")
         print(f"{'=' * 55}")
+
+    except AlpacaAPIError as exc:
+        err_s = str(exc).lower()
+        unauthorized = "unauthorized" in err_s or getattr(exc, "code", None) == 401
+        stub_auth: dict[str, Any] = {
+            "timestamp": datetime.now().isoformat(),
+            "dry_run": dry_run,
+            "skipped": True,
+            "reason": "alpaca_unauthorized" if unauthorized else "alpaca_api_error",
+            "detail": str(exc),
+            "as_of": as_of,
+            "fallback_source": fallback_label,
+            "n_open": 0,
+            "n_close": 0,
+            "n_hold": 0,
+            "orders_placed": [],
+            "orders_skipped": [],
+        }
+        if dry_run:
+            print()
+            print("  [!] Alpaca API rejected this request (often HTTP 401 unauthorized).")
+            print(f"      {exc}")
+            print(
+                "  Dry run: rankings and signal files are still saved; execution steps are skipped."
+            )
+            print(
+                "  Fix: use the **Paper** key pair with https://paper-api.alpaca.markets; "
+                "env ALPACA_API_KEY + ALPACA_SECRET_KEY must match (Secret ≠ Key ID)."
+            )
+            print("        See brokers/alpaca_broker.py docstring or config/alpaca_config.example.yaml.")
+            log_path = _append_execution_skip_log(stub_auth)
+            save_signal_history(signals, as_of, stub_auth)
+            print(f"  Logged: {log_path}")
+            print()
+            print(f"{'=' * 55}")
+            print("  Done (signals only; Alpaca auth failed).")
+            print(f"{'=' * 55}")
+            return
+
+        print()
+        print("  ABORT: Alpaca API error — cannot place or simulate broker-dependent steps.")
+        print(f"      {exc}")
+        print(
+            "  Fix Paper trading: matching API Key ID + Secret in config/alpaca_config.yaml "
+            "or env, and base_url https://paper-api.alpaca.markets."
+        )
+        _append_execution_skip_log(stub_auth)
+        save_signal_history(signals, as_of, stub_auth)
+        raise SystemExit(1) from None
 
     except (
         requests.exceptions.Timeout,

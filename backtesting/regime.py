@@ -10,7 +10,6 @@ according to the prevailing market environment.
 
 import numpy as np
 import pandas as pd
-import yfinance as yf
 
 
 class MarketRegimeAgent:
@@ -71,6 +70,8 @@ class MarketRegimeAgent:
 
     @staticmethod
     def _download(ticker: str, start, end) -> pd.DataFrame:
+        import yfinance as yf  # lazy: keeps test imports of backtesting.metrics free of yfinance websockets stack
+
         raw = yf.download(ticker, start=start, end=end, progress=False)
         if isinstance(raw.columns, pd.MultiIndex):
             raw.columns = raw.columns.get_level_values(0)
@@ -80,6 +81,8 @@ class MarketRegimeAgent:
     @staticmethod
     def _download_vix(start, end, spy_fallback: pd.DataFrame) -> dict:
         """Try ^VIX; fall back to annualised 20-day rolling vol of SPY."""
+        import yfinance as yf  # lazy import
+
         try:
             raw = yf.download("^VIX", start=start, end=end, progress=False)
             if isinstance(raw.columns, pd.MultiIndex):

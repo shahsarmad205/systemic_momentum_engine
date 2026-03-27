@@ -5,17 +5,19 @@ Equity curve, drawdown, regime bands, IC decay, and regime-return plots.
 Decoupled from the backtester — accepts DataFrames and dicts.
 """
 
+from __future__ import annotations
+
+import logging
 import os
 from itertools import groupby
-import logging
 
-import numpy as np
 import pandas as pd
+
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-
 
 BACKTESTS_DIR = os.path.join("output", "backtests")
 
@@ -91,7 +93,7 @@ def _draw_regime_bands(ax, daily_equity, ymin, ymax):
     dates = daily_equity["date"].tolist()
     regimes = daily_equity["regime"].tolist()
 
-    for regime, grp in groupby(zip(dates, regimes), key=lambda x: x[1]):
+    for regime, grp in groupby(zip(dates, regimes, strict=False), key=lambda x: x[1]):
         grp_list = list(grp)
         color = REGIME_COLORS.get(regime, "#bdc3c7")
         ax.axvspan(grp_list[0][0], grp_list[-1][0], alpha=0.06, color=color)
@@ -113,7 +115,7 @@ def plot_ic_decay(
 
     fig, ax = plt.subplots(figsize=(10, 5))
     colors = ["#2ecc71" if v > 0 else "#e74c3c" for v in ic_values]
-    ax.bar(range(len(lags)), ic_values, tick_label=[str(l) for l in lags],
+    ax.bar(range(len(lags)), ic_values, tick_label=[str(lag) for lag in lags],
            color=colors, alpha=0.75, edgecolor="#2c3e50", linewidth=0.5)
     ax.axhline(0, color="#7f8c8d", lw=0.6, ls=":")
     ax.set_xlabel("Forward Horizon (trading days)")
@@ -155,7 +157,7 @@ def plot_regime_returns(
     ax.set_title("Performance by Market Regime", fontweight="bold")
     ax.grid(True, alpha=0.25, axis="y")
 
-    for bar, (_, row) in zip(bars, grouped.iterrows()):
+    for bar, (_, row) in zip(bars, grouped.iterrows(), strict=False):
         ax.text(
             bar.get_x() + bar.get_width() / 2,
             bar.get_height() + 0.0005,

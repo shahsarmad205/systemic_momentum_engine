@@ -1,7 +1,6 @@
-import pandas as pd
-import numpy as np
-from scipy import stats
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 
 
 def run_bootstrap(

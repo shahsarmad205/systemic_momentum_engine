@@ -10,9 +10,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import sys
-import logging
 
 import numpy as np
 import pandas as pd
@@ -23,7 +23,7 @@ _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from risk.var import historical_var, parametric_var, conditional_var
+from risk.var import conditional_var, historical_var, parametric_var
 
 
 def _breach_count(returns: pd.Series, var_series: pd.Series) -> int:

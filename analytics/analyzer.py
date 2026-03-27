@@ -8,9 +8,9 @@ import os
 
 import pandas as pd
 
-from backtesting.metrics import compute_all_metrics
 from backtesting.analytics import compute_ic_decay as _compute_ic_decay
 from backtesting.analytics import compute_rank_ic_decay as _compute_rank_ic_decay
+from backtesting.metrics import compute_all_metrics
 
 
 class PerformanceAnalyzer:

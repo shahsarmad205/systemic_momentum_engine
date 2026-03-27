@@ -13,32 +13,35 @@ Architecture:
 
 from __future__ import annotations
 
-from collections import defaultdict
 import datetime
-import math
-from datetime import date as date_type, timedelta
 import logging
+import math
+from collections import defaultdict
+from datetime import timedelta
 
 import numpy as np
 import pandas as pd
+
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
-import matplotlib.pyplot as plt
 from pathlib import Path
+
+import matplotlib.pyplot as plt
+
 from .config import BacktestConfig
-from .portfolio import Portfolio
 from .execution import ExecutionEngine
+from .portfolio import Portfolio, Position
 from .regime import MarketRegimeAgent
 
 try:
     from execution.cost_model import TransactionCostModel
 except ImportError:
     TransactionCostModel = None
-from .signals import SignalEngine, HISTORY_BUFFER_DAYS, EXIT_BUFFER_DAYS
-from .metrics import compute_all_metrics, compute_capm_metrics
-
-from utils.sectors import SECTOR_MAP
-from utils.sector_aggregates import compute_sector_aggregates, apply_sector_adjustment
 from utils.market_data import get_ohlcv
+from utils.sector_aggregates import apply_sector_adjustment, compute_sector_aggregates
+from utils.sectors import SECTOR_MAP
+
+from .metrics import compute_all_metrics, compute_capm_metrics
+from .signals import EXIT_BUFFER_DAYS, HISTORY_BUFFER_DAYS, SignalEngine
 
 try:
     from agents.weight_learning_agent.feature_builder import (
@@ -50,8 +53,9 @@ except ImportError:  # pragma: no cover
     vol_rank_features_by_ticker = None  # type: ignore[misc,assignment]
 from strategy.candidates import build_ranked_candidates
 from strategy.cross_sectional import build_cross_sectional_candidates
+
 try:
-    from strategy.regime_multipliers import load_regime_multipliers, get_multiplier
+    from strategy.regime_multipliers import get_multiplier, load_regime_multipliers
 except ImportError:  # pragma: no cover
     load_regime_multipliers = None  # type: ignore[misc,assignment]
     get_multiplier = None  # type: ignore[misc,assignment]
@@ -59,8 +63,8 @@ from . import position_sizing
 
 try:
     from options.black_scholes import (
-        bs_price,
         bs_greeks,
+        bs_price,
         implied_vol_from_historical,
     )
 except ImportError:
@@ -729,7 +733,7 @@ class Backtester:
 
                 non_neutral = int((signals["signal"] != "Neutral").sum())
                 print(f"{len(data)} bars, {non_neutral} signals{sent_str}")
-                logger.info(
+                logger.debug(
                     "Prepared data for %s: %d bars, %d non-neutral signals",
                     ticker,
                     len(data),
@@ -798,7 +802,6 @@ class Backtester:
             return
         date_to_idx = {d: idx for idx, d in enumerate(trading_days)}
         min_hold = int(getattr(self.config, "min_holding_period_days", 0) or 0)
-        crisis_max_holding_days = int(getattr(self.config, "crisis_max_holding_days", 3) or 3)
         crisis_beta_cutoff = float(getattr(self.config, "crisis_beta_cutoff", 0.8) or 0.8)
         crisis_signal_window_days = int(getattr(self.config, "crisis_signal_window_days", 60) or 60)
         crisis_signal_quantile = float(getattr(self.config, "crisis_signal_quantile", 0.95) or 0.95)
@@ -931,6 +934,12 @@ class Backtester:
                     adj = row.get("adjusted_score")
                     if adj is not None and abs(float(adj)) >= min_strength:
                         daily_signals[d].append((ticker, row))
+        logger.info(
+            "Signal inclusion summary: days=%d, avg_candidates_per_day=%.2f, max_candidates_on_day=%d",
+            len(daily_signals),
+            float(np.mean([len(v) for v in daily_signals.values()])) if daily_signals else 0.0,
+            max((len(v) for v in daily_signals.values()), default=0),
+        )
 
         # Factor neutralizer (after signals, before ranking)
         factor_neutralizer = None
@@ -1064,7 +1073,10 @@ class Backtester:
                     returns_df = self._build_returns_matrix(price_data, date, lookback)
                     if returns_df is not None and not returns_df.empty and returns_df.shape[1] >= 1:
                         try:
-                            from portfolio.mean_variance import max_sharpe_weights, min_variance_weights
+                            from portfolio.mean_variance import (
+                                max_sharpe_weights,
+                                min_variance_weights,
+                            )
                             max_w = getattr(self.config, "mean_variance_max_single_weight", 0.25)
                             constraints = {"max_weight": max_w}
                             if method == "mv_max_sharpe":
@@ -1537,7 +1549,7 @@ class Backtester:
                 and scm is not None
                 and float(scm) > 0
             ):
-                logger.info(
+                logger.debug(
                     "SIDEWAYS: rolling-std gate scm=%.2f, aggressiveness=%.2f (threshold = scm×σ×aggr)",
                     float(scm),
                     float(th_agg),
@@ -1554,12 +1566,9 @@ class Backtester:
                     if entry.get("signal") == "Bearish":
                         continue
 
-                # Regime-aware signal filtering:
-                # - Bull regime : suppress all shorts
-                # - Bear regime : allow both longs and shorts
-                # - Crisis      : long-only (suppress shorts)
-                # - Sideways    : allow both
-                if regime_today in ("Bull", "Crisis") and entry.get("signal") == "Bearish":
+                # Regime-aware signal filtering: suppress shorts in configured regimes.
+                _suppress = getattr(self.config, "regime_suppress_shorts", ["Bull", "Crisis"])
+                if regime_today in _suppress and entry.get("signal") == "Bearish":
                     continue
 
                 # Bear + long-only: optional hard block — no new entries (weak / no edge).
@@ -1664,7 +1673,7 @@ class Backtester:
                                 base_threshold = float(scm) * rs
                                 final_threshold = base_threshold * float(th_agg)
                                 if regime_today == "Sideways":
-                                    logger.info(
+                                    logger.debug(
                                         "SIDEWAYS GATE: ticker=%s, raw_abs=%.4f, base_thresh=%.4f, "
                                         "aggressiveness=%.4f, final_thresh=%.4f, enter=%s",
                                         tk,
@@ -2054,10 +2063,39 @@ class Backtester:
 
             # --- 4. Record daily equity ---
             regime = regime_data.get(date, "Sideways")
+            # Short borrow cost drag (applied as daily cash charge on short notional).
+            short_borrow_cost = 0.0
+            borrow_bps = float(getattr(self.config, "short_borrow_cost_bps", 0.0) or 0.0)
+            equity_now = float(self.portfolio.equity) if self.portfolio.equity else 0.0
+            # Use shares*price (not Position.market_value) for exposure/borrow calculations.
+            def _notional(pos) -> float:
+                try:
+                    return abs(float(pos.shares) * float(pos.current_price))
+                except Exception:
+                    return abs(float(getattr(pos, "position_size", 0.0) or 0.0))
+            gross_exposure = (
+                sum(_notional(p) for p in self.portfolio.positions) / equity_now
+                if equity_now > 1e-12
+                else 0.0
+            )
+            net_exposure = (
+                sum(float(p.direction) * _notional(p) for p in self.portfolio.positions) / equity_now
+                if equity_now > 1e-12
+                else 0.0
+            )
+            if borrow_bps > 0 and self.portfolio.positions:
+                daily_rate = (borrow_bps / 10_000.0) / 252.0
+                short_notional = sum(_notional(p) for p in self.portfolio.positions if int(getattr(p, "direction", 1)) < 0)
+                short_borrow_cost = float(short_notional) * float(daily_rate)
+                if short_borrow_cost > 0:
+                    self.portfolio.cash -= short_borrow_cost
             self.portfolio.record_equity(
                 date,
                 regime,
                 crisis_consecutive_days=int(crisis_consecutive_days),
+                gross_exposure=gross_exposure,
+                net_exposure=net_exposure,
+                short_borrow_cost=short_borrow_cost if short_borrow_cost > 0 else 0.0,
             )
 
             # --- 5. Queue new signals (only inside backtest window) ---
@@ -2239,7 +2277,7 @@ class Backtester:
             rolling = self._get_rolling_kelly_params()
             if rolling is not None:
                 kelly_win, kelly_avg_win, kelly_avg_loss = rolling
-            setattr(self, "_last_kelly_win_rate", kelly_win)
+            self._last_kelly_win_rate = kelly_win
 
         params = position_sizing.PositionSizingParams(
             method=method,
@@ -2272,7 +2310,7 @@ class Backtester:
                 params=params,
             )
             if equity > 0 and size > 0:
-                setattr(self, "_last_kelly_position_pct", 100.0 * size / equity)
+                self._last_kelly_position_pct = 100.0 * size / equity
             return size
         if method == "risk_parity":
             return position_sizing.risk_parity_size(

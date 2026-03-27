@@ -57,6 +57,101 @@ def _setup_logging(log_file: Path | None, verbose: bool) -> None:
     )
 
 
+def metrics_sharpe(m: dict[str, Any] | None) -> float | None:
+    if not m:
+        return None
+    for k in ("net_sharpe_ratio", "sharpe_ratio"):
+        v = m.get(k)
+        if v is not None:
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                pass
+    return None
+
+
+def learned_backtest_metrics_window(
+    *,
+    config_path: Path,
+    weights_path: Path,
+    start_date: str,
+    end_date: str,
+) -> dict[str, Any] | None:
+    """
+    Run :class:`Backtester` on ``[start_date, end_date]`` with learned weights at ``weights_path``.
+    Returns backtest metrics dict or None.
+    """
+    from backtesting.backtester import Backtester
+    from backtesting.config import load_config
+
+    if not weights_path.is_file():
+        return None
+    cfg = load_config(str(config_path))
+    cfg_start = pd.Timestamp(cfg.start_date)
+    cfg.start_date = max(cfg_start, pd.Timestamp(start_date)).strftime("%Y-%m-%d")
+    cfg.end_date = end_date
+    cfg.signal_mode = "learned"
+    cfg.learned_weights_path = str(weights_path)
+    if pd.Timestamp(cfg.start_date) > pd.Timestamp(cfg.end_date):
+        return None
+    bt = Backtester(cfg)
+    res = bt.run()
+    return dict(res.metrics or {}) if res.metrics else {}
+
+
+def build_oos_validation_windows(
+    train_end: str,
+    holdout_calendar_days: int,
+    n_windows: int,
+) -> list[tuple[str, str]]:
+    """
+    True OOS span is the last ``holdout_calendar_days`` calendar days up to ``train_end`` (inclusive),
+    split into ``n_windows`` contiguous slices by calendar length.
+    """
+    end_ts = pd.Timestamp(train_end)
+    start_ts = end_ts - pd.Timedelta(days=int(holdout_calendar_days))
+    total_days = max(1, (end_ts - start_ts).days)
+    n_windows = max(1, int(n_windows))
+    if n_windows <= 1:
+        return [(start_ts.strftime("%Y-%m-%d"), train_end)]
+
+    out: list[tuple[str, str]] = []
+    for i in range(n_windows):
+        seg_start = start_ts + pd.Timedelta(days=int(i * total_days / n_windows))
+        if i == n_windows - 1:
+            seg_end = end_ts
+        else:
+            seg_end = start_ts + pd.Timedelta(days=int((i + 1) * total_days / n_windows)) - pd.Timedelta(days=1)
+        if seg_start <= seg_end:
+            out.append((seg_start.strftime("%Y-%m-%d"), seg_end.strftime("%Y-%m-%d")))
+    return out if out else [(start_ts.strftime("%Y-%m-%d"), train_end)]
+
+
+def net_sharpe_learned_backtest(
+    *,
+    config_path: Path,
+    train_end: str,
+    weights_path: Path,
+    calendar_span_days: int,
+) -> float | None:
+    """
+    Run :class:`Backtester` on a recent window ending at ``train_end`` using
+    ``signal_mode=learned`` and weights at ``weights_path``. Returns net Sharpe or None.
+
+    **Note:** This window usually overlaps training data if weights were fit through ``train_end``;
+    prefer :func:`learned_backtest_metrics_window` on a held-out OOS range for acceptance tests.
+    """
+    end_ts = pd.Timestamp(train_end)
+    start_guess = end_ts - pd.Timedelta(days=int(calendar_span_days))
+    m = learned_backtest_metrics_window(
+        config_path=config_path,
+        weights_path=weights_path,
+        start_date=start_guess.strftime("%Y-%m-%d"),
+        end_date=train_end,
+    )
+    return metrics_sharpe(m)
+
+
 def _quick_backtest_compare(
     *,
     config_path: Path,
@@ -83,7 +178,13 @@ def _quick_backtest_compare(
             return None
         cfg = deepcopy(cfg_base)
         cfg.learned_weights_path = str(weights_path)
-        log.info("Quick backtest [%s] weights=%s window %s → %s", label, weights_path, cfg.start_date, cfg.end_date)
+        log.info(
+            "Quick backtest [%s] weights=%s window %s → %s",
+            label,
+            weights_path,
+            cfg.start_date,
+            cfg.end_date,
+        )
         bt = Backtester(cfg)
         res = bt.run()
         return dict(res.metrics or {})
@@ -134,6 +235,24 @@ def main() -> None:
         type=str,
         default="",
         help="Train through this date inclusive (YYYY-MM-DD). Default: yesterday (local).",
+    )
+    parser.add_argument(
+        "--train-window-years",
+        type=float,
+        default=None,
+        help="If set, training start is max(train-start-floor, as-of minus N years).",
+    )
+    parser.add_argument(
+        "--train-start-floor",
+        type=str,
+        default="",
+        help="Earliest calendar date for the training window (YYYY-MM-DD). Default: backtest.start_date.",
+    )
+    parser.add_argument(
+        "--holdout-calendar-days",
+        type=int,
+        default=0,
+        help="If >0, fit only on rows with date <= (as-of - N days); reserve the tail for true OOS validation.",
     )
     parser.add_argument(
         "--use-config-feature-subset",
@@ -215,6 +334,14 @@ def main() -> None:
     start_date = str(bt.get("start_date", "2018-01-01"))
     end_date = train_end  # full history through train end
 
+    twy = args.train_window_years
+    if twy is not None and float(twy) > 0:
+        floor_s = str(args.train_start_floor).strip()
+        floor_ts = pd.Timestamp(floor_s) if floor_s else pd.Timestamp(start_date)
+        window_start = train_end_ts - pd.DateOffset(months=int(round(float(twy) * 12)))
+        start_date = max(window_start, floor_ts).strftime("%Y-%m-%d")
+        log.info("Train window: last %.2f years from %s → start_date=%s", float(twy), train_end, start_date)
+
     if pd.Timestamp(start_date) > train_end_ts:
         raise SystemExit(f"backtest.start_date {start_date} is after train end {train_end}")
 
@@ -253,15 +380,43 @@ def main() -> None:
     if df.empty:
         raise SystemExit("No rows after dropping NaN forward_return.")
 
+    holdout = int(getattr(args, "holdout_calendar_days", 0) or 0)
+    training_last_ts = train_end_ts
+    if holdout > 0:
+        training_last_ts = train_end_ts - pd.Timedelta(days=holdout)
+        n_all = len(df)
+        df = df[df["date"] <= training_last_ts].copy()
+        log.info(
+            "Holdout %d calendar days: fitting on rows with date <= %s (%d rows, was %d)",
+            holdout,
+            training_last_ts.strftime("%Y-%m-%d"),
+            len(df),
+            n_all,
+        )
+        if len(df) < 5000:
+            log.warning(
+                "Low row count after holdout (%d). Consider smaller holdout or longer history.",
+                len(df),
+            )
+        if df.empty:
+            raise SystemExit("Holdout removed all training rows; reduce holdout_calendar_days.")
+
     out_weights = Path(args.out_weights)
     out_scaler = Path(args.out_scaler)
-    backup_path = out_weights.with_name(out_weights.name + str(args.backup_suffix))
+    suf = str(args.backup_suffix)
+    backup_path = out_weights.with_name(out_weights.name + suf)
+    backup_scaler_path = out_scaler.with_name(out_scaler.name + suf)
 
     prev_backup: Path | None = None
+    prev_scaler_backup: Path | None = None
     if out_weights.is_file():
         shutil.copy2(out_weights, backup_path)
         prev_backup = backup_path
         log.info("Backed up existing weights to %s", backup_path)
+    if out_scaler.is_file():
+        shutil.copy2(out_scaler, backup_scaler_path)
+        prev_scaler_backup = backup_scaler_path
+        log.info("Backed up existing scaler to %s", backup_scaler_path)
 
     learner = WeightLearner(
         model_type="ridge",
@@ -288,6 +443,8 @@ def main() -> None:
     summary = {
         "timestamp": datetime.now().isoformat(),
         "train_end": train_end,
+        "training_last_date_included": training_last_ts.strftime("%Y-%m-%d"),
+        "holdout_calendar_days": holdout,
         "start_date": start_date,
         "horizon": horizon,
         "n_rows": int(len(df)),
@@ -296,6 +453,7 @@ def main() -> None:
         "weights_path": str(out_weights),
         "scaler_path": str(out_scaler),
         "backup_path": str(prev_backup) if prev_backup else None,
+        "backup_scaler_path": str(prev_scaler_backup) if prev_scaler_backup else None,
     }
     meta_path = out_weights.parent / "retrain_baseline_last.json"
     meta_path.parent.mkdir(parents=True, exist_ok=True)

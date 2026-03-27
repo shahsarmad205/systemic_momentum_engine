@@ -1,0 +1,38 @@
+{
+  "ts_utc": "2026-03-26T13:54:56.034671+00:00",
+  "run_id": "e6f84ac614a5",
+  "git_sha": "6558622",
+  "argv": [
+    "run_daily_pipeline.py"
+  ],
+  "dry_run": false,
+  "no_retrain": false,
+  "force_retrain": false,
+  "snapshots": {
+    "config": {
+      "src": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtest_config.yaml",
+      "present": true,
+      "dst": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/output/runs/e6f84ac614a5/backtest_config.yaml",
+      "sha256": "6ff1dc28bc80bb5bc882a3f3523e4baf4c3e7311cf4c95726bf620b7056e3d1e",
+      "config_sha256": "399204368da9e54be2d6508c914478c3d1d5a9abd28ee71079d755437ee3b65d"
+    },
+    "requirements_lock": {
+      "src": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/requirements-lock.txt",
+      "present": true,
+      "dst": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/output/runs/e6f84ac614a5/requirements-lock.txt",
+      "sha256": "dd5312aae0d6306ea2110d607c074dfbe82d4cd5c1248f4bc3dbdce47430b111"
+    },
+    "learned_weights": {
+      "src": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/output/learned_weights.json",
+      "present": true,
+      "dst": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/output/runs/e6f84ac614a5/learned_weights.json",
+      "sha256": "96c642db63c51fc89c605f2b5a3690650453cd04fa211243def07f250523c0c0"
+    },
+    "learned_weights_scaler": {
+      "src": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/output/learned_weights_scaler.json",
+      "present": true,
+      "dst": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/output/runs/e6f84ac614a5/learned_weights_scaler.json",
+      "sha256": "ca7ae61d429439d924d8d3e97c816cb9a650bd48042b14ad98672138b11c4686"
+    }
+  }
+}

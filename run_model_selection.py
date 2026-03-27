@@ -69,6 +69,20 @@ def _read_config(path: str = "backtest_config.yaml") -> dict[str, Any]:
         return yaml.safe_load(fh) or {}
 
 
+def _model_filename(name: str) -> str:
+    slug = str(name).strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "logistic_regression": "logistic",
+        "xgboost_classifier": "xgboost",
+        "random_forest_classifier": "random_forest",
+        "ridge_classifier": "ridge",
+        "xgb_regressor": "xgbregressor",
+        "shortlogistic": "shortlogistic",
+        "shortxgb": "shortxgb",
+    }
+    return f"{aliases.get(slug, slug)}.pkl"
+
+
 def _date_add_years(ts: pd.Timestamp, years: float) -> pd.Timestamp:
     # Allow fractional years (e.g. 0.25) by converting to months.
     months = int(round(years * 12))
@@ -391,7 +405,7 @@ def _test_portfolio_simulation_logic(*, tol: float = 1e-12) -> None:
 
     # Manual daily return: equal-weight mean of A and B each day (since both score>0 and max_positions=2)
     manual = []
-    for i, d in enumerate(dates):
+    for i, _ in enumerate(dates):
         a = 0.01 if (i % 2 == 0) else -0.01
         b = 0.005
         manual.append(0.5 * (a + b))
@@ -481,8 +495,8 @@ def check_feature_leakage(
     Then we compare truncated manual values to the values produced by
     build_feature_matrix at as_of_date.
     """
-    from utils.market_data import get_ohlcv
     from agents.weight_learning_agent.feature_builder import build_feature_matrix
+    from utils.market_data import get_ohlcv
 
     as_of = pd.Timestamp(as_of_date)
     cfg = _read_config()
@@ -676,19 +690,22 @@ def _feature_columns(df: pd.DataFrame) -> list[str]:
     return cols
 
 
-def _build_models() -> list[tuple[str, Any, bool]]:
+def _build_models() -> list[tuple[str, Any, bool, str]]:
     """
-    Returns (name, estimator_or_pipeline, uses_proba).
+    Returns (name, estimator_or_pipeline, uses_proba, model_kind).
+
+    model_kind is ``"classifier"``, ``"regressor"``, or ``"short_classifier"``.
+    Classifiers train on ``y_bin`` (P(up)); regressors on raw ``forward_return``;
+    short_classifiers on ``y_down`` (P(down)).
     """
+    from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
+    from sklearn.linear_model import LogisticRegression, Ridge, RidgeClassifier
     from sklearn.pipeline import Pipeline
     from sklearn.preprocessing import StandardScaler
 
-    from sklearn.linear_model import LogisticRegression
-    from sklearn.linear_model import RidgeClassifier
-    from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+    models: list[tuple[str, Any, bool, str]] = []
 
-    models: list[tuple[str, Any, bool]] = []
-
+    # --- classifiers ---
     models.append(
         (
             "LogisticRegression",
@@ -699,6 +716,7 @@ def _build_models() -> list[tuple[str, Any, bool]]:
                 ]
             ),
             True,
+            "classifier",
         )
     )
     models.append(
@@ -711,6 +729,7 @@ def _build_models() -> list[tuple[str, Any, bool]]:
                 ]
             ),
             False,
+            "classifier",
         )
     )
     models.append(
@@ -724,6 +743,7 @@ def _build_models() -> list[tuple[str, Any, bool]]:
                 n_jobs=-1,
             ),
             True,
+            "classifier",
         )
     )
     models.append(
@@ -733,6 +753,7 @@ def _build_models() -> list[tuple[str, Any, bool]]:
                 n_estimators=50, learning_rate=0.05, max_depth=3, random_state=42
             ),
             True,
+            "classifier",
         )
     )
 
@@ -753,10 +774,85 @@ def _build_models() -> list[tuple[str, Any, bool]]:
                     eval_metric="logloss",
                 ),
                 True,
+                "classifier",
             )
         )
     except Exception:
-        # xgboost is optional
+        pass
+
+    # --- regressors (predict raw forward return; naturally bipolar) ---
+    models.append(
+        (
+            "Ridge",
+            Pipeline(
+                [
+                    ("scaler", StandardScaler()),
+                    ("model", Ridge(alpha=1.0)),
+                ]
+            ),
+            False,
+            "regressor",
+        )
+    )
+
+    try:
+        from xgboost import XGBRegressor
+
+        models.append(
+            (
+                "XGBRegressor",
+                XGBRegressor(
+                    n_estimators=50,
+                    max_depth=3,
+                    learning_rate=0.05,
+                    random_state=42,
+                    n_jobs=-1,
+                    subsample=0.8,
+                    colsample_bytree=0.8,
+                ),
+                False,
+                "regressor",
+            )
+        )
+    except Exception:
+        pass
+
+    # --- short classifiers (predict P(down); scored as negative) ---
+    models.append(
+        (
+            "ShortLogistic",
+            Pipeline(
+                [
+                    ("scaler", StandardScaler()),
+                    ("model", LogisticRegression(C=0.01, max_iter=1000)),
+                ]
+            ),
+            True,
+            "short_classifier",
+        )
+    )
+
+    try:
+        from xgboost import XGBClassifier as _XGBCls
+
+        models.append(
+            (
+                "ShortXGB",
+                _XGBCls(
+                    n_estimators=50,
+                    max_depth=3,
+                    learning_rate=0.05,
+                    random_state=42,
+                    n_jobs=-1,
+                    subsample=0.8,
+                    colsample_bytree=0.8,
+                    eval_metric="logloss",
+                ),
+                True,
+                "short_classifier",
+            )
+        )
+    except Exception:
         pass
 
     return models
@@ -827,6 +923,23 @@ def main() -> None:
         default=None,
         help="Embargo between train/test (calendar days). Default ~2*horizon.",
     )
+    parser.add_argument(
+        "--matrix-start-date",
+        type=str,
+        default="",
+        help="Override backtest start_date for feature matrix only (YYYY-MM-DD). Used by run_retrain_model.py.",
+    )
+    parser.add_argument(
+        "--matrix-end-date",
+        type=str,
+        default="",
+        help="Override backtest end_date for feature matrix only (YYYY-MM-DD).",
+    )
+    parser.add_argument(
+        "--save-all-models",
+        action="store_true",
+        help="Also fit and save each candidate model artifact (e.g. logistic.pkl, xgboost.pkl).",
+    )
     args = parser.parse_args()
 
     if args.run_sim_test:
@@ -873,6 +986,14 @@ def main() -> None:
 
     start_date = str(bt.get("start_date", "2018-01-01"))
     end_date = str(bt.get("end_date", "2024-01-01"))
+    ms = str(getattr(args, "matrix_start_date", "") or "").strip()
+    me = str(getattr(args, "matrix_end_date", "") or "").strip()
+    if me:
+        end_date = me
+    if ms:
+        start_date = ms
+    if pd.Timestamp(start_date) > pd.Timestamp(end_date):
+        raise SystemExit(f"Invalid matrix window: start {start_date} after end {end_date}")
     train_years = float(research.get("train_years", 5))
     test_years = float(research.get("test_years", 1))
     step_years = float(research.get("step_years", test_years))
@@ -985,9 +1106,11 @@ def main() -> None:
     rows: list[dict[str, Any]] = []
     all_window_details: dict[str, list[WindowMetrics]] = {}
 
-    for name, model, uses_proba in models:
+    for name, model, uses_proba, model_kind in models:
+        is_regressor = model_kind == "regressor"
+        is_short_classifier = model_kind == "short_classifier"
         print()
-        print(f"=== {name} ===")
+        print(f"=== {name} ({model_kind}) ===")
         wm: list[WindowMetrics] = []
         oos_parts: list[pd.DataFrame] = []
         daily_parts: list[pd.Series] = []
@@ -1021,7 +1144,12 @@ def main() -> None:
 
             try:
                 X_tr = tr[feat_cols].replace([np.inf, -np.inf], np.nan).fillna(0.0).values
-                y_tr = tr["y_bin"].values.astype(int)
+                if is_regressor:
+                    y_tr = tr["forward_return"].values.astype(float)
+                elif is_short_classifier:
+                    y_tr = (tr["forward_return"].values < 0).astype(int)
+                else:
+                    y_tr = tr["y_bin"].values.astype(int)
                 X_te = te[feat_cols].replace([np.inf, -np.inf], np.nan).fillna(0.0).values
                 y_te_ret = te["forward_return"].values.astype(float)
                 y_te_bin = te["y_bin"].values.astype(int)
@@ -1037,7 +1165,15 @@ def main() -> None:
 
                 try:
                     t2 = time.perf_counter()
-                    if uses_proba and hasattr(model, "predict_proba"):
+                    if is_regressor:
+                        score = model.predict(X_te).astype(float)
+                    elif is_short_classifier:
+                        if uses_proba and hasattr(model, "predict_proba"):
+                            p_down = model.predict_proba(X_te)[:, 1].astype(float)
+                            score = -(p_down - 0.5)
+                        else:
+                            score = -model.predict(X_te).astype(float) + 0.5
+                    elif uses_proba and hasattr(model, "predict_proba"):
                         p = model.predict_proba(X_te)[:, 1].astype(float)
                         score = p - 0.5
                     elif hasattr(model, "decision_function"):
@@ -1128,6 +1264,7 @@ def main() -> None:
 
         row = {
             "model_name": name,
+            "model_kind": model_kind,
             "oos_sharpe_mean": float(np.nanmean(sharpe_vals)),
             "oos_sharpe_std": float(np.nanstd(sharpe_vals, ddof=1)) if len(wm) > 1 else 0.0,
             "oos_ic_mean": float(np.nanmean(ic_vals)),
@@ -1310,7 +1447,7 @@ def main() -> None:
         raise SystemExit(f"select_metric '{args.select_metric}' not found in report columns")
     report["_selection_metric"] = pd.to_numeric(report[args.select_metric], errors="coerce")
     if "leakage_suspect" in report.columns:
-        report.loc[report["leakage_suspect"] == True, "_selection_metric"] = -1e9
+        report.loc[report["leakage_suspect"].eq(True), "_selection_metric"] = -1e9
     report = report.sort_values("_selection_metric", ascending=False).reset_index(drop=True)
     report_path = out_dir / "model_comparison.csv"
     report.to_csv(report_path, index=False)
@@ -1321,7 +1458,7 @@ def main() -> None:
     print(f"Selected best model by {args.select_metric}: {best_name}")
 
     # Recreate and train best model on full dataset
-    best_spec = {n: (m, p) for (n, m, p) in models}.get(best_name)
+    best_spec = {n: (m, p, k) for (n, m, p, k) in models}.get(best_name)
     if best_spec is None:
         # Allow selecting the baseline as "best" when --compare_baseline is enabled.
         if best_name == "LearnedWeightsBaseline" and args.compare_baseline:
@@ -1362,17 +1499,51 @@ def main() -> None:
             return
 
         raise SystemExit(f"Best model {best_name} not found in model list (was it skipped due to missing deps?).")
-    best_model, _best_uses_proba = best_spec
+    best_model, _best_uses_proba, best_kind = best_spec
 
     t0 = time.perf_counter()
     X_all = df[feat_cols].replace([np.inf, -np.inf], np.nan).fillna(0.0).values
-    y_all = df["y_bin"].values.astype(int)
-    best_model.fit(X_all, y_all)
+    y_all_cls = df["y_bin"].values.astype(int)
+    y_all_reg = df["forward_return"].values.astype(float)
+    y_all_down = (df["forward_return"].values < 0).astype(int)
+    if args.save_all_models:
+        for model_name, model_obj, _uses_proba, mkind in models:
+            try:
+                if mkind == "regressor":
+                    y_fit = y_all_reg
+                elif mkind == "short_classifier":
+                    y_fit = y_all_down
+                else:
+                    y_fit = y_all_cls
+                model_obj.fit(X_all, y_fit)
+                model_artifact = {
+                    "model_name": model_name,
+                    "model_type": mkind,
+                    "horizon_days": int(horizon),
+                    "target": "forward_return",
+                    "feature_columns": feat_cols,
+                    "trained_at": pd.Timestamp.utcnow().isoformat(),
+                    "estimator": model_obj,
+                }
+                model_path = out_dir / _model_filename(model_name)
+                with open(model_path, "wb") as fh:
+                    pickle.dump(model_artifact, fh)
+                print(f"Saved model copy: {model_path}")
+            except Exception as exc:
+                print(f"WARNING: failed to save model copy for {model_name}: {exc}")
+    if best_kind == "regressor":
+        y_best = y_all_reg
+    elif best_kind == "short_classifier":
+        y_best = y_all_down
+    else:
+        y_best = y_all_cls
+    best_model.fit(X_all, y_best)
     t1 = time.perf_counter()
     print(f"Trained best model on full dataset in {t1 - t0:.2f}s")
 
     artifact = {
         "model_name": best_name,
+        "model_type": best_kind,
         "horizon_days": int(horizon),
         "target": "forward_return",
         "feature_columns": feat_cols,

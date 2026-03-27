@@ -21,13 +21,11 @@ import os
 import re
 from datetime import datetime, timedelta
 
+import feedparser
 import numpy as np
 import requests
-import feedparser
+from utils.sentiment_decay import NEWS_DECAY_RATE, apply_time_decay, compute_hours_since
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
-
-from utils.sentiment_decay import apply_time_decay, compute_hours_since, NEWS_DECAY_RATE
-
 
 # ---------------------------------------------------------------------------
 # Configuration

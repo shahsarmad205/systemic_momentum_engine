@@ -14,11 +14,12 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+
 # Avoid importing main; replicate signal classification
 def _classify_signal(adjusted_score: float) -> str:
-    if adjusted_score > 0.5:
+    if adjusted_score > 0:
         return "Bullish"
-    if adjusted_score < -0.5:
+    if adjusted_score < 0:
         return "Bearish"
     return "Neutral"
 

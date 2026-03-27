@@ -19,16 +19,15 @@ transaction cost model as the offline backtests.
 from __future__ import annotations
 
 import argparse
-import os
-from pathlib import Path
-from datetime import datetime
 import http.server
+import os
 import socketserver
+from datetime import datetime
+from pathlib import Path
 
-from backtesting import load_config
 from backtest.engine import BacktestEngine
-from config import apply_dev_mode, setup_logging, DEV_MODE
-
+from backtesting import load_config
+from config import DEV_MODE, apply_dev_mode, setup_logging
 
 ROOT = Path(__file__).resolve().parents[1]
 LIVE_OUTPUT_DIR = ROOT / "output" / "live"
@@ -124,7 +123,7 @@ def main() -> None:
     log_dir = Path(args.log_dir).expanduser().resolve() / f"session_{ts}"
     os.makedirs(log_dir, exist_ok=True)
 
-    print(f"\nPaper Trader session starting:")
+    print("\nPaper Trader session starting:")
     print(f"  Config     : {cfg_path}")
     print(f"  Tickers    : {len(config.tickers or [])}")
     print(f"  Capital    : ${config.initial_capital:,.2f}")

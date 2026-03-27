@@ -54,7 +54,7 @@ def load_regime_multipliers(config_path: str = "backtest_config.yaml") -> dict:
         return out
 
     try:
-        with open(cfg_file, "r", encoding="utf-8") as f:
+        with open(cfg_file, encoding="utf-8") as f:
             cfg = yaml.safe_load(f) or {}
     except Exception as exc:
         logger.warning("Failed to parse config %s (%s). Using all multipliers=1.0.", cfg_file, exc)

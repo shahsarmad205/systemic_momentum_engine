@@ -65,18 +65,16 @@ def test_kelly_size_scales_with_full_kelly():
         kelly_avg_loss_return=0.01,
     )
 
-    # Base equal allocation
     base = equity / max_positions
+    size = kelly_size(equity, max_positions, 1.0, params)
 
-    # Manual Kelly fraction
     p = params.kelly_win_rate
     q = 1.0 - p
     b = params.kelly_avg_win_return / params.kelly_avg_loss_return
     full_kelly = max(0.0, min((p * b - q) / b, 1.0))
-    expected_mult = 1.0 + full_kelly
-
-    size = kelly_size(equity, max_positions, 1.0, params)
-
-    # Ratio of kelly size to base should be close to 1 + full_kelly (capped at 2× inside implementation).
-    assert math.isclose(size / base, min(expected_mult, 2.0), rel_tol=1e-6)
+    expected_size = equity * full_kelly * params.kelly_fraction
+    expected_size = max(expected_size, base * 0.5)
+    cap = equity * params.max_position_pct_of_equity
+    expected_size = min(expected_size, cap)
+    assert math.isclose(size, expected_size, rel_tol=1e-6)
 

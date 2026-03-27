@@ -14,6 +14,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import yaml
+from utils.ensemble_scoring import compute_ensemble_score, load_ensemble_models
 
 
 def _to_float(row, key, default=0.0):
@@ -94,20 +95,22 @@ def run_daily_signals(as_of_date=None):
     print(f"{'='*55}")
 
     # Load config
-    config = yaml.safe_load(open("backtest_config.yaml"))
+    config = yaml.safe_load(open("backtest_config.yaml", encoding="utf-8"))
     tickers = config.get("tickers", [])
+    bt = config.get("backtest", {}) or {}
+    ex = config.get("execution", {}) or {}
+    sig_cfg = config.get("signals", {}) or {}
+    signal_mode = str(sig_cfg.get("mode", "learned")).strip().lower()
+    enable_shorts = bool(ex.get("enable_shorts", False))
+    long_only = bool(ex.get("long_only", True))
+    max_positions = int(bt.get("max_positions", 10) or 10)
+    max_longs = int(bt.get("max_longs", (max_positions + 1) // 2) or 0)
+    max_shorts = int(bt.get("max_shorts", max_positions // 2) or 0)
+    if not enable_shorts or long_only:
+        max_shorts = 0
+        max_longs = max_positions
 
-    # Load learned weights
     weights_path = "output/learned_weights.json"
-    weights = json.load(open(weights_path))
-    model_name = weights.get("model_type")
-    ic_val = weights.get("ic")
-    print(f"  Model: {model_name}")
-    if isinstance(ic_val, (int, float)):
-        print(f"  Train IC: {float(ic_val):.4f}")
-    else:
-        print("  Train IC: N/A")
-    print()
 
     # Build feature matrix for today
     print("  Building features...")
@@ -135,22 +138,73 @@ def run_daily_signals(as_of_date=None):
 
     # Generate signals using learned weights
     from agents.weight_learning_agent.weight_model import LearnedWeights
-
-    lw = LearnedWeights.load(weights_path)
-
-    # Compute adjusted scores
-    scores = {}
-    for _, row in today_features.iterrows():
-        ticker = row["ticker"]
-        score = compute_score(row, lw)
-        scores[ticker] = score
+    scores: dict[str, float] = {}
+    if signal_mode == "ensemble":
+        ens_cfg = sig_cfg.get("ensemble", {}) or {}
+        models = load_ensemble_models(ens_cfg)
+        if not models:
+            print("  [ensemble] WARN: no ensemble models loaded; falling back to learned weights.")
+            signal_mode = "learned"
+        else:
+            feat_df = today_features.copy()
+            if "ticker" in feat_df.columns:
+                feat_df = feat_df.set_index("ticker")
+            feat_df = feat_df.drop(columns=["date"], errors="ignore")
+            ens_scores = compute_ensemble_score(
+                feat_df,
+                models,
+                normalize=bool(ens_cfg.get("normalize", True)),
+                clip=bool(ens_cfg.get("clip", False)),
+            )
+            if ens_scores.empty or ens_scores.isna().all():
+                print("  [ensemble] WARN: empty predictions; falling back to learned weights.")
+                signal_mode = "learned"
+            else:
+                scores = {str(t): float(s) for t, s in ens_scores.items()}
+                print(f"  [ensemble] Loaded {len(models)} models")
+    if signal_mode == "ml":
+        ml_path = str(sig_cfg.get("ml_model_path", "output/models/best_model.pkl")).strip()
+        ml_type = str(sig_cfg.get("ml_model_type", "classifier")).strip().lower()
+        models = load_ensemble_models({"models": [{"path": ml_path, "weight": 1.0, "type": ml_type}]})
+        if not models:
+            print("  [ml] WARN: model not loaded; falling back to learned weights.")
+            signal_mode = "learned"
+        else:
+            feat_df = today_features.copy()
+            if "ticker" in feat_df.columns:
+                feat_df = feat_df.set_index("ticker")
+            feat_df = feat_df.drop(columns=["date"], errors="ignore")
+            ml_scores = compute_ensemble_score(feat_df, models, normalize=False, clip=bool(sig_cfg.get("ml_clip", False)))
+            if ml_scores.empty or ml_scores.isna().all():
+                print("  [ml] WARN: empty predictions; falling back to learned weights.")
+                signal_mode = "learned"
+            else:
+                scores = {str(t): float(s) for t, s in ml_scores.items()}
+                print(f"  [ml] Loaded model: {ml_path}")
+    if signal_mode not in {"ensemble", "ml", "learned"}:
+        print(f"  [{signal_mode}] WARN: unsupported mode in run_daily_signals; falling back to learned.")
+        signal_mode = "learned"
+    if signal_mode == "learned":
+        weights = json.load(open(weights_path, encoding="utf-8"))
+        model_name = weights.get("model_type")
+        ic_val = weights.get("ic")
+        print(f"  Model: {model_name}")
+        if isinstance(ic_val, int | float):
+            print(f"  Train IC: {float(ic_val):.4f}")
+        else:
+            print("  Train IC: N/A")
+        print()
+        lw = LearnedWeights.load(weights_path)
+        for _, row in today_features.iterrows():
+            ticker = row["ticker"]
+            score = compute_score(row, lw)
+            scores[str(ticker)] = float(score)
+    if not scores:
+        raise RuntimeError("No scores generated. Check signals.mode and model artifact paths.")
 
     # Rank tickers by score
-    ranked = (
-        pd.DataFrame([{"ticker": t, "score": s} for t, s in scores.items()])
-        .sort_values("score", ascending=False)
-        .reset_index(drop=True)
-    )
+    ranked = pd.DataFrame([{"ticker": t, "score": s} for t, s in scores.items()])
+    ranked = ranked.sort_values("score", ascending=False).reset_index(drop=True)
 
     # Get current market regime
     regime = _detect_regime(as_of_date)
@@ -166,25 +220,36 @@ def run_daily_signals(as_of_date=None):
     multiplier = float(config.get("backtest", {}).get("signal_confidence_multiplier", 0.8))
     rolling_std = float(ranked["score"].std()) if len(ranked) > 1 else 0.0
     threshold = multiplier * rolling_std
-    ranked = ranked[ranked["score"].abs() > threshold]
+    ranked = ranked[ranked["score"].abs() > threshold].copy()
+    ranked["signal"] = np.where(ranked["score"] > 0, 1, -1)
 
-    # Top long candidates
-    longs = ranked[ranked["score"] > 0].head(10).copy()
+    longs = ranked[ranked["score"] > 0].copy().sort_values("score", ascending=False).head(max_longs)
+    shorts = (
+        ranked[ranked["score"] < 0].copy().sort_values("score", ascending=True).head(max_shorts)
+        if max_shorts > 0
+        else ranked.iloc[0:0].copy()
+    )
+    selected = pd.concat([longs, shorts], ignore_index=True)
+    selected = (
+        selected.sort_values("score", key=lambda s: s.abs(), ascending=False)
+        .head(max_positions)
+        .reset_index(drop=True)
+    )
 
     # Output
     print(f"{'='*55}")
-    print(f"  TOP LONG SIGNALS — {as_of_date}")
+    print(f"  TOP SIGNALS (LONG/SHORT) — {as_of_date}")
     print(f"{'='*55}")
-    print(f"  {'Rank':<6} {'Ticker':<8} {'Score':>10} {'Signal'}")
+    print(f"  {'Rank':<6} {'Ticker':<8} {'Score':>10} {'Side'}")
     print(f"  {'-'*45}")
-    for i, (_, row) in enumerate(longs.iterrows(), 1):
-        signal = "STRONG" if abs(row["score"]) > threshold * 1.5 else "MODERATE"
-        print(f"  {i:<6} {row['ticker']:<8} {row['score']:>10.4f} {signal}")
+    for i, (_, row) in enumerate(selected.iterrows(), 1):
+        side = "LONG" if float(row["score"]) > 0 else "SHORT"
+        print(f"  {i:<6} {row['ticker']:<8} {row['score']:>10.4f} {side}")
 
     print()
     print(f"  Regime:    {regime}")
     print(f"  Threshold: {threshold:.4f} ({multiplier}x std)")
-    print(f"  Signals:   {len(longs)} tickers")
+    print(f"  Signals:   {len(selected)} tickers (longs={len(longs)}, shorts={len(shorts)})")
     print()
 
     # Save output
@@ -196,14 +261,14 @@ def run_daily_signals(as_of_date=None):
 
     # Append to signal history
     history_file = output_dir / "signal_history.csv"
-    longs["date"] = as_of_date
-    longs["regime"] = regime
+    selected["date"] = as_of_date
+    selected["regime"] = regime
 
     if history_file.exists():
         history = pd.read_csv(history_file)
-        history = pd.concat([history, longs], ignore_index=True)
+        history = pd.concat([history, selected], ignore_index=True)
     else:
-        history = longs
+        history = selected
     history.to_csv(history_file, index=False)
 
     # Also write entries for paper-trading tracker.
@@ -222,11 +287,12 @@ def run_daily_signals(as_of_date=None):
         "entry_date",
         "signal_score",
     ]
-    paper_rows = longs[["ticker", "score"]].copy()
+    paper_rows = selected[["ticker", "score", "signal"]].copy()
     paper_rows = paper_rows.rename(columns={"score": "signal_score"})
     paper_rows["date"] = as_of_date
     paper_rows["entry_date"] = as_of_date
-    paper_rows["direction"] = "LONG"
+    paper_rows["direction"] = np.where(paper_rows["signal"] > 0, "LONG", "SHORT")
+    paper_rows = paper_rows.drop(columns=["signal"], errors="ignore")
     # Prices/shares are left for manual update by paper-trading workflow.
     paper_rows["entry_price"] = np.nan
     paper_rows["current_price"] = np.nan
@@ -256,7 +322,7 @@ def run_daily_signals(as_of_date=None):
     print(f"  Paper positions: {paper_positions_file}")
     print(f"{'='*55}")
 
-    return longs
+    return selected
 
 
 if __name__ == "__main__":

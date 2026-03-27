@@ -28,12 +28,12 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from agents.weight_learning_agent import build_feature_matrix  # noqa: E402
 from agents.weight_learning_agent.ensemble_model import StackedEnsemble  # noqa: E402
 from agents.weight_learning_agent.weight_model import (  # noqa: E402
     COMPOUND_AND_PRICE_FEATURES,
     TARGET,
 )
-from agents.weight_learning_agent import build_feature_matrix  # noqa: E402
 
 try:
     from xgboost import XGBRegressor

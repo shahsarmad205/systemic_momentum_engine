@@ -79,7 +79,7 @@ def post_portfolio_analyze(body: AnalyzeBody):
     weighted_news_sum = 0.0
     weighted_beta_sum = 0.0
     tech_count = 0
-    for h, w in zip(holdings, weights_norm):
+    for h, w in zip(holdings, weights_norm, strict=False):
         ticker = (h.ticker or "").strip().upper()
         sig = signals_map.get(ticker) or {}
         signal_score = float(sig.get("signal_score", 0))
@@ -139,7 +139,9 @@ def get_portfolio(date: str | None = Query(None, description="Date YYYY-MM-DD; d
     try:
         data = _load_signals_for_date(date)
     except FileNotFoundError:
-        raise HTTPException(status_code=404, detail=f"Portfolio/signals not found for {date}. Run daily_runner.")
+        raise HTTPException(
+            status_code=404, detail=f"Portfolio/signals not found for {date}. Run daily_runner."
+        ) from None
     return {
         "date": data.get("date"),
         "generated_at": data.get("generated_at"),

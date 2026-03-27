@@ -1,0 +1,20 @@
+[Unit]
+Description=Trend Signal Engine (API)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/trend_signal_engine/trend_signal_engine
+EnvironmentFile=/opt/trend_signal_engine/env/prod.env
+ExecStart=/opt/trend_signal_engine/venv/bin/uvicorn api.main:app --host 0.0.0.0 --port 8000
+Restart=on-failure
+RestartSec=5
+
+# Hardening (baseline; tune per host)
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+

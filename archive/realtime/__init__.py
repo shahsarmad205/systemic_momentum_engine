@@ -18,9 +18,9 @@ Usage:
 """
 
 from .hooks import DataIngestionHooks
-from .signal_stream import SignalStream
 from .predict import predict_latest_signal
 from .runner import make_data_ready_handler, run_streaming_poll
+from .signal_stream import SignalStream
 
 __all__ = [
     "DataIngestionHooks",

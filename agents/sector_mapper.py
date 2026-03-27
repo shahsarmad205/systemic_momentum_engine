@@ -1,6 +1,9 @@
-import yfinance as yf
-import json, os, time
+import json
+import os
+import time
 from collections import Counter
+
+import yfinance as yf
 
 SECTOR_CACHE_PATH = "output/cache/ticker_info"
 CACHE_TTL_DAYS = 30

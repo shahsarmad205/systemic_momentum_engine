@@ -18,29 +18,35 @@ from __future__ import annotations
 import json
 import logging
 import warnings
-from dataclasses import dataclass, asdict, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
-from sklearn.linear_model import Ridge, LogisticRegression
-from sklearn.ensemble import (
-    GradientBoostingRegressor,
-    GradientBoostingClassifier,
-    RandomForestRegressor,
-    RandomForestClassifier,
-)
-from sklearn.model_selection import GridSearchCV, RandomizedSearchCV, TimeSeriesSplit
 from scipy.stats import spearmanr
-import shap
+from sklearn.ensemble import (
+    GradientBoostingClassifier,
+    GradientBoostingRegressor,
+    RandomForestClassifier,
+    RandomForestRegressor,
+)
+from sklearn.linear_model import LogisticRegression, Ridge
+from sklearn.model_selection import GridSearchCV, RandomizedSearchCV, TimeSeriesSplit
+
+try:
+    import shap  # type: ignore
+except ImportError:  # optional — explainability plots only
+    shap = None  # type: ignore[misc, assignment]
+
 import matplotlib.pyplot as plt
+from sklearn.metrics import accuracy_score, mean_absolute_error, r2_score, roc_auc_score
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import r2_score, mean_absolute_error, accuracy_score, roc_auc_score
 
 try:
     from xgboost import XGBRegressor
-except ImportError:  # optional dependency
+except Exception:  # optional dependency; includes missing libomp runtime on macOS
     XGBRegressor = None  # type: ignore[misc,assignment]
 
 
@@ -786,7 +792,7 @@ class WeightLearner:
         w_orig = coef / scale
         intercept = float(inter) - float(np.dot(coef, mean / scale))
 
-        weight_map = dict(zip(self.active_features, w_orig.tolist()))
+        weight_map = dict(zip(self.active_features, w_orig.tolist(), strict=False))
 
         train_start = ""
         train_end = ""
@@ -866,28 +872,29 @@ class WeightLearner:
 
         # Choose a model suitable for SHAP TreeExplainer when possible
         model_for_shap = None
-        if isinstance(
-            self.model,
-            (
-                GradientBoostingRegressor,
-                GradientBoostingClassifier,
-                RandomForestRegressor,
-                RandomForestClassifier,
-            ),
-        ):
+        TreeModel = (
+            GradientBoostingRegressor
+            | GradientBoostingClassifier
+            | RandomForestRegressor
+            | RandomForestClassifier
+        )
+        if isinstance(self.model, TreeModel):
             model_for_shap = self.model
         elif self.ensemble_models is not None:
             # Prefer tree-based member of the ensemble if available
             for name in ("gbr", "gbc", "gbm"):
                 if name in self.ensemble_models and isinstance(
                     self.ensemble_models[name],
-                    (GradientBoostingRegressor, GradientBoostingClassifier),
+                    GradientBoostingRegressor | GradientBoostingClassifier,
                 ):
                     model_for_shap = self.ensemble_models[name]
                     break
 
         if model_for_shap is None:
             print("analyze_shap: SHAP analysis currently implemented for tree-based models only.")
+            return
+        if shap is None:
+            print("analyze_shap: install 'shap' for SHAP plots; skipping.")
             return
 
         # Prepare sample
@@ -1039,27 +1046,32 @@ class WeightLearner:
             ]
 
             # Helper to compute IC-based selection for a given threshold.
-            def _select_by_ic(threshold: float) -> list[str]:
+            def _select_by_ic(
+                threshold: float,
+                tdf: pd.DataFrame,
+                candidates: list[str],
+                y_ic: np.ndarray,
+            ) -> list[str]:
                 feats: list[str] = []
-                for col in candidate_features:
-                    x = train_df[col].values.astype(float)
-                    mask = np.isfinite(x) & np.isfinite(y_train_ic)
+                for col in candidates:
+                    x = tdf[col].values.astype(float)
+                    mask = np.isfinite(x) & np.isfinite(y_ic)
                     if mask.sum() <= 2:
                         continue
                     try:
-                        rho, _ = spearmanr(x[mask], y_train_ic[mask])
+                        rho, _ = spearmanr(x[mask], y_ic[mask])
                         if np.isfinite(rho) and abs(float(rho)) > threshold:
                             feats.append(col)
                     except Exception:
                         continue
                 return feats
 
-            selected_features: list[str] = _select_by_ic(0.02)
+            selected_features: list[str] = _select_by_ic(0.02, train_df, candidate_features, y_train_ic)
             effective_threshold = 0.02
 
             if len(selected_features) < 5:
                 # Relax threshold within this fold only.
-                relaxed = _select_by_ic(0.01)
+                relaxed = _select_by_ic(0.01, train_df, candidate_features, y_train_ic)
                 if len(relaxed) >= 3:
                     selected_features = relaxed
                     effective_threshold = 0.01

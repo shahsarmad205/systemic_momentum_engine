@@ -1,0 +1,24 @@
+[2026-03-25T21:54:18.522227] ======================================================================
+[2026-03-25T21:54:18.522313] ops_suite start
+[2026-03-25T21:54:18.522326] execute_orders=False config=backtest_config.yaml
+[2026-03-25T21:54:18.522460] preflight: start
+[2026-03-25T21:54:19.372231] preflight: Alpaca get_account OK
+[2026-03-25T21:54:19.372387] preflight: PASS
+[2026-03-25T21:54:19.374043] RUN daily_pipeline: /opt/anaconda3/bin/python /Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_daily_pipeline.py --config backtest_config.yaml --dry-run
+[2026-03-25T21:54:34.820139] OK daily_pipeline
+[2026-03-25T21:54:34.820276] RUN performance_tracker: /opt/anaconda3/bin/python /Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_performance_tracker.py
+[2026-03-25T21:55:45.629023] OK performance_tracker
+[2026-03-25T21:55:45.629115] ops_suite finished OK
+[2026-03-25T21:55:45.629134] ======================================================================
+[2026-03-25T21:56:40.797855] ======================================================================
+[2026-03-25T21:56:40.797900] ops_suite start
+[2026-03-25T21:56:40.797913] execute_orders=False config=backtest_config.yaml
+[2026-03-25T21:56:40.797947] preflight: start
+[2026-03-25T21:56:41.462138] preflight: Alpaca get_account OK
+[2026-03-25T21:56:41.462260] preflight: PASS
+[2026-03-25T21:56:41.463571] RUN daily_pipeline: /opt/anaconda3/bin/python /Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_daily_pipeline.py --config backtest_config.yaml --dry-run
+[2026-03-25T21:56:55.864711] OK daily_pipeline
+[2026-03-25T21:56:55.864839] RUN performance_tracker: /opt/anaconda3/bin/python /Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_performance_tracker.py
+[2026-03-25T21:58:08.798447] OK performance_tracker
+[2026-03-25T21:58:08.798547] ops_suite finished OK
+[2026-03-25T21:58:08.798558] ======================================================================

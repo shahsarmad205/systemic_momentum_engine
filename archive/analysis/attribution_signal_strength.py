@@ -24,15 +24,15 @@ Usage (from project root):
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 from pathlib import Path
 
-import logging
 import numpy as np
 import pandas as pd
+
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
 import matplotlib.pyplot as plt
-
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -169,7 +169,7 @@ def plot_attribution(summary: pd.DataFrame, output_path: Path) -> None:
 
     # Annotate bar tops with basic stats (win rate)
     win_rates = summary["win_rate"]
-    for bar, wr in zip(bars, win_rates):
+    for bar, wr in zip(bars, win_rates, strict=False):
         height = bar.get_height()
         plt.text(
             bar.get_x() + bar.get_width() / 2,

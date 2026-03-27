@@ -13,8 +13,8 @@ Run from trend_signal_engine root:
 
 from __future__ import annotations
 
-import warnings
 import sys
+import warnings
 from pathlib import Path
 
 import matplotlib

@@ -1,15 +1,8 @@
 from __future__ import annotations
 
-"""
-Position sizing utilities.
+"""Position sizing utilities (equal, vol-scaled, Kelly, risk parity, compose)."""
 
-Supports the following methods:
-- equal:       equal dollar allocation per slot
-- vol_scaled:  size ≈ target_risk * equity / stock_volatility
-- kelly:       Kelly-style leverage multiplier based on win-rate and avg win/loss
-- risk_parity: single-asset approximation using inverse-vol (degenerates to vol_scaled)
-"""
-
+import math
 from dataclasses import dataclass
 
 
@@ -127,4 +120,40 @@ def risk_parity_size(
         stock_vol_annual=stock_vol_annual,
         params=params,
     )
+
+
+def compose_position_size(
+    equity: float,
+    weight: float,
+    vol_scaling: float,
+    regime_scaling: float,
+    max_single_position_pct: float = 0.12,
+    *,
+    long_only: bool = True,
+    min_single_position_pct: float | None = None,
+) -> float:
+    """
+    Dollar size from multiplicative factors, capped per name as fraction of equity.
+
+    Negative weights represent shorts when ``long_only`` is False.
+    """
+    if equity <= 0 or not math.isfinite(equity):
+        return 0.0
+    if not all(
+        math.isfinite(x) for x in (weight, vol_scaling, regime_scaling, max_single_position_pct)
+    ):
+        return 0.0
+    if long_only and weight < 0:
+        return 0.0
+
+    raw = float(equity) * float(weight) * float(vol_scaling) * float(regime_scaling)
+    if min_single_position_pct is not None:
+        thresh = float(equity) * float(min_single_position_pct)
+        if abs(raw) < thresh:
+            return 0.0
+
+    cap = float(equity) * float(max_single_position_pct)
+    if raw >= 0:
+        return float(min(raw, cap))
+    return float(max(raw, -cap))
 

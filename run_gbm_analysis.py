@@ -30,9 +30,9 @@ def run(
     from backtesting.config import load_config
     from config import get_effective_tickers
     from simulation.gbm import (
+        backtest_gbm_accuracy,
         estimate_gbm_params,
         simulate_gbm,
-        backtest_gbm_accuracy,
     )
     from utils.market_data import get_ohlcv
 

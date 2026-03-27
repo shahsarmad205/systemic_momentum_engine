@@ -64,6 +64,17 @@ def parse_args():
                    help="Walk-forward CV splits")
     p.add_argument("--tickers", nargs="+", default=None,
                    help="Override tickers (space-separated)")
+    p.add_argument(
+        "--config",
+        default="backtest_config.yaml",
+        help="YAML config file to load tickers from (default: backtest_config.yaml). Ignored if --tickers is set.",
+    )
+    p.add_argument(
+        "--limit-tickers",
+        type=int,
+        default=0,
+        help="Optional: cap the ticker list size (0 = no cap). Applied after resolving tickers.",
+    )
     p.add_argument("--output", default=WEIGHTS_PATH,
                    help="Path to save learned weights JSON")
     p.add_argument("--compare", action="store_true",
@@ -72,8 +83,6 @@ def parse_args():
                    help="Run backtest with learned weights and require total_trades > 0")
     p.add_argument("--regime", action="store_true",
                    help="Train regime-specific weights (Bull, Bear, HighVol, Normal)")
-    p.add_argument("--config", default=None,
-                   help="Optional YAML file with default weight-learning settings")
     p.add_argument("--tune", action="store_true",
                    help="Enable hyperparameter tuning inside each training window")
     return p.parse_args()
@@ -85,6 +94,28 @@ def parse_args():
 
 def _resolve_tickers(args):
     from config import get_effective_tickers
+
+    # 1) Explicit tickers via CLI always win.
+    if args.tickers:
+        raw = [str(t).strip() for t in args.tickers if str(t).strip()]
+        tickers = get_effective_tickers(raw, [])
+        return tickers[: int(args.limit_tickers)] if int(args.limit_tickers or 0) > 0 else tickers
+
+    # 2) Otherwise load from config YAML (default: backtest_config.yaml).
+    cfg_tickers: list[str] = []
+    cfg_path = Path(str(args.config or "")).expanduser()
+    if cfg_path:
+        try:
+            if not cfg_path.is_absolute():
+                cfg_path = Path.cwd() / cfg_path
+            if cfg_path.is_file():
+                with open(cfg_path, encoding="utf-8") as fh:
+                    cfg = yaml.safe_load(fh) or {}
+                raw_cfg = cfg.get("tickers") or []
+                cfg_tickers = [str(t).strip() for t in raw_cfg if str(t).strip()]
+        except Exception:
+            cfg_tickers = []
+
     try:
         from main import TICKERS
         fallback = list(TICKERS)
@@ -97,7 +128,8 @@ def _resolve_tickers(args):
             "CRM", "AMD", "INTC", "ORCL", "IBM", "GS", "CAT",
             "SPY", "QQQ", "IWM", "DIA", "XLK", "VTI",
         ]
-    return get_effective_tickers(args.tickers or [], fallback)
+    tickers = get_effective_tickers(cfg_tickers, fallback)
+    return tickers[: int(args.limit_tickers)] if int(args.limit_tickers or 0) > 0 else tickers
 
 
 # ------------------------------------------------------------------
@@ -153,7 +185,7 @@ def main():
 
     # ── Phase 2: Train model (single or regime-specific) ─────────────
     from agents.weight_learning_agent import WeightLearner
-    from agents.weight_learning_agent.weight_model import save_regime_weights, TARGET
+    from agents.weight_learning_agent.weight_model import TARGET, save_regime_weights
 
     REGIME_ORDER = ["bull", "bear", "high_vol", "normal"]
     MIN_SAMPLES_PER_REGIME = 300
@@ -244,7 +276,7 @@ def main():
         active_features = None
 
     # Log weights (single or first regime)
-    print(f"\n  Learned Weights (verify non-zero):")
+    print("\n  Learned Weights (verify non-zero):")
     w_names = [
         "w_trend", "w_regional", "w_global", "w_social",
         "w_ret_5d", "w_ret_10d", "w_vol_10", "w_vol", "w_rel_vol",
@@ -328,7 +360,7 @@ def main():
                   f"Dir={r['directional_accuracy']:.1%}  IC={ic_s}  AUC={auc_s}  "
                   f"(n_train={r['n_train']:,}  n_test={r['n_test']:,})")
 
-        print(f"\n  Average across folds:")
+        print("\n  Average across folds:")
         print(f"    R²                    : {_fmt(avg_r2)}")
         print(f"    MAE                   : {_fmt(avg_mae, '.6f')}")
         print(f"    Directional Accuracy  : {avg_dir:.1%}")
@@ -337,7 +369,7 @@ def main():
             print(f"    AUC                   : {avg_auc:.4f}")
 
         # Weight stability across folds
-        print(f"\n  Weight stability across folds:")
+        print("\n  Weight stability across folds:")
         w_trends = [r["weights"]["w_trend"] for r in wf_results]
         print(f"    w_trend: mean={np.mean(w_trends):+.4f}  "
               f"std={np.std(w_trends):.4f}  "
@@ -514,7 +546,6 @@ def _run_validate(args, tickers):
     print()
 
     from backtesting import Backtester, load_config
-
     from config import apply_dev_mode
     config_path = "backtest_config.yaml"
     base_config = load_config(config_path)
@@ -529,12 +560,12 @@ def _run_validate(args, tickers):
     result = bt.run(tickers)
     total_trades = result.metrics["total_trades"]
 
-    print(f"\n  Validation — Signal generation:")
+    print("\n  Validation — Signal generation:")
     print(f"    Total trades : {total_trades:,}")
     if total_trades > 0:
-        print(f"    OK: Signals generated and positions taken.")
+        print("    OK: Signals generated and positions taken.")
     else:
-        print(f"    FAIL: No trades. Check learned weights and score_scale.")
+        print("    FAIL: No trades. Check learned weights and score_scale.")
         sys.exit(1)
     print()
 
@@ -546,7 +577,6 @@ def _run_comparison(args, tickers):
     print()
 
     from backtesting import Backtester, load_config
-
     from config import apply_dev_mode
     config_path = "backtest_config.yaml"
     base_config = load_config(config_path)
@@ -601,6 +631,7 @@ def _run_comparison(args, tickers):
 def _clone_config(cfg):
     """Shallow-copy a BacktestConfig for independent mutation."""
     from dataclasses import fields
+
     from backtesting.config import BacktestConfig
     kwargs = {f.name: getattr(cfg, f.name) for f in fields(cfg)}
     return BacktestConfig(**kwargs)

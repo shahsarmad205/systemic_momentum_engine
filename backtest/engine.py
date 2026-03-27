@@ -10,10 +10,9 @@ import os
 import shutil
 from datetime import datetime
 
-import pandas as pd
-
 from backtesting.backtester import Backtester, BacktestResult
-from backtesting.config import BacktestConfig, load_config as _load_config
+from backtesting.config import BacktestConfig
+from backtesting.config import load_config as _load_config
 
 
 class BacktestEngine:
@@ -48,7 +47,7 @@ class BacktestEngine:
         if not result.daily_equity.empty:
             result.daily_equity.to_csv(os.path.join(experiment_dir, "daily_equity.csv"), index=False)
         with open(os.path.join(experiment_dir, "metrics.json"), "w") as fh:
-            json.dump({k: (float(v) if isinstance(v, (float, int)) and not isinstance(v, bool) else v)
+            json.dump({k: (float(v) if isinstance(v, float | int) and not isinstance(v, bool) else v)
                        for k, v in result.metrics.items()}, fh, indent=2, default=str)
         # Config snapshot
         cfg_dict = {

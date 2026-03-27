@@ -14,7 +14,6 @@ Decay rates:
 
 import numpy as np
 
-
 # Decay rate per hour for traditional news (regional + global)
 NEWS_DECAY_RATE = 0.10
 

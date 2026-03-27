@@ -8,8 +8,8 @@ and publishes to SignalStream. Suitable for polling or async data feeds.
 from __future__ import annotations
 
 from .hooks import DataIngestionHooks
-from .signal_stream import SignalStream
 from .predict import predict_latest_signal
+from .signal_stream import SignalStream
 
 
 def make_data_ready_handler(signal_engine, stream: SignalStream, min_bars: int = 210):

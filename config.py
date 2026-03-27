@@ -24,7 +24,7 @@ def get_effective_tickers(config_tickers: list | None, fallback_list: list | Non
     return raw
 
 
-def apply_dev_mode(config: "BacktestConfig") -> None:
+def apply_dev_mode(config: BacktestConfig) -> None:
     """
     When DEV_MODE: limit ticker count only. Date range is left as in config
     (e.g. 2018-01-01 → 2024-01-01) so backtest period is not shortened.

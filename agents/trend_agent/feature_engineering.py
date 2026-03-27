@@ -1,5 +1,5 @@
-import pandas as pd
 import numpy as np
+import pandas as pd
 
 
 def compute_daily_returns(close_prices: pd.Series) -> pd.Series:

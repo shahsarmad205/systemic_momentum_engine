@@ -29,7 +29,6 @@ from typing import Literal
 
 import pandas as pd
 
-
 RegimeBucket = Literal["Bull", "Bear", "Sideways", "Other"]
 
 

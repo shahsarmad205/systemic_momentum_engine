@@ -16,18 +16,23 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
+import smtplib
 import sys
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, replace
 from datetime import datetime
+from email.mime.text import MIMEText
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
 import yaml
+
+logger = logging.getLogger(__name__)
 
 _ROOT = Path(__file__).resolve().parent
 if str(_ROOT) not in sys.path:
@@ -62,6 +67,24 @@ class IcTrackerConfig:
     alert_url: str = ""
     signal_history_path: Path = Path("output/live/signal_history.csv")
     out_csv: Path = Path("output/live/ic_tracker.csv")
+    # When False, IC threshold / webhook alerts are deferred to ``monitor()`` (unified alerting).
+    alert_on_threshold: bool = True
+
+
+@dataclass
+class MonitoringConfig:
+    """Dashboard + rolling Sharpe merge + alert dispatch (see ``monitoring:`` in backtest_config.yaml)."""
+
+    ic_rolling_window: int = 20
+    sharpe_rolling_window: int = 20
+    ic_alert_threshold: float = 0.02
+    sharpe_alert_threshold: float = 0.0
+    alert_method: str = "print"
+    email_recipient: str = ""
+    slack_webhook: str = ""
+    dashboard_path: Path = Path("output/live/dashboard.html")
+    generate_dashboard: bool = True
+    monitoring_metrics_path: Path = Path("output/live/monitoring_metrics.csv")
 
 
 def _load_data_settings() -> tuple[str, str]:
@@ -77,6 +100,545 @@ def _load_data_settings() -> tuple[str, str]:
     except Exception:
         provider, cache_dir, ttl = "yahoo", "data/cache/ohlcv", 0
     return provider, cache_dir, ttl
+
+
+def _load_monitoring_config() -> MonitoringConfig:
+    path = _ROOT / "backtest_config.yaml"
+    d = MonitoringConfig()
+    try:
+        with open(path, encoding="utf-8") as fh:
+            cfg = yaml.safe_load(fh) or {}
+        raw = cfg.get("monitoring") or {}
+        if not isinstance(raw, dict):
+            return d
+        d.ic_rolling_window = int(raw.get("ic_rolling_window", d.ic_rolling_window))
+        d.sharpe_rolling_window = int(raw.get("sharpe_rolling_window", d.sharpe_rolling_window))
+        d.ic_alert_threshold = float(raw.get("ic_alert_threshold", d.ic_alert_threshold))
+        d.sharpe_alert_threshold = float(raw.get("sharpe_alert_threshold", d.sharpe_alert_threshold))
+        d.alert_method = str(raw.get("alert_method", d.alert_method) or "print").strip().lower()
+        d.email_recipient = str(raw.get("email_recipient", d.email_recipient) or "").strip()
+        wh = raw.get("slack_webhook", d.slack_webhook)
+        d.slack_webhook = str(wh or "").strip()
+        dp = raw.get("dashboard_path", str(d.dashboard_path))
+        d.dashboard_path = Path(str(dp))
+        d.generate_dashboard = bool(raw.get("generate_dashboard", d.generate_dashboard))
+        mp = raw.get("monitoring_metrics_path", str(d.monitoring_metrics_path))
+        d.monitoring_metrics_path = Path(str(mp))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("monitoring config load failed: %s", exc)
+    return d
+
+
+def _rolling_sharpe_series(
+    returns: pd.Series,
+    window: int,
+    *,
+    min_periods: int | None = None,
+) -> pd.Series:
+    """Annualized rolling Sharpe: mean/ std * sqrt(252) over trailing window."""
+    r = pd.to_numeric(returns, errors="coerce")
+    w = max(2, int(window))
+    mp = max(2, int(min_periods)) if min_periods is not None else max(2, w // 2)
+
+    def _sharpe(x: np.ndarray) -> float:
+        x = x[np.isfinite(x)]
+        if len(x) < 2:
+            return float("nan")
+        sd = float(np.std(x, ddof=1))
+        if sd < 1e-12:
+            return float("nan")
+        return float(np.mean(x) / sd * np.sqrt(252))
+
+    return r.rolling(window=w, min_periods=mp).apply(_sharpe, raw=True)
+
+
+def _write_monitoring_metrics(
+    *,
+    ic_path: Path,
+    pnl_path: Path,
+    sharpe_window: int,
+    out_csv: Path,
+) -> pd.DataFrame | None:
+    """Merge IC tracker with PnL-based rolling Sharpe; write ``monitoring_metrics.csv``."""
+    if not pnl_path.is_file():
+        return None
+    pnl = pd.read_csv(pnl_path)
+    if pnl.empty or "date" not in pnl.columns or "equity" not in pnl.columns:
+        return None
+    pnl = pnl.copy()
+    pnl["date"] = pd.to_datetime(pnl["date"], errors="coerce").dt.strftime("%Y-%m-%d")
+    pnl["equity"] = pd.to_numeric(pnl["equity"], errors="coerce")
+    pnl = pnl.dropna(subset=["date", "equity"]).sort_values("date")
+    pnl = pnl.drop_duplicates(subset=["date"], keep="last")
+    pnl["ret"] = pnl["equity"].pct_change()
+    pnl["rolling_sharpe"] = _rolling_sharpe_series(pnl["ret"], max(2, int(sharpe_window)))
+
+    if not ic_path.is_file():
+        out = pnl[["date", "equity", "ret", "rolling_sharpe"]].copy()
+        out_csv.parent.mkdir(parents=True, exist_ok=True)
+        out.to_csv(out_csv, index=False)
+        return out
+
+    ic = pd.read_csv(ic_path)
+    if ic.empty or "date" not in ic.columns:
+        out = pnl[["date", "equity", "ret", "rolling_sharpe"]].copy()
+        out_csv.parent.mkdir(parents=True, exist_ok=True)
+        out.to_csv(out_csv, index=False)
+        return out
+    ic = ic.copy()
+    ic["date"] = ic["date"].astype(str).str.strip()
+    merge_on = [c for c in ("date", "ic_daily", "rolling_ic", "n_names", "forward_trading_days", "below_threshold") if c in ic.columns]
+    merged = pd.merge(
+        ic[merge_on],
+        pnl[["date", "equity", "ret", "rolling_sharpe"]],
+        on="date",
+        how="outer",
+        sort=True,
+    )
+    merged = merged.sort_values("date").reset_index(drop=True)
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
+    merged.to_csv(out_csv, index=False)
+    return merged
+
+
+def send_alert(
+    message: str,
+    *,
+    subject: str,
+    mon: MonitoringConfig,
+    dashboard_url_note: str = "",
+) -> None:
+    """Dispatch alert per ``monitoring.alert_method``."""
+    method = (mon.alert_method or "print").strip().lower()
+    body = message
+    if dashboard_url_note:
+        body = f"{message}\n\n{dashboard_url_note}"
+
+    if method == "print":
+        print(f"  [MONITOR ALERT] {body.replace(chr(10), ' ')}")
+        return
+
+    if method == "email":
+        recipient = (mon.email_recipient or "").strip()
+        if not recipient or "your@" in recipient.lower():
+            print("  [MONITOR ALERT email] Set monitoring.email_recipient (or valid address).")
+            print(f"  {body}")
+            return
+        smtp_host = (os.environ.get("SMTP_HOST") or "").strip()
+        smtp_from = (os.environ.get("SMTP_FROM") or os.environ.get("SMTP_USER") or "").strip()
+        if not smtp_host or not smtp_from:
+            print("  [MONITOR ALERT email] Set SMTP_HOST and SMTP_FROM (or SMTP_USER) env vars.")
+            print(f"  {body}")
+            return
+        port = int(os.environ.get("SMTP_PORT", "587"))
+        user = (os.environ.get("SMTP_USER") or "").strip()
+        password = (os.environ.get("SMTP_PASSWORD") or "").strip()
+        msg = MIMEText(body, "plain", "utf-8")
+        msg["Subject"] = subject
+        msg["From"] = smtp_from
+        msg["To"] = recipient
+        try:
+            with smtplib.SMTP(smtp_host, port, timeout=30) as server:
+                server.starttls()
+                if user:
+                    server.login(user, password)
+                server.sendmail(smtp_from, [recipient], msg.as_string())
+            print("  [MONITOR ALERT] Email sent.")
+        except Exception as exc:  # noqa: BLE001
+            print(f"  [MONITOR ALERT] Email failed: {exc}")
+        return
+
+    if method == "slack":
+        url = (mon.slack_webhook or "").strip()
+        if not url or "hooks.slack.com" not in url:
+            print("  [MONITOR ALERT slack] Set monitoring.slack_webhook to a valid URL.")
+            print(f"  {body}")
+            return
+        try:
+            import requests
+        except ImportError:
+            payload = json.dumps({"text": body[:3000]}).encode("utf-8")
+            req = urllib.request.Request(
+                url,
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=20) as resp:
+                    _ = resp.read()
+                print("  [MONITOR ALERT] Slack webhook sent (urllib).")
+            except Exception as exc:  # noqa: BLE001
+                print(f"  [MONITOR ALERT] Slack failed: {exc}")
+            return
+        try:
+            r = requests.post(url, json={"text": body[:30000]}, timeout=20)
+            r.raise_for_status()
+            print("  [MONITOR ALERT] Slack webhook sent.")
+        except Exception as exc:  # noqa: BLE001
+            print(f"  [MONITOR ALERT] Slack failed: {exc}")
+        return
+
+    print(f"  [MONITOR ALERT] Unknown alert_method={method!r}; printing.")
+    print(f"  {body}")
+
+
+def generate_dashboard(
+    mon: MonitoringConfig,
+    *,
+    pnl_path: Path,
+    ic_path: Path,
+    metrics_path: Path,
+    positions: pd.DataFrame | None,
+    account: dict[str, float] | None,
+) -> None:
+    """Write PNG charts + static HTML dashboard."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    live_dir = mon.dashboard_path.parent
+    live_dir.mkdir(parents=True, exist_ok=True)
+
+    png_equity = live_dir / "dashboard_equity.png"
+    png_ic = live_dir / "dashboard_rolling_ic.png"
+    png_sharpe = live_dir / "dashboard_rolling_sharpe.png"
+    png_signals = live_dir / "dashboard_top_signals.png"
+
+    # --- Data ---
+    metrics = pd.read_csv(metrics_path) if metrics_path.is_file() else pd.DataFrame()
+    pnl = pd.read_csv(pnl_path) if pnl_path.is_file() else pd.DataFrame()
+
+    latest_ranking: pd.DataFrame | None = None
+    sig_dir = _ROOT / "output" / "signals"
+    if sig_dir.is_dir():
+        rank_files = sorted(sig_dir.glob("*_rankings.csv"))
+        if rank_files:
+            try:
+                latest_ranking = pd.read_csv(rank_files[-1])
+            except Exception:  # noqa: BLE001
+                latest_ranking = None
+
+    # --- Plots ---
+    fig, ax = plt.subplots(figsize=(9, 3.5))
+    if not pnl.empty and "date" in pnl.columns and "equity" in pnl.columns:
+        p2 = pnl.copy()
+        p2["date"] = pd.to_datetime(p2["date"], errors="coerce")
+        ax.plot(p2["date"], pd.to_numeric(p2["equity"], errors="coerce"), lw=1.5)
+        ax.set_title("Equity (daily PnL)")
+        ax.set_xlabel("Date")
+        ax.set_ylabel("Equity ($)")
+        ax.grid(True, alpha=0.3)
+    else:
+        ax.text(0.5, 0.5, "No equity data", ha="center", va="center")
+    fig.tight_layout()
+    fig.savefig(png_equity, dpi=120, bbox_inches="tight")
+    plt.close(fig)
+
+    fig, ax = plt.subplots(figsize=(9, 3.5))
+    if not metrics.empty and "date" in metrics.columns and "rolling_ic" in metrics.columns:
+        m = metrics.copy()
+        m["date"] = pd.to_datetime(m["date"], errors="coerce")
+        ax.plot(
+            m["date"],
+            pd.to_numeric(m["rolling_ic"], errors="coerce"),
+            lw=1.5,
+            color="#1f77b4",
+        )
+        ax.axhline(mon.ic_alert_threshold, color="r", ls="--", lw=1, label="threshold")
+        ax.set_title("Rolling IC")
+        ax.legend(loc="best", fontsize=8)
+        ax.grid(True, alpha=0.3)
+    else:
+        ax.text(0.5, 0.5, "No rolling IC", ha="center", va="center")
+    fig.tight_layout()
+    fig.savefig(png_ic, dpi=120, bbox_inches="tight")
+    plt.close(fig)
+
+    fig, ax = plt.subplots(figsize=(9, 3.5))
+    if not metrics.empty and "date" in metrics.columns and "rolling_sharpe" in metrics.columns:
+        m = metrics.copy()
+        m["date"] = pd.to_datetime(m["date"], errors="coerce")
+        ax.plot(
+            m["date"],
+            pd.to_numeric(m["rolling_sharpe"], errors="coerce"),
+            lw=1.5,
+            color="#2ca02c",
+        )
+        ax.axhline(mon.sharpe_alert_threshold, color="r", ls="--", lw=1, label="threshold")
+        ax.set_title("Rolling Sharpe (annualized)")
+        ax.legend(loc="best", fontsize=8)
+        ax.grid(True, alpha=0.3)
+    else:
+        ax.text(0.5, 0.5, "No rolling Sharpe", ha="center", va="center")
+    fig.tight_layout()
+    fig.savefig(png_sharpe, dpi=120, bbox_inches="tight")
+    plt.close(fig)
+
+    fig, ax = plt.subplots(figsize=(8, 4))
+    if latest_ranking is not None and not latest_ranking.empty and "ticker" in latest_ranking.columns:
+        dfp = latest_ranking.copy()
+        if "score" in dfp.columns:
+            dfp["score"] = pd.to_numeric(dfp["score"], errors="coerce")
+            top = dfp.nlargest(10, "score")
+            ax.barh(top["ticker"].astype(str), top["score"], color="#9467bd")
+            ax.invert_yaxis()
+            ax.set_title("Top 10 signals (latest rankings)")
+            ax.grid(True, axis="x", alpha=0.3)
+        else:
+            ax.text(0.5, 0.5, "No score column", ha="center", va="center")
+    else:
+        ax.text(0.5, 0.5, "No rankings file", ha="center", va="center")
+    fig.tight_layout()
+    fig.savefig(png_signals, dpi=120, bbox_inches="tight")
+    plt.close(fig)
+
+    # --- Latest KPIs ---
+    last_eq = float("nan")
+    peak_eq = float("nan")
+    dd = float("nan")
+    total_ret = float("nan")
+    if not pnl.empty and "equity" in pnl.columns:
+        eq = pd.to_numeric(pnl["equity"], errors="coerce").dropna()
+        if len(eq):
+            last_eq = float(eq.iloc[-1])
+            peak_eq = float(eq.cummax().iloc[-1])
+            if peak_eq > 0:
+                dd = (last_eq - peak_eq) / peak_eq
+            start = float(eq.iloc[0])
+            if start > 0:
+                total_ret = last_eq / start - 1.0
+
+    ric = rs = None
+    if not metrics.empty:
+        tail = metrics.iloc[-1]
+        if "rolling_ic" in metrics.columns:
+            v = pd.to_numeric(tail.get("rolling_ic"), errors="coerce")
+            ric = float(v) if pd.notna(v) else None
+        if "rolling_sharpe" in metrics.columns:
+            v = pd.to_numeric(tail.get("rolling_sharpe"), errors="coerce")
+            rs = float(v) if pd.notna(v) else None
+
+    acct_equity = float(account["equity"]) if account and "equity" in account else last_eq
+    acct_cash = float(account.get("cash", float("nan"))) if account else float("nan")
+
+    # Positions HTML
+    pos_html = "<p>No position snapshot.</p>"
+    if positions is not None and not positions.empty:
+        cols = [c for c in ("ticker", "market_value", "unrealized_pnl", "unrealized_pnl_pct") if c in positions.columns]
+        if cols:
+            pos_html = positions[cols].to_html(index=False, float_format=lambda x: f"{x:,.2f}")
+
+    sig_html = "<p>No signals file.</p>"
+    if latest_ranking is not None and not latest_ranking.empty:
+        show = latest_ranking.head(15)
+        sig_html = show.to_html(index=False)
+
+    def _pct(x: float) -> str:
+        return f"{100.0 * float(x):.2f}%" if np.isfinite(x) else "—"
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Strategy health — {datetime.now().strftime("%Y-%m-%d %H:%M")}</title>
+  <style>
+    body {{ font-family: system-ui, sans-serif; margin: 1.5rem; max-width: 1100px; background: #fafafa; }}
+    h1 {{ font-size: 1.35rem; }}
+    .kpi {{ display: flex; flex-wrap: wrap; gap: 1rem; margin: 1rem 0; }}
+    .kpi div {{ background: #fff; padding: 0.75rem 1rem; border-radius: 8px; border: 1px solid #e0e0e0; }}
+    img {{ max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 6px; margin: 0.5rem 0; background: #fff; }}
+    table {{ font-size: 0.9rem; }}
+  </style>
+</head>
+<body>
+  <h1>Live monitoring dashboard</h1>
+  <p>Generated {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
+  <div class="kpi">
+    <div><strong>Account equity</strong><br/>{acct_equity:,.2f}</div>
+    <div><strong>Cash</strong><br/>{acct_cash if np.isfinite(acct_cash) else "—"}</div>
+    <div><strong>Total return (PnL series)</strong><br/>{_pct(total_ret)}</div>
+    <div><strong>Drawdown (from peak in series)</strong><br/>{_pct(dd)}</div>
+    <div><strong>Rolling IC</strong><br/>{f"{ric:.4f}" if ric is not None and np.isfinite(ric) else "—"}</div>
+    <div><strong>Rolling Sharpe</strong><br/>{f"{rs:.3f}" if rs is not None and np.isfinite(rs) else "—"}</div>
+  </div>
+  <h2>Equity</h2>
+  <img src="{png_equity.name}" alt="Equity"/>
+  <h2>Rolling IC</h2>
+  <img src="{png_ic.name}" alt="Rolling IC"/>
+  <h2>Rolling Sharpe</h2>
+  <img src="{png_sharpe.name}" alt="Rolling Sharpe"/>
+  <h2>Top signals (bar)</h2>
+  <img src="{png_signals.name}" alt="Signals"/>
+  <h2>Open positions</h2>
+  {pos_html}
+  <h2>Latest rankings (top 15 rows)</h2>
+  {sig_html}
+</body>
+</html>
+"""
+    mon.dashboard_path.parent.mkdir(parents=True, exist_ok=True)
+    mon.dashboard_path.write_text(html, encoding="utf-8")
+    print(f"  Dashboard → {mon.dashboard_path.resolve()}")
+
+
+def monitor(
+    mon: MonitoringConfig,
+    *,
+    ic_cfg: IcTrackerConfig,
+    positions: pd.DataFrame | None,
+    account: dict[str, float] | None,
+) -> None:
+    """Rolling-metrics file, threshold alerts, optional HTML dashboard."""
+    try:
+        metrics = _write_monitoring_metrics(
+            ic_path=ic_cfg.out_csv,
+            pnl_path=Path("output/live/daily_pnl.csv"),
+            sharpe_window=mon.sharpe_rolling_window,
+            out_csv=mon.monitoring_metrics_path,
+        )
+        if metrics is None or metrics.empty:
+            print("  [monitor] No monitoring_metrics (need daily_pnl.csv with equity).")
+            if mon.generate_dashboard:
+                try:
+                    generate_dashboard(
+                        mon,
+                        pnl_path=Path("output/live/daily_pnl.csv"),
+                        ic_path=ic_cfg.out_csv,
+                        metrics_path=mon.monitoring_metrics_path,
+                        positions=positions,
+                        account=account,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    print(f"  [monitor] dashboard: {exc}")
+            return
+
+        tail = metrics.iloc[-1]
+        ric = pd.to_numeric(tail.get("rolling_ic"), errors="coerce")
+        rsh = pd.to_numeric(tail.get("rolling_sharpe"), errors="coerce")
+        breaches: list[str] = []
+        if pd.notna(ric) and float(ric) < float(mon.ic_alert_threshold):
+            breaches.append(
+                f"rolling_ic={float(ric):.4f} < threshold {float(mon.ic_alert_threshold):.4f}"
+            )
+        if pd.notna(rsh) and float(rsh) < float(mon.sharpe_alert_threshold):
+            breaches.append(
+                f"rolling_sharpe={float(rsh):.4f} < threshold {float(mon.sharpe_alert_threshold):.4f}"
+            )
+
+        dash_note = f"Dashboard: file://{mon.dashboard_path.resolve()}"
+        if breaches:
+            subj = f"[TrendSignalEngine] Strategy health alert — {datetime.now().strftime('%Y-%m-%d')}"
+            send_alert(
+                "\n".join(breaches),
+                subject=subj,
+                mon=mon,
+                dashboard_url_note=dash_note,
+            )
+
+        if mon.generate_dashboard:
+            generate_dashboard(
+                mon,
+                pnl_path=Path("output/live/daily_pnl.csv"),
+                ic_path=ic_cfg.out_csv,
+                metrics_path=mon.monitoring_metrics_path,
+                positions=positions,
+                account=account,
+            )
+    except Exception as exc:  # noqa: BLE001
+        print(f"  [monitor] Error (tracker continues): {exc}")
+
+
+def _load_backtest_config_yaml() -> dict[str, Any]:
+    path = Path("backtest_config.yaml")
+    if not path.is_file():
+        return {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return yaml.safe_load(fh) or {}
+    except Exception:
+        return {}
+
+
+def _backtest_slippage_assumption_bps(cfg: dict[str, Any]) -> float:
+    ex = cfg.get("execution") or {}
+    if ex.get("slippage_bps") is not None:
+        return float(ex["slippage_bps"])
+    ec = cfg.get("execution_costs") or {}
+    v = ec.get("slippage_bps")
+    if v is None:
+        return 5.0
+    v = float(v)
+    if abs(v) < 1.0:
+        return v * 10_000.0
+    return v
+
+
+def run_slippage_metrics_section(cfg: dict[str, Any], mon: MonitoringConfig) -> None:
+    st = cfg.get("slippage_tracking") or {}
+    if not isinstance(st, dict) or not st.get("enabled", False):
+        return
+    trades_path = Path(str(st.get("trades_file", "output/live/trades.csv")))
+    if not trades_path.is_file():
+        print("  [slippage] No trades file yet — run live execute then scripts/fetch_fills.py.")
+        return
+    try:
+        df = pd.read_csv(trades_path)
+    except Exception as exc:  # noqa: BLE001
+        print(f"  [slippage] Could not read {trades_path}: {exc}")
+        return
+    if df.empty or "slippage_bps" not in df.columns:
+        print("  [slippage] Trades CSV empty or missing slippage_bps.")
+        return
+    sub = df[pd.to_numeric(df["slippage_bps"], errors="coerce").notna()].copy()
+    if sub.empty:
+        print("  [slippage] No rows with computed slippage yet (backfill fills first).")
+        return
+    last_n = int(st.get("rolling_trades", 20) or 20)
+    threshold = float(st.get("alert_threshold_bps", 10) or 10)
+    tail = sub.tail(last_n)["slippage_bps"].astype(float)
+    avg = float(tail.mean())
+    assum = _backtest_slippage_assumption_bps(cfg)
+    print()
+    print("  === REALISED SLIPPAGE (live) ===")
+    print(f"  Trades file:        {trades_path}")
+    print(f"  Last {len(tail)} fills avg (adverse bps): {avg:.2f} bps")
+    print(f"  Backtest assumption (execution.slippage_bps): {assum:.2f} bps")
+    if avg > assum:
+        print(
+            "  [!] Realised slippage exceeds backtest assumption — "
+            "consider raising the cost model or reviewing execution."
+        )
+    metrics_path = Path(str(st.get("slippage_metrics_csv", "output/live/slippage_metrics.csv")))
+    snap = pd.DataFrame(
+        [
+            {
+                "timestamp": datetime.now().isoformat(),
+                "n_trades_window": len(tail),
+                "avg_slippage_bps": avg,
+                "backtest_assumption_bps": assum,
+            }
+        ]
+    )
+    metrics_path.parent.mkdir(parents=True, exist_ok=True)
+    if metrics_path.is_file():
+        old = pd.read_csv(metrics_path)
+        hist = pd.concat([old, snap], ignore_index=True)
+    else:
+        hist = snap
+    hist.to_csv(metrics_path, index=False)
+    print(f"  Slippage metrics log: {metrics_path}")
+
+    if len(tail) >= 5 and avg > threshold:
+        subj = f"[TrendSignalEngine] High realised slippage — {datetime.now().strftime('%Y-%m-%d')}"
+        send_alert(
+            f"Average adverse slippage over last {len(tail)} fills is {avg:.2f} bps "
+            f"(alert threshold {threshold:.2f} bps; backtest assumption {assum:.2f} bps).",
+            subject=subj,
+            mon=mon,
+        )
 
 
 def _forward_trading_return(
@@ -294,7 +856,7 @@ def run_ic_tracker_section(cfg: IcTrackerConfig) -> None:
 
     last_roll = float(ic_df["rolling_ic"].iloc[-1]) if len(ic_df) else float("nan")
     last_day = str(ic_df["date"].iloc[-1]) if len(ic_df) else ""
-    if np.isfinite(last_roll) and last_roll < float(cfg.threshold):
+    if cfg.alert_on_threshold and np.isfinite(last_roll) and last_roll < float(cfg.threshold):
         msg = (
             f"[IC ALERT] Rolling IC {last_roll:.4f} < threshold {float(cfg.threshold):.4f} "
             f"(as of signal date {last_day}, window={cfg.rolling_window})."
@@ -329,12 +891,21 @@ def run_ic_tracker_section(cfg: IcTrackerConfig) -> None:
             )
 
 
-def run_tracker(*, ic: IcTrackerConfig | None = None) -> None:
+def run_tracker(
+    *,
+    ic: IcTrackerConfig | None = None,
+    skip_monitor: bool = False,
+) -> None:
     _chdir_root()
 
+    mon = _load_monitoring_config()
     ic_cfg = ic if ic is not None else IcTrackerConfig()
     if os.environ.get("IC_TRACKER_SKIP", "").lower() in ("1", "true", "yes"):
         ic_cfg = replace(ic_cfg, enabled=False)
+    if skip_monitor:
+        ic_cfg = replace(ic_cfg, alert_on_threshold=True)
+    else:
+        ic_cfg = replace(ic_cfg, alert_on_threshold=False)
 
     today = datetime.now().strftime("%Y-%m-%d")
 
@@ -342,6 +913,8 @@ def run_tracker(*, ic: IcTrackerConfig | None = None) -> None:
     print(f"{'=' * 55}")
     print(f"  PERFORMANCE TRACKER — {today}")
     print(f"{'=' * 55}")
+
+    cfg_bt = _load_backtest_config_yaml()
 
     history_file = Path("output/live/signal_history.csv")
     if not history_file.exists():
@@ -479,15 +1052,35 @@ def run_tracker(*, ic: IcTrackerConfig | None = None) -> None:
 
     run_ic_tracker_section(ic_cfg)
 
+    try:
+        run_slippage_metrics_section(cfg_bt, mon)
+    except Exception as exc:  # noqa: BLE001
+        print(f"  [slippage] Skipped: {exc}")
+
+    if not skip_monitor:
+        try:
+            monitor(
+                mon,
+                ic_cfg=ic_cfg,
+                positions=positions if not positions.empty else None,
+                account=account,
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"  [monitor] Skipped: {exc}")
+
     print()
     print(f"{'=' * 55}")
     print("  Tracker complete.")
     if pnl_file.exists():
         print(f"  PnL history: {pnl_file}")
+    if not skip_monitor and mon.generate_dashboard:
+        print(f"  Dashboard:   {mon.dashboard_path}")
     print(f"{'=' * 55}")
 
 
 def main() -> None:
+    _chdir_root()
+    _mon = _load_monitoring_config()
     p = argparse.ArgumentParser(description="Paper performance tracker + rolling IC monitor.")
     p.add_argument(
         "--skip-ic",
@@ -495,19 +1088,34 @@ def main() -> None:
         help="Disable IC tracker section.",
     )
     p.add_argument(
+        "--skip-monitor",
+        action="store_true",
+        help="Skip monitoring metrics file, alerts, and dashboard.",
+    )
+    p.add_argument(
         "--ic-recent-days",
         type=int,
         default=int(os.environ.get("IC_TRACKER_RECENT_DAYS", "730")),
         help="Use signal_history rows from the last N calendar days (default 730).",
     )
-    p.add_argument("--ic-rolling-window", type=int, default=20, help="Rolling mean window (trading days with IC).")
+    p.add_argument(
+        "--ic-rolling-window",
+        type=int,
+        default=_mon.ic_rolling_window,
+        help="Rolling mean window (trading days with IC); default from backtest_config monitoring.",
+    )
     p.add_argument(
         "--ic-rolling-min",
         type=int,
         default=10,
         help="Min periods for rolling IC (default 10).",
     )
-    p.add_argument("--ic-threshold", type=float, default=0.02, help="Warn if rolling IC falls below this.")
+    p.add_argument(
+        "--ic-threshold",
+        type=float,
+        default=_mon.ic_alert_threshold,
+        help="IC threshold for alerts (monitoring); default from backtest_config.",
+    )
     p.add_argument(
         "--ic-forward-days",
         type=int,
@@ -537,7 +1145,7 @@ def main() -> None:
         min_names=int(args.ic_min_names),
         alert_url=str(args.ic_alert_url or "").strip(),
     )
-    run_tracker(ic=ic)
+    run_tracker(ic=ic, skip_monitor=args.skip_monitor)
 
 
 if __name__ == "__main__":

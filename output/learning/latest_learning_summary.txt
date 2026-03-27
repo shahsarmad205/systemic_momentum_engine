@@ -5,12 +5,12 @@
   Model              : ridge
   Target task        : regression
   Return target      : raw
-  Train IC           : 0.0488
-  Train R²           : 0.0038
-  Train MAE          : 0.026794
-  Train Dir. Acc.    : 54.5%
-  WF mean IC         : 0.0617
-  WF mean R²         : -0.0066
-  WF mean Dir. Acc.  : 53.5%
-  WF mean AUC        : 0.5190
+  Train IC           : 0.0472
+  Train R²           : 0.0017
+  Train MAE          : 0.031299
+  Train Dir. Acc.    : 54.0%
+  WF mean IC         : 0.0210
+  WF mean R²         : -0.0106
+  WF mean Dir. Acc.  : 53.6%
+  WF mean AUC        : 0.5081
 ============================================================

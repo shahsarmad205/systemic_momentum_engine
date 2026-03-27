@@ -4,15 +4,19 @@ Run from project root: python scripts/diagnose_tickers.py
 """
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from backtesting.config import load_config
-from main import TICKERS
-from config import get_effective_tickers
-from utils.market_data import get_ohlcv
-from backtesting.signals import SignalEngine
-import pandas as pd
 from collections import defaultdict
+
+import pandas as pd
+
+from backtesting.config import load_config
+from backtesting.signals import SignalEngine
+from config import get_effective_tickers
+from main import TICKERS
+from utils.market_data import get_ohlcv
+
 
 def _to_calendar_key(ts) -> str:
     return pd.Timestamp(ts).strftime("%Y-%m-%d")

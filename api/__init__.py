@@ -1,1 +1,1 @@
-# API package for FastAPI application.
+"""Flask monitoring API (see server.py)."""

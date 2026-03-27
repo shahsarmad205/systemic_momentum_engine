@@ -32,15 +32,16 @@ _root = Path(__file__).resolve().parents[1]
 if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
 
+import logging
+
 import numpy as np
 import pandas as pd
-import logging
+
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
 import matplotlib.pyplot as plt
 import seaborn as sns
 
 from agents.weight_learning_agent import build_feature_matrix
-
 
 ROOT = Path(__file__).resolve().parents[1]
 

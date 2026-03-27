@@ -20,16 +20,12 @@ Intended usage:
 from __future__ import annotations
 
 import argparse
-import os
 import shutil
 from datetime import datetime
 from pathlib import Path
 
-import pandas as pd
-
 from backtesting import load_config, run_walk_forward
-from config import apply_dev_mode, setup_logging, DEV_MODE
-
+from config import DEV_MODE, apply_dev_mode, setup_logging
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT_DIR = ROOT / "output"

@@ -22,8 +22,12 @@ import numpy as np
 import pandas as pd
 
 from agents.trend_agent.feature_engineering import build_features
-from agents.volatility_agent.volatility_model import compute_rolling_confidence, compute_vol_term_structure
-from main import CONFIDENCE_MULTIPLIER, compute_rolling_trend_scores, classify_final_signal
+from agents.volatility_agent.volatility_model import (
+    compute_rolling_confidence,
+    compute_vol_term_structure,
+)
+from main import CONFIDENCE_MULTIPLIER, classify_final_signal, compute_rolling_trend_scores
+from utils.ensemble_scoring import compute_ensemble_score, load_ensemble_models
 
 # Calendar-day buffers for downloading enough data around the backtest window
 HISTORY_BUFFER_DAYS = 400   # 200-day MA + 126-day momentum warm-up
@@ -74,6 +78,7 @@ def _mean_reversion_features_ts_zscore(close: pd.Series, open_px: pd.Series) -> 
 
     return {
         "rsi_zscore": _ts_zscore_shifted(rsi_raw),
+        "rsi_14_raw": rsi_raw,
         "bb_position": _ts_zscore_shifted(bb_pos_raw),
         "dist_high": _ts_zscore_shifted(dist_high_raw),
         "dist_low": _ts_zscore_shifted(dist_low_raw),
@@ -153,6 +158,9 @@ class SignalEngine:
         self.regime_series = regime_series
         self.signal_smoothing_enabled = bool(signal_smoothing_enabled)
         self.signal_smoothing_span = int(signal_smoothing_span)
+        self._ensemble_models_cache = None
+        self._warned_all_nan_cols = False
+        self._warned_ensemble_norm_ignored = False
 
     # ==============================================================
     # Core: vectorised price-based signals (trend + volatility)
@@ -204,7 +212,11 @@ class SignalEngine:
         )
         if features.isna().all().any():
             bad_cols = [c for c in features.columns if features[c].isna().all()]
-            logger.warning("SignalEngine: all-NaN feature columns detected: %s", bad_cols)
+            if not self._warned_all_nan_cols:
+                logger.warning("SignalEngine: all-NaN feature columns detected: %s", bad_cols)
+                self._warned_all_nan_cols = True
+            else:
+                logger.debug("SignalEngine: all-NaN feature columns detected: %s", bad_cols)
 
         trend_scores = compute_rolling_trend_scores(features)
         if trend_scores.isna().all():
@@ -230,13 +242,6 @@ class SignalEngine:
         volume = stock_data["Volume"].reindex(features.index)
         ret_5d = close.pct_change(5)
         ret_10d = close.pct_change(10)
-        ret_20d = close.pct_change(20)
-        ret_60d = close.pct_change(60)
-        momentum_3m = (
-            pd.to_numeric(features["momentum_3m"], errors="coerce")
-            if "momentum_3m" in features.columns
-            else pd.Series(0.0, index=features.index, dtype=float)
-        )
         momentum_6m = (
             pd.to_numeric(features["momentum_6m"], errors="coerce")
             if "momentum_6m" in features.columns
@@ -424,6 +429,7 @@ class SignalEngine:
                     + getattr(lw, "w_intraday_rev", 0) * mr_feat["intraday_rev"].loc[mask]
                     + getattr(lw, "w_sector_relative_20d", 0) * sr20.loc[mask]
                     + getattr(lw, "w_sector_relative_60d", 0) * sr60.loc[mask]
+                    + getattr(lw, "w_capm_beta", 0) * capm_beta_series.loc[mask].fillna(0)
                 )
                 adjusted.loc[mask] = raw * getattr(lw, "score_scale", 1.0)
             still_missing = adjusted.isna()
@@ -455,6 +461,7 @@ class SignalEngine:
                     + getattr(default_lw, "w_intraday_rev", 0) * mr_feat["intraday_rev"][still_missing]
                     + getattr(default_lw, "w_sector_relative_20d", 0) * sr20[still_missing]
                     + getattr(default_lw, "w_sector_relative_60d", 0) * sr60[still_missing]
+                    + getattr(default_lw, "w_capm_beta", 0) * capm_beta_series[still_missing].fillna(0)
                 )
                 adjusted.loc[still_missing] = raw_def * getattr(default_lw, "score_scale", 1.0)
             adjusted = adjusted.fillna(0)
@@ -464,6 +471,94 @@ class SignalEngine:
                 regime_label_for_log,
                 "regime_specific",
             )
+        elif (
+            hasattr(self, "config")
+            and self.config is not None
+            and str(getattr(self.config, "signal_mode", "price")).lower() in {"ensemble", "ml"}
+        ):
+            mode = str(getattr(self.config, "signal_mode", "price")).lower()
+            if mode == "ensemble":
+                ens_cfg = {
+                    "models": getattr(self.config, "ensemble_models", []) or [],
+                    "normalize": bool(getattr(self.config, "ensemble_normalize", True)),
+                    "clip": bool(getattr(self.config, "ensemble_clip", False)),
+                }
+            else:
+                ens_cfg = {
+                    "models": [
+                        {
+                            "path": str(getattr(self.config, "ml_model_path", "") or "").strip(),
+                            "weight": 1.0,
+                            "type": str(getattr(self.config, "ml_model_type", "classifier")).strip().lower(),
+                        }
+                    ],
+                    "normalize": False,
+                    "clip": bool(getattr(self.config, "ml_clip", False)),
+                }
+            if self._ensemble_models_cache is None:
+                self._ensemble_models_cache = load_ensemble_models(ens_cfg)
+            ret_20d = close.pct_change(20)
+            ret_60d = close.pct_change(60)
+            model_features = pd.DataFrame(
+                {
+                    "f_trend": f_trend,
+                    "ret_5d": ret_5d.fillna(0.0),
+                    "ret_10d": ret_10d.fillna(0.0),
+                    "ret_20d": ret_20d.fillna(0.0),
+                    "ret_60d": ret_60d.fillna(0.0),
+                    "cs_momentum_percentile": cs_momentum_series.fillna(0.5),
+                    "momentum_3m": pd.to_numeric(features.get("momentum_3m", 0.0), errors="coerce").fillna(0.0),
+                    "momentum_6m": momentum_6m.fillna(0.0),
+                    "ma_crossover": ma_crossover.fillna(0.0),
+                    "rolling_vol_5": rolling_vol_5.fillna(0.0),
+                    "rolling_vol_10": rolling_vol_10.fillna(0.0),
+                    "rolling_vol_20": rolling_vol_20.fillna(0.0),
+                    "vol_of_vol_20": vol_of_vol_20.fillna(0.0),
+                    "jump_indicator": jump_indicator.fillna(0.0),
+                    "vol_rank": vr_series.fillna(0.5),
+                    "relative_volume": relative_volume.fillna(1.0),
+                    "volume_zscore": volume_zscore.fillna(0.0),
+                    "rolling_corr_market_20": rolling_corr_market_20.fillna(0.0),
+                    "capm_beta": capm_beta_series.fillna(0.0),
+                    "vix_zscore": vix_zscore_series.fillna(0.0),
+                    "vol_spike": vol_spike_series.fillna(0.0),
+                    "vix_term_zscore": vix_term_zscore_series.fillna(0.0),
+                    "rsi_zscore": mr_feat["rsi_zscore"].fillna(0.0),
+                    "bb_position": mr_feat["bb_position"].fillna(0.0),
+                    "dist_high": mr_feat["dist_high"].fillna(0.0),
+                    "dist_low": mr_feat["dist_low"].fillna(0.0),
+                    "overnight_gap": mr_feat["overnight_gap"].fillna(0.0),
+                    "intraday_rev": mr_feat["intraday_rev"].fillna(0.0),
+                    "sector_relative_20d": sr20.fillna(0.0),
+                    "sector_relative_60d": sr60.fillna(0.0),
+                    "rsi_14": mr_feat["rsi_14_raw"].shift(1).fillna(50.0),
+                    "ret_1d": daily_ret.shift(1).fillna(0.0),
+                    "vol_ratio_5_20": (
+                        pd.to_numeric(vol_struct["vol_5d"], errors="coerce")
+                        / pd.to_numeric(vol_struct["vol_20d"], errors="coerce").replace(0, np.nan)
+                    ).replace([np.inf, -np.inf], np.nan).shift(1).fillna(1.0),
+                },
+                index=features.index,
+            )
+            if not self._ensemble_models_cache:
+                logger.warning("SignalEngine: no %s models loaded; falling back to learned/price mode.", mode)
+                adjusted = f_trend * self.weights.get("trend", 1.0)
+            else:
+                if bool(ens_cfg.get("normalize", True)) and not self._warned_ensemble_norm_ignored:
+                    logger.warning(
+                        "SignalEngine: ensemble normalize=true ignored in backtest to avoid lookahead bias."
+                    )
+                    self._warned_ensemble_norm_ignored = True
+                adjusted = compute_ensemble_score(
+                    model_features,
+                    self._ensemble_models_cache,
+                    normalize=False,
+                    standardize=bool(ens_cfg.get("standardize", False)),
+                    clip=bool(ens_cfg.get("clip", False)),
+                ).reindex(features.index)
+                if adjusted.empty or adjusted.isna().all():
+                    logger.warning("SignalEngine: %s predictions empty; falling back to price trend score.", mode)
+                    adjusted = f_trend * self.weights.get("trend", 1.0)
         elif self.learned_weights is not None:
             lw = self.learned_weights
             raw = (
@@ -493,6 +588,7 @@ class SignalEngine:
                 + getattr(lw, "w_intraday_rev", 0) * mr_feat["intraday_rev"]
                 + getattr(lw, "w_sector_relative_20d", 0) * sr20
                 + getattr(lw, "w_sector_relative_60d", 0) * sr60
+                + getattr(lw, "w_capm_beta", 0) * capm_beta_series.fillna(0)
             )
             scale = getattr(lw, "score_scale", 1.0)
             direction = getattr(lw, "score_direction", 1)
@@ -551,7 +647,7 @@ class SignalEngine:
         # config.min_signal_strength so behaviour is user-tunable instead of
         # hard-coded.
         base = 0.3
-        if hasattr(self, "config") and getattr(self, "config") is not None:
+        if hasattr(self, "config") and self.config is not None:
             base = float(getattr(self.config, "min_signal_strength", base))
             try:
                 from utils.signal_threshold import compute_dynamic_thresholds

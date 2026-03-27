@@ -12,10 +12,9 @@ work on a thread pool or event loop for true async.
 from __future__ import annotations
 
 import threading
-from typing import Callable
+from collections.abc import Callable
 
 import pandas as pd
-
 
 Callback = Callable[[str, pd.DataFrame], None]
 

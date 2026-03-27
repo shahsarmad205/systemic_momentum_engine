@@ -5524,3 +5524,33 @@
 2026-03-25 15:56:59 INFO Quick backtest NEW net_sharpe≈0.9183  total_return=0.10683570000000008
 2026-03-25 15:56:59 INFO Quick backtest PREVIOUS net_sharpe≈0.8360  total_return=0.09379520000000004
 2026-03-25 15:56:59 INFO Done.
+2026-03-26 11:26:31 INFO Using full feature matrix (feature_subset=None).
+2026-03-26 11:26:31 INFO Retrain baseline: 300 tickers | horizon=1 | 2013-01-01 → 2026-03-25
+2026-03-26 11:27:20 INFO Backed up existing weights to output/learned_weights.json.before_retrain
+2026-03-26 11:27:20 INFO Backed up existing scaler to output/learned_weights_scaler.json.before_retrain
+2026-03-26 11:27:20 INFO Fitting WeightLearner (ridge / regression) on 945660 rows…
+2026-03-26 11:27:21 INFO Dropped 751 rows with NaNs in features/target (kept 944909)
+2026-03-26 11:27:21 INFO Wrote output/learned_weights.json and output/learned_weights_scaler.json
+2026-03-26 11:27:21 INFO Train stats: samples=944909 IC=0.029 R2=0.0008 start=2013-01-02 end=2026-03-25
+2026-03-26 11:27:21 INFO Wrote metadata output/retrain_baseline_last.json
+2026-03-26 11:27:21 INFO Done.
+2026-03-26 12:11:24 INFO Using full feature matrix (feature_subset=None).
+2026-03-26 12:11:24 INFO Retrain baseline: 300 tickers | horizon=1 | 2013-01-01 → 2026-03-25
+2026-03-26 12:12:12 INFO Backed up existing weights to output/learned_weights.json.before_retrain
+2026-03-26 12:12:12 INFO Backed up existing scaler to output/learned_weights_scaler.json.before_retrain
+2026-03-26 12:12:12 INFO Fitting WeightLearner (ridge / regression) on 945660 rows…
+2026-03-26 12:12:13 INFO Dropped 751 rows with NaNs in features/target (kept 944909)
+2026-03-26 12:12:14 INFO Wrote output/learned_weights.json and output/learned_weights_scaler.json
+2026-03-26 12:12:14 INFO Train stats: samples=944909 IC=0.0289 R2=0.0008 start=2013-01-02 end=2026-03-25
+2026-03-26 12:12:14 INFO Wrote metadata output/retrain_baseline_last.json
+2026-03-26 12:12:14 INFO Done.
+2026-03-26 12:12:47 INFO Using full feature matrix (feature_subset=None).
+2026-03-26 12:12:47 INFO Retrain baseline: 300 tickers | horizon=1 | 2013-01-01 → 2026-03-25
+2026-03-26 12:13:37 INFO Backed up existing weights to output/learned_weights.json.before_retrain
+2026-03-26 12:13:37 INFO Backed up existing scaler to output/learned_weights_scaler.json.before_retrain
+2026-03-26 12:13:37 INFO Fitting WeightLearner (ridge / regression) on 945660 rows…
+2026-03-26 12:13:38 INFO Dropped 751 rows with NaNs in features/target (kept 944909)
+2026-03-26 12:13:38 INFO Wrote output/learned_weights.json and output/learned_weights_scaler.json
+2026-03-26 12:13:38 INFO Train stats: samples=944909 IC=0.0289 R2=0.0008 start=2013-01-02 end=2026-03-25
+2026-03-26 12:13:38 INFO Wrote metadata output/retrain_baseline_last.json
+2026-03-26 12:13:38 INFO Done.

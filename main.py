@@ -37,22 +37,26 @@ Usage:
     python scheduler.py                (continuous refresh loop)
 """
 
-import os
-import logging
+from __future__ import annotations
 
-import pandas as pd
+import logging
+import os
+
 import numpy as np
+import pandas as pd
+
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
 import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
 
-from data_loader import download_stock_data
+matplotlib.use("Agg")
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
 
 # --- Agent imports ---
 from agents.trend_agent import build_features, run_trend_model
 from agents.volatility_agent import run_volatility_model
+from data_loader import download_stock_data
+
 #
 # Some deployments of this repo include only the price-based / volatility
 # components needed for backtesting. The live multi-agent news/sentiment
@@ -80,8 +84,8 @@ except ModuleNotFoundError:  # pragma: no cover
 # Volatility helpers for rolling plots
 from agents.volatility_agent.volatility_model import (
     compute_daily_returns,
-    compute_rolling_volatility,
     compute_rolling_confidence,
+    compute_rolling_volatility,
 )
 
 # News-impact detection utility (optional for backtests)
@@ -584,7 +588,7 @@ def plot_combined_chart(
     bar_values = [regional_sentiment, global_sentiment, social_sentiment]
     bar_colors = ["#2ecc71" if v >= 0 else "#e74c3c" for v in bar_values]
 
-    bars = ax_sent.barh(bar_labels, bar_values, color=bar_colors, height=0.5, alpha=0.8)
+    ax_sent.barh(bar_labels, bar_values, color=bar_colors, height=0.5, alpha=0.8)
     ax_sent.set_xlim(-1.0, 1.0)
     ax_sent.axvline(x=0, color="#7f8c8d", linewidth=0.8)
     ax_sent.set_xlabel("Sentiment Score", fontsize=10)

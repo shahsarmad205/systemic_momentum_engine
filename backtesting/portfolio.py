@@ -10,7 +10,6 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-
 # ------------------------------------------------------------------
 # Position data container
 # ------------------------------------------------------------------
@@ -255,8 +254,12 @@ class Portfolio:
         date: pd.Timestamp,
         regime: str = "",
         crisis_consecutive_days: int = 0,
+        *,
+        gross_exposure: float | None = None,
+        net_exposure: float | None = None,
+        short_borrow_cost: float | None = None,
     ) -> None:
-        self.equity_history.append({
+        row = {
             "date": date,
             "equity": round(self.equity, 2),
             "cash": round(self.cash, 2),
@@ -264,7 +267,14 @@ class Portfolio:
             "n_positions": len(self.positions),
             "regime": regime,
             "crisis_consecutive_days": int(crisis_consecutive_days),
-        })
+        }
+        if gross_exposure is not None:
+            row["gross_exposure"] = float(gross_exposure)
+        if net_exposure is not None:
+            row["net_exposure"] = float(net_exposure)
+        if short_borrow_cost is not None:
+            row["short_borrow_cost"] = float(short_borrow_cost)
+        self.equity_history.append(row)
 
     # -- sector helpers ---------------------------------------------
 

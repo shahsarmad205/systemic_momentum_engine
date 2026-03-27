@@ -111,7 +111,9 @@ def get_signals(date: str | None = Query(None, description="Date YYYY-MM-DD; def
     try:
         return _load_signals_for_date(date)
     except FileNotFoundError:
-        raise HTTPException(status_code=404, detail=f"Signals not found for {date}. Run daily_runner to generate.")
+        raise HTTPException(
+            status_code=404, detail=f"Signals not found for {date}. Run daily_runner to generate."
+        ) from None
 
 
 @router.get("/{ticker}")
@@ -125,7 +127,7 @@ def get_signal_for_ticker(
     try:
         data = _load_signals_for_date(date)
     except FileNotFoundError:
-        raise HTTPException(status_code=404, detail=f"Signals not found for {date}.")
+        raise HTTPException(status_code=404, detail=f"Signals not found for {date}.") from None
     ticker = ticker.upper()
     signals_map = data.get("signals") or {}
     if ticker not in signals_map:

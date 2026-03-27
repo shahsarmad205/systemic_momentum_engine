@@ -17,15 +17,14 @@ import hashlib
 import itertools
 import json
 import multiprocessing as mp
-from pathlib import Path
-from typing import Any
 import re
 import subprocess
+from pathlib import Path
+from typing import Any
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 import yaml
-
 
 # -----------------------------
 # 1) Parameter grid definition
@@ -158,7 +157,7 @@ def generate_param_combinations(param_grid: dict[str, list[Any]]) -> list[dict[s
     vals = [param_grid[k] for k in keys]
     combos = []
     for tup in itertools.product(*vals):
-        p = dict(zip(keys, tup))
+        p = dict(zip(keys, tup, strict=False))
         if _valid_combo(p):
             combos.append(p)
     return combos

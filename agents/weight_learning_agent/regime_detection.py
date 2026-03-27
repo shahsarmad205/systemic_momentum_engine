@@ -16,7 +16,6 @@ When multiple conditions could apply, HighVol takes precedence, then Bull/Bear.
 from __future__ import annotations
 
 import pandas as pd
-import yfinance as yf
 
 SPY_TICKER = "SPY"
 LOOKBACK_DAYS = 250  # 200 MA + buffer
@@ -34,6 +33,8 @@ def detect_regimes(start_date: str, end_date: str) -> pd.Series:
     """
     start = pd.Timestamp(start_date)
     end = pd.Timestamp(end_date)
+    import yfinance as yf  # lazy: avoids pulling websockets stack at import time
+
     dl_start = start - pd.Timedelta(days=LOOKBACK_DAYS)
     dl_end = end + pd.Timedelta(days=5)
 

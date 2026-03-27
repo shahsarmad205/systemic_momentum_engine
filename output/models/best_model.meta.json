@@ -1,19 +1,82 @@
 {
-  "model_name": "GradientBoostingClassifier",
+  "model_name": "XGBRegressor",
   "horizon_days": 1,
   "target": "forward_return",
-  "n_rows": 220133,
-  "n_tickers": 149,
+  "n_rows": 778371,
+  "n_tickers": 297,
   "feature_columns": [
     "f_trend",
     "ret_5d",
     "ret_10d",
     "ret_20d",
     "rolling_vol_20",
-    "cs_momentum_percentile"
+    "cs_momentum_percentile",
+    "rsi_14",
+    "ret_1d",
+    "vol_ratio_5_20"
   ],
   "selected_by": "oos_sharpe_chained",
   "windows": [
+    {
+      "train_start": "2013-01-01",
+      "train_end": "2015-12-31",
+      "test_start": "2016-01-01",
+      "test_end": "2016-06-30"
+    },
+    {
+      "train_start": "2013-07-01",
+      "train_end": "2016-06-30",
+      "test_start": "2016-07-01",
+      "test_end": "2016-12-31"
+    },
+    {
+      "train_start": "2014-01-01",
+      "train_end": "2016-12-31",
+      "test_start": "2017-01-01",
+      "test_end": "2017-06-30"
+    },
+    {
+      "train_start": "2014-07-01",
+      "train_end": "2017-06-30",
+      "test_start": "2017-07-01",
+      "test_end": "2017-12-31"
+    },
+    {
+      "train_start": "2015-01-01",
+      "train_end": "2017-12-31",
+      "test_start": "2018-01-01",
+      "test_end": "2018-06-30"
+    },
+    {
+      "train_start": "2015-07-01",
+      "train_end": "2018-06-30",
+      "test_start": "2018-07-01",
+      "test_end": "2018-12-31"
+    },
+    {
+      "train_start": "2016-01-01",
+      "train_end": "2018-12-31",
+      "test_start": "2019-01-01",
+      "test_end": "2019-06-30"
+    },
+    {
+      "train_start": "2016-07-01",
+      "train_end": "2019-06-30",
+      "test_start": "2019-07-01",
+      "test_end": "2019-12-31"
+    },
+    {
+      "train_start": "2017-01-01",
+      "train_end": "2019-12-31",
+      "test_start": "2020-01-01",
+      "test_end": "2020-06-30"
+    },
+    {
+      "train_start": "2017-07-01",
+      "train_end": "2020-06-30",
+      "test_start": "2020-07-01",
+      "test_end": "2020-12-31"
+    },
     {
       "train_start": "2018-01-01",
       "train_end": "2020-12-31",

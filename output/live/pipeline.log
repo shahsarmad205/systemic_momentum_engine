@@ -1,0 +1,195 @@
+[2026-03-25T21:43:46.392782] ============================================================
+[2026-03-25T21:43:46.392844] pipeline start
+[2026-03-25T21:43:46.392856] dry_run=True no_retrain=False force_retrain=False
+[2026-03-25T21:43:46.577573] OHLCV cache OK: latest bar 2026-03-25 (need >= 2026-03-24)
+[2026-03-25T21:43:46.577719] retrain skipped (weights mtime within 30d): /Users/sarmad/Desktop/Quant-project/trend_signal_engine/output/learned_weights.json
+[2026-03-25T21:43:46.577742] RUN run_live_trading: /opt/anaconda3/bin/python /Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_live_trading.py
+[2026-03-25T21:44:01.468340] FAIL run_live_trading: exit code 1
+[2026-03-25T21:44:01.473850] pipeline ABORTED with exception:
+Traceback (most recent call last):
+  File "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_daily_pipeline.py", line 384, in main
+    run_subprocess(live_argv, cwd=_ROOT, logf=logf, label="run_live_trading")
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_daily_pipeline.py", line 233, in run_subprocess
+    subprocess.run(argv, cwd=str(cwd), check=True)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/subprocess.py", line 577, in run
+    raise CalledProcessError(retcode, process.args,
+                             output=stdout, stderr=stderr)
+subprocess.CalledProcessError: Command '['/opt/anaconda3/bin/python', '/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_live_trading.py']' returned non-zero exit status 1.
+
+[2026-03-25T21:44:01.473886] ============================================================
+[2026-03-25T21:45:12.427329] ============================================================
+[2026-03-25T21:45:12.427375] pipeline start
+[2026-03-25T21:45:12.427389] dry_run=True no_retrain=False force_retrain=False
+[2026-03-25T21:45:12.610412] OHLCV cache OK: latest bar 2026-03-25 (need >= 2026-03-24)
+[2026-03-25T21:45:12.610539] retrain skipped (weights mtime within 30d): /Users/sarmad/Desktop/Quant-project/trend_signal_engine/output/learned_weights.json
+[2026-03-25T21:45:12.610559] RUN run_live_trading: /opt/anaconda3/bin/python /Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_live_trading.py
+[2026-03-25T21:45:27.967806] FAIL run_live_trading: exit code 1
+[2026-03-25T21:45:27.970774] pipeline ABORTED with exception:
+Traceback (most recent call last):
+  File "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_daily_pipeline.py", line 384, in main
+    run_subprocess(live_argv, cwd=_ROOT, logf=logf, label="run_live_trading")
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_daily_pipeline.py", line 233, in run_subprocess
+    subprocess.run(argv, cwd=str(cwd), check=True)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/subprocess.py", line 577, in run
+    raise CalledProcessError(retcode, process.args,
+                             output=stdout, stderr=stderr)
+subprocess.CalledProcessError: Command '['/opt/anaconda3/bin/python', '/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_live_trading.py']' returned non-zero exit status 1.
+
+[2026-03-25T21:45:27.970807] ============================================================
+[2026-03-25T21:47:34.981211] ============================================================
+[2026-03-25T21:47:34.981262] pipeline start
+[2026-03-25T21:47:34.981374] dry_run=True no_retrain=False force_retrain=False
+[2026-03-25T21:47:35.143446] OHLCV cache OK: latest bar 2026-03-25 (need >= 2026-03-24)
+[2026-03-25T21:47:35.143572] retrain skipped (weights mtime within 30d): /Users/sarmad/Desktop/Quant-project/trend_signal_engine/output/learned_weights.json
+[2026-03-25T21:47:35.143592] RUN run_live_trading: /opt/anaconda3/bin/python /Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_live_trading.py
+[2026-03-25T21:47:49.172904] pipeline finished OK
+[2026-03-25T21:47:49.173009] ============================================================
+[2026-03-25T21:50:14.598690] ============================================================
+[2026-03-25T21:50:14.598734] pipeline start
+[2026-03-25T21:50:14.598748] dry_run=True no_retrain=False force_retrain=False
+[2026-03-25T21:50:14.776766] OHLCV cache OK: latest bar 2026-03-25 (need >= 2026-03-24)
+[2026-03-25T21:50:14.776884] retrain skipped (weights mtime within 30d): /Users/sarmad/Desktop/Quant-project/trend_signal_engine/output/learned_weights.json
+[2026-03-25T21:50:14.776905] RUN run_live_trading: /opt/anaconda3/bin/python /Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_live_trading.py
+[2026-03-25T21:50:28.981348] pipeline finished OK
+[2026-03-25T21:50:28.981424] ============================================================
+[2026-03-25T21:54:19.757917] ============================================================
+[2026-03-25T21:54:19.757956] pipeline start
+[2026-03-25T21:54:19.757969] dry_run=True no_retrain=False force_retrain=False
+[2026-03-25T21:54:19.891975] OHLCV cache OK: latest bar 2026-03-25 (need >= 2026-03-24)
+[2026-03-25T21:54:19.892119] retrain skipped (weights mtime within 30d): /Users/sarmad/Desktop/Quant-project/trend_signal_engine/output/learned_weights.json
+[2026-03-25T21:54:19.892142] RUN run_live_trading: /opt/anaconda3/bin/python /Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_live_trading.py
+[2026-03-25T21:54:34.792442] pipeline finished OK
+[2026-03-25T21:54:34.792542] ============================================================
+[2026-03-25T21:56:41.833080] ============================================================
+[2026-03-25T21:56:41.833125] pipeline start
+[2026-03-25T21:56:41.833147] dry_run=True no_retrain=False force_retrain=False
+[2026-03-25T21:56:41.963833] OHLCV cache OK: latest bar 2026-03-25 (need >= 2026-03-24)
+[2026-03-25T21:56:41.964023] retrain skipped (weights mtime within 30d): /Users/sarmad/Desktop/Quant-project/trend_signal_engine/output/learned_weights.json
+[2026-03-25T21:56:41.964046] RUN run_live_trading: /opt/anaconda3/bin/python /Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_live_trading.py
+[2026-03-25T21:56:55.838140] pipeline finished OK
+[2026-03-25T21:56:55.838225] ============================================================
+[2026-03-26T09:02:33.004885] ============================================================ [run_id=a88e4e6b9c3c git_sha=6558622]
+[2026-03-26T09:02:33.016520] pipeline start [run_id=a88e4e6b9c3c git_sha=6558622]
+[2026-03-26T09:02:33.028685] dry_run=False no_retrain=False force_retrain=False [run_id=a88e4e6b9c3c git_sha=6558622]
+[2026-03-26T09:02:33.419160] OHLCV cache OK: latest bar 2026-03-25 (need >= 2026-03-25) [run_id=a88e4e6b9c3c git_sha=6558622]
+[2026-03-26T09:02:33.431028] retrain skipped (weights mtime within 30d): /Users/sarmad/Desktop/Quant-project/trend_signal_engine/output/learned_weights.json [run_id=a88e4e6b9c3c git_sha=6558622]
+[2026-03-26T09:02:33.441749] RUN run_live_trading: /Users/sarmad/Desktop/Quant-project/trend_signal_engine/.venv/bin/python /Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_live_trading.py --execute [run_id=a88e4e6b9c3c git_sha=6558622]
+[2026-03-26T09:02:33.842445] FAIL run_live_trading: exit code 1 [run_id=a88e4e6b9c3c git_sha=6558622]
+[2026-03-26T09:02:33.855300] pipeline ABORTED with exception:
+Traceback (most recent call last):
+  File "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_daily_pipeline.py", line 368, in main
+    run_subprocess(live_argv, cwd=_ROOT, logf=logf, label="run_live_trading")
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_daily_pipeline.py", line 204, in run_subprocess
+    subprocess.run(argv, cwd=str(cwd), check=True)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/subprocess.py", line 577, in run
+    raise CalledProcessError(retcode, process.args,
+                             output=stdout, stderr=stderr)
+subprocess.CalledProcessError: Command '['/Users/sarmad/Desktop/Quant-project/trend_signal_engine/.venv/bin/python', '/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_live_trading.py', '--execute']' returned non-zero exit status 1.
+ [run_id=a88e4e6b9c3c git_sha=6558622]
+[2026-03-26T09:02:33.865227] ============================================================ [run_id=a88e4e6b9c3c git_sha=6558622]
+[2026-03-26T09:03:13.371974] ============================================================ [run_id=9d64da4c8f11 git_sha=6558622]
+[2026-03-26T09:03:13.383339] pipeline start [run_id=9d64da4c8f11 git_sha=6558622]
+[2026-03-26T09:03:13.393275] dry_run=False no_retrain=False force_retrain=False [run_id=9d64da4c8f11 git_sha=6558622]
+[2026-03-26T09:03:13.555313] OHLCV cache OK: latest bar 2026-03-25 (need >= 2026-03-25) [run_id=9d64da4c8f11 git_sha=6558622]
+[2026-03-26T09:03:13.566716] retrain skipped (weights mtime within 30d): /Users/sarmad/Desktop/Quant-project/trend_signal_engine/output/learned_weights.json [run_id=9d64da4c8f11 git_sha=6558622]
+[2026-03-26T09:03:13.576543] RUN run_live_trading: /Users/sarmad/Desktop/Quant-project/trend_signal_engine/.venv/bin/python /Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_live_trading.py --execute [run_id=9d64da4c8f11 git_sha=6558622]
+[2026-03-26T09:03:13.912121] FAIL run_live_trading: exit code 1 [run_id=9d64da4c8f11 git_sha=6558622]
+[2026-03-26T09:03:13.924510] pipeline ABORTED with exception:
+Traceback (most recent call last):
+  File "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_daily_pipeline.py", line 368, in main
+    run_subprocess(live_argv, cwd=_ROOT, logf=logf, label="run_live_trading")
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_daily_pipeline.py", line 204, in run_subprocess
+    subprocess.run(argv, cwd=str(cwd), check=True)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/subprocess.py", line 577, in run
+    raise CalledProcessError(retcode, process.args,
+                             output=stdout, stderr=stderr)
+subprocess.CalledProcessError: Command '['/Users/sarmad/Desktop/Quant-project/trend_signal_engine/.venv/bin/python', '/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_live_trading.py', '--execute']' returned non-zero exit status 1.
+ [run_id=9d64da4c8f11 git_sha=6558622]
+[2026-03-26T09:03:13.934485] ============================================================ [run_id=9d64da4c8f11 git_sha=6558622]
+[2026-03-26T09:03:43.275745] ============================================================ [run_id=4ed106959c5a git_sha=6558622]
+[2026-03-26T09:03:43.286703] pipeline start [run_id=4ed106959c5a git_sha=6558622]
+[2026-03-26T09:03:43.295836] dry_run=False no_retrain=False force_retrain=False [run_id=4ed106959c5a git_sha=6558622]
+[2026-03-26T09:03:43.425398] OHLCV cache OK: latest bar 2026-03-25 (need >= 2026-03-25) [run_id=4ed106959c5a git_sha=6558622]
+[2026-03-26T09:03:43.436637] retrain skipped (weights mtime within 30d): /Users/sarmad/Desktop/Quant-project/trend_signal_engine/output/learned_weights.json [run_id=4ed106959c5a git_sha=6558622]
+[2026-03-26T09:03:43.447521] RUN run_live_trading: /Users/sarmad/Desktop/Quant-project/trend_signal_engine/.venv/bin/python /Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_live_trading.py --execute [run_id=4ed106959c5a git_sha=6558622]
+[2026-03-26T09:03:43.706082] FAIL run_live_trading: exit code 1 [run_id=4ed106959c5a git_sha=6558622]
+[2026-03-26T09:03:43.717464] pipeline ABORTED with exception:
+Traceback (most recent call last):
+  File "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_daily_pipeline.py", line 368, in main
+    run_subprocess(live_argv, cwd=_ROOT, logf=logf, label="run_live_trading")
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_daily_pipeline.py", line 204, in run_subprocess
+    subprocess.run(argv, cwd=str(cwd), check=True)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/subprocess.py", line 577, in run
+    raise CalledProcessError(retcode, process.args,
+                             output=stdout, stderr=stderr)
+subprocess.CalledProcessError: Command '['/Users/sarmad/Desktop/Quant-project/trend_signal_engine/.venv/bin/python', '/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_live_trading.py', '--execute']' returned non-zero exit status 1.
+ [run_id=4ed106959c5a git_sha=6558622]
+[2026-03-26T09:03:43.726694] ============================================================ [run_id=4ed106959c5a git_sha=6558622]
+[2026-03-26T09:05:28.369457] ============================================================ [run_id=56babe606053 git_sha=6558622]
+[2026-03-26T09:05:28.383393] pipeline start [run_id=56babe606053 git_sha=6558622]
+[2026-03-26T09:05:28.396543] dry_run=False no_retrain=False force_retrain=False [run_id=56babe606053 git_sha=6558622]
+[2026-03-26T09:05:30.855535] OHLCV cache OK: latest bar 2026-03-25 (need >= 2026-03-25) [run_id=56babe606053 git_sha=6558622]
+[2026-03-26T09:05:30.866939] retrain skipped (weights mtime within 30d): /Users/sarmad/Desktop/Quant-project/trend_signal_engine/output/learned_weights.json [run_id=56babe606053 git_sha=6558622]
+[2026-03-26T09:05:30.879624] RUN run_live_trading: /Users/sarmad/Desktop/Quant-project/trend_signal_engine/.venv/bin/python /Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_live_trading.py --execute [run_id=56babe606053 git_sha=6558622]
+[2026-03-26T09:05:33.584938] FAIL run_live_trading: exit code 1 [run_id=56babe606053 git_sha=6558622]
+[2026-03-26T09:05:33.596730] pipeline ABORTED with exception:
+Traceback (most recent call last):
+  File "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_daily_pipeline.py", line 368, in main
+    run_subprocess(live_argv, cwd=_ROOT, logf=logf, label="run_live_trading")
+  File "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_daily_pipeline.py", line 204, in run_subprocess
+    subprocess.run(argv, cwd=str(cwd), check=True)
+  File "/opt/homebrew/Cellar/python@3.11/3.11.15/Frameworks/Python.framework/Versions/3.11/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['/Users/sarmad/Desktop/Quant-project/trend_signal_engine/.venv/bin/python', '/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_live_trading.py', '--execute']' returned non-zero exit status 1.
+ [run_id=56babe606053 git_sha=6558622]
+[2026-03-26T09:05:33.605978] ============================================================ [run_id=56babe606053 git_sha=6558622]
+[2026-03-26T09:06:14.596212] ============================================================ [run_id=a085a38275a2 git_sha=6558622]
+[2026-03-26T09:06:14.606597] pipeline start [run_id=a085a38275a2 git_sha=6558622]
+[2026-03-26T09:06:14.615648] dry_run=False no_retrain=False force_retrain=False [run_id=a085a38275a2 git_sha=6558622]
+[2026-03-26T09:06:14.735261] OHLCV cache OK: latest bar 2026-03-25 (need >= 2026-03-25) [run_id=a085a38275a2 git_sha=6558622]
+[2026-03-26T09:06:14.746666] retrain skipped (weights mtime within 30d): /Users/sarmad/Desktop/Quant-project/trend_signal_engine/output/learned_weights.json [run_id=a085a38275a2 git_sha=6558622]
+[2026-03-26T09:06:14.756691] RUN run_live_trading: /Users/sarmad/Desktop/Quant-project/trend_signal_engine/.venv/bin/python /Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_live_trading.py --execute [run_id=a085a38275a2 git_sha=6558622]
+[2026-03-26T09:06:40.345670] pipeline finished OK [run_id=a085a38275a2 git_sha=6558622]
+[2026-03-26T09:06:40.358161] ============================================================ [run_id=a085a38275a2 git_sha=6558622]
+[2026-03-26T09:54:56.035010] ============================================================ [run_id=e6f84ac614a5 git_sha=6558622]
+[2026-03-26T09:54:56.044387] pipeline start [run_id=e6f84ac614a5 git_sha=6558622]
+[2026-03-26T09:54:56.056941] dry_run=False no_retrain=False force_retrain=False [run_id=e6f84ac614a5 git_sha=6558622]
+[2026-03-26T09:54:56.277943] OHLCV cache OK: latest bar 2026-03-25 (need >= 2026-03-25) [run_id=e6f84ac614a5 git_sha=6558622]
+[2026-03-26T09:54:56.289603] retrain skipped (weights mtime within 30d): /Users/sarmad/Desktop/Quant-project/trend_signal_engine/output/learned_weights.json [run_id=e6f84ac614a5 git_sha=6558622]
+[2026-03-26T09:54:56.299606] RUN run_live_trading: /Users/sarmad/Desktop/Quant-project/trend_signal_engine/.venv/bin/python /Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_live_trading.py --execute [run_id=e6f84ac614a5 git_sha=6558622]
+[2026-03-26T09:55:00.788628] pipeline finished OK [run_id=e6f84ac614a5 git_sha=6558622]
+[2026-03-26T09:55:00.800517] ============================================================ [run_id=e6f84ac614a5 git_sha=6558622]
+[2026-03-26T11:26:31.236392] ============================================================ [run_id=8fbf6f540423 git_sha=6558622]
+[2026-03-26T11:26:31.245533] pipeline start [run_id=8fbf6f540423 git_sha=6558622]
+[2026-03-26T11:26:31.257080] dry_run=True no_retrain=False force_retrain=True [run_id=8fbf6f540423 git_sha=6558622]
+[2026-03-26T11:26:31.699800] OHLCV cache OK: latest bar 2026-03-26 (need >= 2026-03-25) [run_id=8fbf6f540423 git_sha=6558622]
+[2026-03-26T11:26:31.710989] RUN retrain:run_retrain_baseline.py: /Users/sarmad/Desktop/Quant-project/trend_signal_engine/.venv/bin/python /Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_retrain_baseline.py --config backtest_config.yaml [run_id=8fbf6f540423 git_sha=6558622]
+[2026-03-26T11:27:21.807549] RUN run_live_trading: /Users/sarmad/Desktop/Quant-project/trend_signal_engine/.venv/bin/python /Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_live_trading.py [run_id=8fbf6f540423 git_sha=6558622]
+[2026-03-26T11:27:40.237878] pipeline finished OK [run_id=8fbf6f540423 git_sha=6558622]
+[2026-03-26T11:27:40.248211] ============================================================ [run_id=8fbf6f540423 git_sha=6558622]
+[2026-03-26T12:11:23.495464] ============================================================ [run_id=4ebd34eb8e43 git_sha=6558622]
+[2026-03-26T12:11:23.504583] pipeline start [run_id=4ebd34eb8e43 git_sha=6558622]
+[2026-03-26T12:11:23.514185] dry_run=True no_retrain=False force_retrain=True [run_id=4ebd34eb8e43 git_sha=6558622]
+[2026-03-26T12:11:23.968091] OHLCV cache OK: latest bar 2026-03-26 (need >= 2026-03-25) [run_id=4ebd34eb8e43 git_sha=6558622]
+[2026-03-26T12:11:23.979573] RUN retrain:run_retrain_baseline.py: /Users/sarmad/Desktop/Quant-project/trend_signal_engine/.venv/bin/python /Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_retrain_baseline.py --config backtest_config.yaml [run_id=4ebd34eb8e43 git_sha=6558622]
+[2026-03-26T12:12:14.242908] RUN run_live_trading: /Users/sarmad/Desktop/Quant-project/trend_signal_engine/.venv/bin/python /Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_live_trading.py [run_id=4ebd34eb8e43 git_sha=6558622]
+[2026-03-26T12:12:28.989814] pipeline finished OK [run_id=4ebd34eb8e43 git_sha=6558622]
+[2026-03-26T12:12:29.000517] ============================================================ [run_id=4ebd34eb8e43 git_sha=6558622]
+[2026-03-26T12:12:46.826849] ============================================================ [run_id=5d4905636f66 git_sha=6558622]
+[2026-03-26T12:12:46.836473] pipeline start [run_id=5d4905636f66 git_sha=6558622]
+[2026-03-26T12:12:46.846465] dry_run=True no_retrain=False force_retrain=True [run_id=5d4905636f66 git_sha=6558622]
+[2026-03-26T12:12:47.267978] OHLCV cache OK: latest bar 2026-03-26 (need >= 2026-03-25) [run_id=5d4905636f66 git_sha=6558622]
+[2026-03-26T12:12:47.279813] RUN retrain:run_retrain_baseline.py: /Users/sarmad/Desktop/Quant-project/trend_signal_engine/.venv/bin/python /Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_retrain_baseline.py --config backtest_config.yaml [run_id=5d4905636f66 git_sha=6558622]
+[2026-03-26T12:13:38.933305] RUN run_live_trading: /Users/sarmad/Desktop/Quant-project/trend_signal_engine/.venv/bin/python /Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_live_trading.py [run_id=5d4905636f66 git_sha=6558622]
+[2026-03-26T12:13:55.726296] pipeline finished OK [run_id=5d4905636f66 git_sha=6558622]
+[2026-03-26T12:13:55.737730] ============================================================ [run_id=5d4905636f66 git_sha=6558622]

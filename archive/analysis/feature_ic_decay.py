@@ -22,10 +22,9 @@ It will:
 - Download OHLCV data for the same tickers to compute forward returns.
 """
 
-import os
-from typing import List
-
 import logging
+import os
+
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
 import matplotlib.pyplot as plt
 import numpy as np
@@ -36,14 +35,13 @@ from agents.weight_learning_agent import build_feature_matrix
 from config import get_effective_tickers
 from utils.market_data import get_ohlcv
 
-
 START_DATE = "2013-01-01"
 END_DATE = "2024-01-01"
 DEFAULT_HOLDING_DAYS = 5
 LAGS = [1, 2, 3, 5, 10, 15, 20]
 
 
-def _resolve_tickers() -> List[str]:
+def _resolve_tickers() -> list[str]:
     """Mirror run_weight_learning's ticker resolution."""
     try:
         from main import TICKERS
@@ -97,13 +95,13 @@ def _resolve_tickers() -> List[str]:
 
 def _attach_forward_returns_by_lag(
     features_df: pd.DataFrame,
-    lags: List[int],
+    lags: list[int],
 ) -> pd.DataFrame:
     """
     For each (ticker, date) row in features_df, attach forward returns
     at the requested lags, computed from OHLCV Close prices.
     """
-    out_chunks: List[pd.DataFrame] = []
+    out_chunks: list[pd.DataFrame] = []
     max_lag = max(lags)
 
     for ticker in sorted(features_df["ticker"].unique()):
@@ -148,7 +146,7 @@ def _attach_forward_returns_by_lag(
     return pd.concat(out_chunks, ignore_index=True)
 
 
-def compute_feature_ic_decay(df: pd.DataFrame, lags: List[int]) -> pd.DataFrame:
+def compute_feature_ic_decay(df: pd.DataFrame, lags: list[int]) -> pd.DataFrame:
     """
     Compute IC (Spearman rank correlation) for each feature vs
     forward returns at given lags.
@@ -200,7 +198,7 @@ def compute_feature_ic_decay(df: pd.DataFrame, lags: List[int]) -> pd.DataFrame:
     return ic_df
 
 
-def plot_top_feature_ic_decay(ic_df: pd.DataFrame, lags: List[int], out_path: str, top_n: int = 10) -> None:
+def plot_top_feature_ic_decay(ic_df: pd.DataFrame, lags: list[int], out_path: str, top_n: int = 10) -> None:
     """Plot IC vs lag for top-N features by |IC(1d)|."""
     lag1_col = f"ic_{lags[0]}d"
     if lag1_col not in ic_df.columns:

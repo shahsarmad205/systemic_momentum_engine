@@ -35,8 +35,8 @@ weights.  All features use only past data (no look-ahead bias).
 
 from __future__ import annotations
 
-from datetime import timedelta
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from datetime import timedelta
 
 import numpy as np
 import pandas as pd
@@ -46,12 +46,12 @@ from agents.volatility_agent.volatility_model import (
     compute_rolling_confidence,
     compute_vol_term_structure,
 )
-from agents.weight_learning_agent.regime_detection import get_regime_series_for_dates
 from agents.weight_learning_agent.feature_flags import feature_columns_to_zero_for_ablation
+from agents.weight_learning_agent.regime_detection import get_regime_series_for_dates
 from execution.cost_model import TransactionCostModel
 from main import CONFIDENCE_MULTIPLIER, compute_rolling_trend_scores
-from utils.sectors import SECTOR_MAP, get_sector
 from utils.market_data import get_ohlcv
+from utils.sectors import get_sector
 
 HISTORY_BUFFER_DAYS = 400
 MARKET_TICKER = "SPY"  # for rolling correlation feature
@@ -454,6 +454,13 @@ def _build_features_for_ticker(
 
         forward_ret = close.shift(-holding_period) / close - 1
 
+        # Short-predictive features
+        rsi_14 = mr_rsi_raw.shift(1)
+        ret_1d = daily_ret.shift(1)
+        vol_ratio_5_20 = (vol_5_raw / vol_20_raw.replace(0, np.nan)).replace(
+            [np.inf, -np.inf], np.nan
+        ).shift(1)
+
         chunk = pd.DataFrame(
             {
                 "ticker": ticker,
@@ -496,6 +503,9 @@ def _build_features_for_ticker(
                 "cs_momentum_raw": cs_mom_raw,
                 "daily_return": daily_ret,
                 "vol_20_simple": vol_20_simple,
+                "rsi_14": rsi_14,
+                "ret_1d": ret_1d,
+                "vol_ratio_5_20": vol_ratio_5_20,
                 "forward_return": forward_ret,
             },
             index=features.index,

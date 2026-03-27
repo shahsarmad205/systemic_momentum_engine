@@ -1,6 +1,6 @@
 import pandas as pd
 
-from UniverseSelector import UniverseSelector
+from strategy.universe_selector import UniverseSelector
 
 
 def _make_panel():

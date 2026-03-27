@@ -10,7 +10,6 @@ from dataclasses import dataclass, field
 
 import yaml
 
-
 _DEFAULT_REGIME_ADJ = {
     "Bull":     {"score_mult": 1.2, "position_scale": 1.0},
     "Bear":     {"score_mult": 0.8, "position_scale": 0.5},
@@ -37,6 +36,11 @@ class BacktestConfig:
     # Capital management
     initial_capital: float = 100_000
     max_positions: int = 10
+    # When running ranked (non cross-sectional) selection with shorts enabled,
+    # allocate the max_positions budget across long and short slots.
+    # Defaults are set in load_config to half/half when missing.
+    max_longs: int = 0
+    max_shorts: int = 0
     holding_period_days: int = 5
     # Minimum time-in-trade (trading days) before we allow expiry/rebalance
     # exits. This reduces churn from ultra-short round trips.
@@ -118,6 +122,14 @@ class BacktestConfig:
     stop_loss_pct: float = 0.0             # 0 = disabled; e.g. 0.02 = -2% exit
     take_profit_pct: float = 0.0           # 0 = disabled; e.g. 0.05 = +5% exit
     max_position_pct_of_equity: float = 0.12  # single-name cap vs equity; enforced in backtester after beta/vol
+    # Long/short fund-style exposure controls (fractions of equity).
+    # Gross exposure: sum(|position_value|)/equity; Net exposure: (long-short)/equity.
+    max_gross_exposure: float = 1.0
+    max_net_exposure: float = 1.0
+    # Short-specific cap (fraction of equity). If 0, fall back to max_position_pct_of_equity.
+    max_short_single_name: float = 0.0
+    # Borrow cost (annualized bps) applied as daily drag on short exposure in backtests.
+    short_borrow_cost_bps: float = 0.0
     vol_scaling_enabled: bool = True
     vol_scaling_target: float = 0.15
     max_drawdown_pct: float = 0.20         # circuit breaker: halt new trades beyond this DD (e.g. 0.20 = -20%)
@@ -137,6 +149,8 @@ class BacktestConfig:
     execution_delay_days: int = 0  # Monte Carlo: delay entry by N days (0 = next day)
     # Long-only override: when True, ignore bearish signals and do not open shorts.
     long_only: bool = True
+    # Regimes where shorts are suppressed even when allow_shorts=True.
+    regime_suppress_shorts: list[str] = field(default_factory=lambda: ["Bull", "Crisis"])
 
     # Execution costs (realistic trading: commission + spread + slippage in bps)
     execution_costs_enabled: bool = True
@@ -164,7 +178,7 @@ class BacktestConfig:
     signal_confidence_multiplier_crisis: float | None = None
     signal_confidence_std_window: int = 60
     signal_confidence_min_periods: int = 20
-    signal_mode: str = "price"      # "price" = trend+vol, "full" = all agents, "learned" = dynamic weights
+    signal_mode: str = "price"      # "price" | "full" | "learned" | "ml" | "ensemble"
     signal_weights: dict = field(default_factory=lambda: {
         "trend": 1.0,
         "regional_news": 0.5,
@@ -172,6 +186,12 @@ class BacktestConfig:
         "social": 0.3,
     })
     learned_weights_path: str = ""  # path to learned_weights.json (used when signal_mode="learned")
+    ml_model_path: str = "output/models/best_model.pkl"
+    ml_model_type: str = "classifier"
+    ml_clip: bool = False
+    ensemble_models: list[dict] = field(default_factory=list)
+    ensemble_normalize: bool = True
+    ensemble_clip: bool = False
     signal_smoothing_span: int = 5
     signal_smoothing_enabled: bool = True
     signal_flip_threshold: float = 0.15
@@ -274,6 +294,13 @@ def load_config(path: str = "backtest_config.yaml") -> BacktestConfig:
     cfg.end_date = bt.get("end_date", cfg.end_date)
     cfg.initial_capital = float(bt.get("initial_capital", cfg.initial_capital))
     cfg.max_positions = int(bt.get("max_positions", cfg.max_positions))
+    # Long/short slot split for ranked selection (not cross-sectional).
+    cfg.max_longs = int(bt.get("max_longs", cfg.max_longs) or 0)
+    cfg.max_shorts = int(bt.get("max_shorts", cfg.max_shorts) or 0)
+    if cfg.max_longs <= 0 and cfg.max_shorts <= 0:
+        # Default: half/half (odd -> bias longs by 1)
+        cfg.max_longs = int((cfg.max_positions + 1) // 2)
+        cfg.max_shorts = int(cfg.max_positions // 2)
     cfg.holding_period_days = int(bt.get("holding_period_days", cfg.holding_period_days))
     cfg.min_holding_period_days = int(bt.get("min_holding_period_days", cfg.min_holding_period_days))
     cfg.rebalance_every_trading_days = int(
@@ -363,6 +390,10 @@ def load_config(path: str = "backtest_config.yaml") -> BacktestConfig:
         risk.get("crisis_signal_quantile", cfg.crisis_signal_quantile)
     )
     cfg.max_position_pct_of_equity = float(risk.get("max_position_pct_of_equity", cfg.max_position_pct_of_equity))
+    cfg.max_gross_exposure = float(risk.get("max_gross_exposure", cfg.max_gross_exposure))
+    cfg.max_net_exposure = float(risk.get("max_net_exposure", cfg.max_net_exposure))
+    cfg.max_short_single_name = float(risk.get("max_short_single_name", cfg.max_short_single_name))
+    cfg.short_borrow_cost_bps = float(risk.get("short_borrow_cost_bps", cfg.short_borrow_cost_bps))
     cfg.max_drawdown_pct = float(risk.get("max_drawdown_pct", cfg.max_drawdown_pct))
     cfg.drawdown_resume_pct = float(risk.get("drawdown_resume_pct", cfg.drawdown_resume_pct))
     cfg.severe_drawdown_close_all_pct = float(
@@ -384,6 +415,9 @@ def load_config(path: str = "backtest_config.yaml") -> BacktestConfig:
     cfg.allow_shorts = ex.get("allow_shorts", ex.get("enable_shorts", cfg.allow_shorts))
     cfg.enable_shorts = cfg.allow_shorts  # keep in sync for backward compatibility
     cfg.long_only = ex.get("long_only", cfg.long_only)
+    rss = ex.get("regime_suppress_shorts")
+    if isinstance(rss, list):
+        cfg.regime_suppress_shorts = [str(r).strip() for r in rss]
 
     ec = raw.get("execution_costs", {})
     cfg.execution_costs_enabled = ec.get("enabled", cfg.execution_costs_enabled)
@@ -449,6 +483,13 @@ def load_config(path: str = "backtest_config.yaml") -> BacktestConfig:
     if "weights" in sig:
         cfg.signal_weights.update(sig["weights"])
     cfg.learned_weights_path = sig.get("learned_weights_path", cfg.learned_weights_path)
+    cfg.ml_model_path = str(sig.get("ml_model_path", cfg.ml_model_path))
+    cfg.ml_model_type = str(sig.get("ml_model_type", cfg.ml_model_type))
+    cfg.ml_clip = bool(sig.get("ml_clip", cfg.ml_clip))
+    ens = sig.get("ensemble", {}) or {}
+    cfg.ensemble_models = list(ens.get("models", cfg.ensemble_models) or [])
+    cfg.ensemble_normalize = bool(ens.get("normalize", cfg.ensemble_normalize))
+    cfg.ensemble_clip = bool(ens.get("clip", cfg.ensemble_clip))
     cfg.signal_smoothing_span = int(sig.get("smoothing_span", cfg.signal_smoothing_span))
     cfg.signal_smoothing_enabled = sig.get("smoothing_enabled", cfg.signal_smoothing_enabled)
     cfg.signal_flip_threshold = float(sig.get("flip_threshold", cfg.signal_flip_threshold))

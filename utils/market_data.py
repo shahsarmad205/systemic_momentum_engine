@@ -8,16 +8,22 @@ Usage:
     from utils.market_data import get_ohlcv
 
     df = get_ohlcv("AAPL", "2020-01-01", "2024-01-01", provider="yahoo", use_cache=True)
+
+Per-ticker cache/download traces use ``logging`` at DEBUG for ``utils.market_data``
+(e.g. ``logging.getLogger("utils.market_data").setLevel(logging.DEBUG)``).
 """
 
 from __future__ import annotations
 
+import logging
 import os
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 # Default cache directory (under project root)
@@ -385,8 +391,12 @@ def get_ohlcv(
     """
     start = pd.Timestamp(start_date)
     end = pd.Timestamp(end_date)
-    # Verbose debug: show requested date range
-    print(f"[get_ohlcv] {ticker}: requesting {start.strftime('%Y-%m-%d')} → {end.strftime('%Y-%m-%d')}")
+    logger.debug(
+        "[get_ohlcv] %s: requesting %s → %s",
+        ticker,
+        start.strftime("%Y-%m-%d"),
+        end.strftime("%Y-%m-%d"),
+    )
     cache_dir = cache_dir or DEFAULT_CACHE_DIR
     path = _cache_path(cache_dir, ticker)
 
@@ -398,7 +408,7 @@ def get_ohlcv(
             # If the cached history fully covers the requested window, just slice.
             if start >= cached_start and end <= cached_end:
                 df = cached.loc[(cached.index >= start) & (cached.index <= end)].copy()
-                print(f"[get_ohlcv] {ticker}: cache hit, sliced shape={df.shape}")
+                logger.debug("[get_ohlcv] %s: cache hit, sliced shape=%s", ticker, df.shape)
                 if include_delisted and asset_type == "equity" and not df.empty:
                     df = _attach_delisted_date(df, end)
                 return df
@@ -409,9 +419,11 @@ def get_ohlcv(
                 gap_days = int((cached_start - start).days)
                 if gap_days <= 5:
                     df = cached.loc[(cached.index >= cached_start) & (cached.index <= end)].copy()
-                    print(
-                        f"[get_ohlcv] {ticker}: cache near-hit (missing {gap_days} day(s) at start), "
-                        f"sliced shape={df.shape}"
+                    logger.debug(
+                        "[get_ohlcv] %s: cache near-hit (missing %d day(s) at start), sliced shape=%s",
+                        ticker,
+                        gap_days,
+                        df.shape,
                     )
                     if include_delisted and asset_type == "equity" and not df.empty:
                         df = _attach_delisted_date(df, end)
@@ -420,10 +432,13 @@ def get_ohlcv(
                 # Partial coverage: fall through to download additional history.
                 # We will merge the newly downloaded data with the existing cache
                 # in the save-cache step below.
-                print(
-                    f"[get_ohlcv] {ticker}: cache partial "
-                    f"(cached {cached_start.date()} → {cached_end.date()}, "
-                    f"requested {start.date()} → {end.date()}) — downloading extension"
+                logger.debug(
+                    "[get_ohlcv] %s: cache partial (cached %s → %s, requested %s → %s) — downloading extension",
+                    ticker,
+                    cached_start.date(),
+                    cached_end.date(),
+                    start.date(),
+                    end.date(),
                 )
 
     provider = (provider or "yahoo").lower()
@@ -459,18 +474,26 @@ def get_ohlcv(
             raise ValueError(f"Unknown provider: {provider}. Use 'yahoo', 'alpaca', or 'finnhub'.")
 
     if df is None or df.empty:
-        print(f"[get_ohlcv] {ticker}: download returned EMPTY frame")
+        logger.debug("[get_ohlcv] %s: download returned EMPTY frame", ticker)
     else:
         # Defensive: must overlap requested window (see _download_yahoo period fallback).
         if not _df_overlaps_window(df, start, end):
-            print(
-                f"[get_ohlcv] {ticker}: rejecting download (no overlap; "
-                f"got {df.index.min().date()} → {df.index.max().date()})"
+            logger.debug(
+                "[get_ohlcv] %s: rejecting download (no overlap; got %s → %s)",
+                ticker,
+                df.index.min().date(),
+                df.index.max().date(),
             )
             df = pd.DataFrame(columns=OHLCV_COLUMNS)
         else:
             df = df.loc[(df.index >= start) & (df.index <= end)].copy()
-            print(f"[get_ohlcv] {ticker}: download shape={df.shape}, date range {df.index.min()} → {df.index.max()}")
+            logger.debug(
+                "[get_ohlcv] %s: download shape=%s, date range %s → %s",
+                ticker,
+                df.shape,
+                df.index.min(),
+                df.index.max(),
+            )
 
     if include_delisted and asset_type == "equity" and not df.empty:
         df = _attach_delisted_date(df, end)
@@ -497,8 +520,10 @@ def get_ohlcv(
         if cached_only is not None and not cached_only.empty:
             sl = cached_only.loc[(cached_only.index >= start) & (cached_only.index <= end)].copy()
             if not sl.empty:
-                print(
-                    f"[get_ohlcv] {ticker}: cache slice fallback (download unusable), shape={sl.shape}"
+                logger.debug(
+                    "[get_ohlcv] %s: cache slice fallback (download unusable), shape=%s",
+                    ticker,
+                    sl.shape,
                 )
                 if include_delisted:
                     sl = _attach_delisted_date(sl, end)

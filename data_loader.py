@@ -12,7 +12,6 @@ This wrapper re-exports `download_stock_data` implemented via
 from __future__ import annotations
 
 import re
-from typing import Optional
 
 import pandas as pd
 
@@ -42,8 +41,8 @@ def download_stock_data(
     ticker: str,
     *,
     period: str = "2y",
-    start: Optional[str] = None,
-    end: Optional[str] = None,
+    start: str | None = None,
+    end: str | None = None,
     provider: str = "yahoo",
     use_cache: bool = True,
 ):

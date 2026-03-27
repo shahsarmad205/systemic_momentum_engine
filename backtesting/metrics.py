@@ -13,7 +13,6 @@ Expected trade DataFrame columns:
 import numpy as np
 import pandas as pd
 
-
 # ------------------------------------------------------------------
 # Win rate
 # ------------------------------------------------------------------
@@ -563,12 +562,12 @@ def compute_turnover_corrected(
     # Drop trades where the daily equity at entry/exit isn't available
     w_entry = []
     w_exit = []
-    for idx, ee, xe, ps, r in zip(
+    for _, ee, xe, ps, r in zip(
         trades_valid_idx,
         entry_eq,
         exit_eq,
         pos_sizes.loc[trades_valid_idx].values,
-        returns.loc[trades_valid_idx].values,
+        returns.loc[trades_valid_idx].values, strict=False,
     ):
         if ee is None or xe is None:
             continue

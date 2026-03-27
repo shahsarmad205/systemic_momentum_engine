@@ -1,0 +1,5 @@
+# Installed after requirements-lock.txt in CI for lint, test, audit.
+# Local dev can still use requirements-dev.txt (unpinned direct deps + tools).
+pytest>=7.4
+ruff>=0.6
+pip-audit>=2.7

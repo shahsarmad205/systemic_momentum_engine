@@ -7,7 +7,6 @@ from __future__ import annotations
 import pandas as pd
 
 from backtesting.portfolio import Portfolio, Position
-from backtesting.execution import ExecutionEngine
 
 
 class PortfolioEngine:

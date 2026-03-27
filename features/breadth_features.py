@@ -8,14 +8,12 @@ This module aggregates per-name prices into simple breadth measures:
 
 from __future__ import annotations
 
-from typing import Dict
-
 import numpy as np
 import pandas as pd
 
 
 def calculate_market_breadth(
-    market_data_dict: Dict[str, pd.DataFrame],
+    market_data_dict: dict[str, pd.DataFrame],
 ) -> pd.DataFrame:
     """
     Compute simple market breadth metrics across a set of tickers.

@@ -1,1 +1,39 @@
 /bin/sh: /Users/sarmad/miniconda3/bin/python: No such file or directory
+
+1 Failed download:
+['ORCL']: TypeError("'NoneType' object is not subscriptable")
+
+=======================================================
+  PERFORMANCE TRACKER — 2026-03-26
+=======================================================
+[Alpaca] REST client configured (PAPER) — https://paper-api.alpaca.markets (auth is checked on the first API call)
+
+  === ACCOUNT STATE ===
+  Baseline equity:  $  100,000.00  (paper default; adjust if needed)
+  Current equity:   $   97,114.09
+  Total return:          -2.89%
+  Open positions:   0
+  Filled orders (sample): 30 rows
+
+  === LIVE METRICS (from daily_pnl, 2 return obs) ===
+  Backtest targets — Net Sharpe: 1.547, CAGR: 8.99%, Max DD: -7.06%, Win rate: 48.40%
+  Need 5+ return observations for live Sharpe/CAGR/DD (have 2).
+
+  === SIGNAL HISTORY (output/live) ===
+  Total rows:      518
+  Unique dates:    4
+  Unique tickers:  320
+  Marked executed: 10 rows
+
+  === IC TRACKER ===
+  Signals: last 730 cd | fwd=1 td | roll=20 | min_names=8 | provider=yahoo
+  Saved 2 rows → output/live/ic_tracker.csv
+  Latest rolling_ic not yet available (date=2026-03-25; need ≥10 daily IC points for 20-date roll).
+  [slippage] No trades file yet — run live execute then scripts/fetch_fills.py.
+  Dashboard → /Users/sarmad/Desktop/Quant-project/trend_signal_engine/output/live/dashboard.html
+
+=======================================================
+  Tracker complete.
+  PnL history: output/live/daily_pnl.csv
+  Dashboard:   output/live/dashboard.html
+=======================================================

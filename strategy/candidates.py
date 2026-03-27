@@ -161,6 +161,26 @@ def build_ranked_candidates(
         if tk not in seen:
             seen.add(tk)
             unique.append(c)
+
+    # If configured, split candidate budget between long/short slots.
+    # This applies to the ranked (non-cross-sectional) path; cross-sectional
+    # selection uses its own top_longs/top_shorts logic.
+    max_positions = int(getattr(config, "max_positions", 10) or 10)
+    max_longs = int(getattr(config, "max_longs", 0) or 0)
+    max_shorts = int(getattr(config, "max_shorts", 0) or 0)
+    if max_longs <= 0 and max_shorts <= 0:
+        max_longs = int((max_positions + 1) // 2)
+        max_shorts = int(max_positions // 2)
+    if bool(getattr(config, "long_only", False)) or not getattr(config, "enable_shorts", False):
+        max_shorts = 0
+        max_longs = max_positions
+
+    longs_only = [c for c in unique if c.get("signal") == "Bullish"]
+    shorts_only = [c for c in unique if c.get("signal") == "Bearish"]
+    selected = longs_only[:max_longs] + shorts_only[:max_shorts]
+    # Keep final ordering by absolute score (so the open loop remains deterministic).
+    selected.sort(key=lambda x: abs(float(x.get("adjusted_score", 0.0) or 0.0)), reverse=True)
+    unique = selected[:max_positions]
     # Diversification: prefer tickers we've traded less so more names get filled (e.g. tickers traded >= 12)
     counts = ticker_trade_counts or {}
     diversification_penalty = 0.002  # 500 trades ≈ 1.0 score penalty

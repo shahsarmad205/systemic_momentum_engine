@@ -5,14 +5,16 @@ Run from project root: python scripts/debug_daily_signals.py
 """
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from backtesting.config import load_config
-from backtesting.backtester import Backtester
-from main import TICKERS
-from config import get_effective_tickers
-import backtesting.backtester as bmod
 import pandas as pd
+
+import backtesting.backtester as bmod
+from backtesting.backtester import Backtester
+from backtesting.config import load_config
+from config import get_effective_tickers
+from main import TICKERS
 
 cfg = load_config("backtest_config.yaml")
 tickers = get_effective_tickers(cfg.tickers or [], list(TICKERS))
@@ -30,8 +32,9 @@ def patched_simulate(self, price_data, signal_data, regime_data):
     from collections import defaultdict
     start_ts = pd.Timestamp(self.config.start_date)
     end_ts = pd.Timestamp(self.config.end_date)
-    from backtesting.signals import EXIT_BUFFER_DAYS
     from datetime import timedelta
+
+    from backtesting.signals import EXIT_BUFFER_DAYS
     sim_end = end_ts + timedelta(days=EXIT_BUFFER_DAYS)
     cross_sectional = getattr(self.config, "cross_sectional_ranking", False)
     daily_signals = defaultdict(list)

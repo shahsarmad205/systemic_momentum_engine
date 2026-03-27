@@ -19,14 +19,13 @@ Prints:
 from __future__ import annotations
 
 import argparse
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-
-import sys
 
 # Ensure `trend_signal_engine/` is on sys.path when this file is executed
 # as a script from within `trend_signal_engine/backtesting/`.
@@ -205,7 +204,7 @@ def main():
 
     pass_criteria = (oos_rep.sharpe > 0.5) and (oos_rep.cagr > 0.05)
     print("\n================ Pass/Fail ================")
-    print(f"Criteria: OOS Sharpe > 0.5 AND OOS CAGR > 5%")
+    print("Criteria: OOS Sharpe > 0.5 AND OOS CAGR > 5%")
     print(f"Result  : {'PASS' if pass_criteria else 'FAIL'}")
 
 

@@ -26,19 +26,18 @@ Usage (from project root):
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 from pathlib import Path
-from typing import Dict, List, Tuple
 
-import logging
 import numpy as np
 import pandas as pd
+
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
 import matplotlib.pyplot as plt
 
 from backtesting import load_config
 from utils.market_data import get_ohlcv
-
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -104,22 +103,21 @@ def _load_equity(equity_path: Path) -> pd.DataFrame:
     return eq
 
 
-def _infer_tickers_from_trades(trades: pd.DataFrame) -> List[str]:
+def _infer_tickers_from_trades(trades: pd.DataFrame) -> list[str]:
     return sorted(trades["ticker"].unique().tolist())
 
 
 def _load_price_data(
-    tickers: List[str],
+    tickers: list[str],
     start: pd.Timestamp,
     end: pd.Timestamp,
     cfg,
-) -> Dict[str, pd.DataFrame]:
+) -> dict[str, pd.DataFrame]:
     """
     Reload OHLCV data for the tickers over [start, end] with a small buffer.
     """
-    from utils.market_data import get_ohlcv  # local import to avoid heavy import at module load
 
-    price_data: Dict[str, pd.DataFrame] = {}
+    price_data: dict[str, pd.DataFrame] = {}
     start_str = (start - pd.Timedelta(days=5 * cfg.vol_lookback_days)).strftime("%Y-%m-%d")
     end_str = end.strftime("%Y-%m-%d")
     for tk in tickers:
@@ -144,7 +142,7 @@ def _load_price_data(
 def _build_position_weights(
     trades: pd.DataFrame,
     equity: pd.DataFrame,
-) -> Tuple[pd.DataFrame, List[str]]:
+) -> tuple[pd.DataFrame, list[str]]:
     """
     Reconstruct daily position weights for each ticker from trades and daily equity.
 
@@ -179,7 +177,7 @@ def _build_position_weights(
     return weights, tickers
 
 
-def _compute_returns(price_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+def _compute_returns(price_data: dict[str, pd.DataFrame]) -> pd.DataFrame:
     """
     Build a wide returns DataFrame indexed by date with columns = tickers.
     """

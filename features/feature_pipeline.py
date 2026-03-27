@@ -14,11 +14,11 @@ import warnings
 import numpy as np
 import pandas as pd
 
-from .momentum_features import calculate_momentum_features
-from .volatility_features import calculate_volatility_features
-from .liquidity_features import calculate_liquidity_features
-from .regime_features import detect_market_regime
 from .capm_features import compute_capm_features
+from .liquidity_features import calculate_liquidity_features
+from .momentum_features import calculate_momentum_features
+from .regime_features import detect_market_regime
+from .volatility_features import calculate_volatility_features
 
 _HAS_TREND_AGENT = True
 

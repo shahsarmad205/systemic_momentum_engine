@@ -23,15 +23,13 @@ Usage (from project root):
 
 import math
 from dataclasses import dataclass
-from typing import List
 
 import numpy as np
 import pandas as pd
 
-from agents.weight_learning_agent import build_feature_matrix, WeightLearner
+from agents.weight_learning_agent import WeightLearner, build_feature_matrix
 from backtesting import Backtester, load_config
 from config import apply_dev_mode, get_effective_tickers
-
 
 START_DATE = "2013-01-01"
 END_DATE = "2024-01-01"
@@ -40,7 +38,7 @@ HOLDING_WINDOWS = [1, 3, 5]
 N_SPLITS = 5
 
 
-def _resolve_tickers() -> List[str]:
+def _resolve_tickers() -> list[str]:
     """Mirror run_weight_learning's ticker resolution."""
     try:
         from main import TICKERS
@@ -117,7 +115,7 @@ def _compute_ic_stats(wf_results: list[dict]) -> tuple[float, float]:
     return mean_ic, t_stat
 
 
-def run_for_holding(holding_days: int, tickers: List[str]) -> SweepResult:
+def run_for_holding(holding_days: int, tickers: list[str]) -> SweepResult:
     print(f"\n=== Holding period: {holding_days} days ===\n")
 
     # 1) Build features for this forward window
@@ -156,7 +154,7 @@ def run_for_holding(holding_days: int, tickers: List[str]) -> SweepResult:
     if not np.isnan(mean_dir):
         print(f"    Mean Dir. Acc. (OOS)    : {mean_dir:.4f}")
     else:
-        print(f"    Mean Dir. Acc. (OOS)    : N/A")
+        print("    Mean Dir. Acc. (OOS)    : N/A")
 
     # Fit on full sample to get weights for backtest
     weights = learner.fit(features_df)

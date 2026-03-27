@@ -11,16 +11,16 @@ Outputs:
 from __future__ import annotations
 
 import argparse
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-import logging
 import numpy as np
 import pandas as pd
+
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
 
 from matplotlib import pyplot as plt
-
 from trend_signal_engine.utils.market_data import get_ohlcv
 
 

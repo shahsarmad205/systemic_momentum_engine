@@ -10,8 +10,8 @@ Canonical exposure mapping:
 
 from __future__ import annotations
 
-from typing import Iterable
 import math
+from collections.abc import Iterable
 
 CANONICAL_REGIME_EXPOSURE: dict[str, float] = {
     "Bull": 1.0,

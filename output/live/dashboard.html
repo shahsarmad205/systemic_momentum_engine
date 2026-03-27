@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Strategy health — 2026-03-26 17:02</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 1.5rem; max-width: 1100px; background: #fafafa; }
+    h1 { font-size: 1.35rem; }
+    .kpi { display: flex; flex-wrap: wrap; gap: 1rem; margin: 1rem 0; }
+    .kpi div { background: #fff; padding: 0.75rem 1rem; border-radius: 8px; border: 1px solid #e0e0e0; }
+    img { max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 6px; margin: 0.5rem 0; background: #fff; }
+    table { font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>Live monitoring dashboard</h1>
+  <p>Generated 2026-03-26 17:02:19</p>
+  <div class="kpi">
+    <div><strong>Account equity</strong><br/>97,114.09</div>
+    <div><strong>Cash</strong><br/>97114.09</div>
+    <div><strong>Total return (PnL series)</strong><br/>-2.89%</div>
+    <div><strong>Drawdown (from peak in series)</strong><br/>-2.89%</div>
+    <div><strong>Rolling IC</strong><br/>—</div>
+    <div><strong>Rolling Sharpe</strong><br/>—</div>
+  </div>
+  <h2>Equity</h2>
+  <img src="dashboard_equity.png" alt="Equity"/>
+  <h2>Rolling IC</h2>
+  <img src="dashboard_rolling_ic.png" alt="Rolling IC"/>
+  <h2>Rolling Sharpe</h2>
+  <img src="dashboard_rolling_sharpe.png" alt="Rolling Sharpe"/>
+  <h2>Top signals (bar)</h2>
+  <img src="dashboard_top_signals.png" alt="Signals"/>
+  <h2>Open positions</h2>
+  <p>No position snapshot.</p>
+  <h2>Latest rankings (top 15 rows)</h2>
+  <table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>date</th>
+      <th>asset</th>
+      <th>score</th>
+      <th>rank</th>
+      <th>percentile</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>2018-01-02</td>
+      <td>AMD</td>
+      <td>1.305756</td>
+      <td>1</td>
+      <td>1.000000</td>
+    </tr>
+    <tr>
+      <td>2018-01-02</td>
+      <td>ORCL</td>
+      <td>1.126373</td>
+      <td>2</td>
+      <td>0.956522</td>
+    </tr>
+    <tr>
+      <td>2018-01-02</td>
+      <td>LLY</td>
+      <td>0.978414</td>
+      <td>3</td>
+      <td>0.913043</td>
+    </tr>
+    <tr>
+      <td>2018-01-02</td>
+      <td>XOM</td>
+      <td>0.966718</td>
+      <td>4</td>
+      <td>0.869565</td>
+    </tr>
+    <tr>
+      <td>2018-01-02</td>
+      <td>INTC</td>
+      <td>0.930476</td>
+      <td>5</td>
+      <td>0.826087</td>
+    </tr>
+    <tr>
+      <td>2018-01-02</td>
+      <td>CVX</td>
+      <td>0.876453</td>
+      <td>6</td>
+      <td>0.782609</td>
+    </tr>
+    <tr>
+      <td>2018-01-02</td>
+      <td>AVGO</td>
+      <td>0.850696</td>
+      <td>7</td>
+      <td>0.739130</td>
+    </tr>
+    <tr>
+      <td>2018-01-02</td>
+      <td>NVDA</td>
+      <td>0.832039</td>
+      <td>8</td>
+      <td>0.695652</td>
+    </tr>
+    <tr>
+      <td>2018-01-02</td>
+      <td>JNJ</td>
+      <td>0.829820</td>
+      <td>9</td>
+      <td>0.652174</td>
+    </tr>
+    <tr>
+      <td>2018-01-02</td>
+      <td>NKE</td>
+      <td>0.813827</td>
+      <td>10</td>
+      <td>0.608696</td>
+    </tr>
+    <tr>
+      <td>2018-01-02</td>
+      <td>PFE</td>
+      <td>0.803679</td>
+      <td>11</td>
+      <td>0.565217</td>
+    </tr>
+    <tr>
+      <td>2018-01-02</td>
+      <td>JPM</td>
+      <td>0.801181</td>
+      <td>12</td>
+      <td>0.521739</td>
+    </tr>
+    <tr>
+      <td>2018-01-02</td>
+      <td>BAC</td>
+      <td>0.789227</td>
+      <td>13</td>
+      <td>0.478261</td>
+    </tr>
+    <tr>
+      <td>2018-01-02</td>
+      <td>MSFT</td>
+      <td>0.759341</td>
+      <td>14</td>
+      <td>0.434783</td>
+    </tr>
+    <tr>
+      <td>2018-01-02</td>
+      <td>AAPL</td>
+      <td>0.749170</td>
+      <td>15</td>
+      <td>0.391304</td>
+    </tr>
+  </tbody>
+</table>
+</body>
+</html>

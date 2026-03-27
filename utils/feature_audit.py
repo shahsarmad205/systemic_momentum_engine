@@ -9,8 +9,7 @@ columns), and optionally render a correlation heatmap for inspection.
 from __future__ import annotations
 
 import logging
-
-from typing import Dict, List
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -19,7 +18,7 @@ logging.getLogger("matplotlib").setLevel(logging.WARNING)
 
 
 # Columns that must never be dropped automatically, even if highly correlated.
-PROTECTED_COLUMNS: List[str] = [
+PROTECTED_COLUMNS: list[str] = [
     "daily_return",
     "momentum_3m",
     "momentum_6m",
@@ -117,9 +116,9 @@ def compute_feature_correlation_report(
 
 def get_low_redundancy_features(
     feature_matrix: pd.DataFrame,
-    protected_cols: List[str],
+    protected_cols: list[str],
     threshold: float = 0.85,
-) -> List[str]:
+) -> list[str]:
     """
     Return a list of feature columns with redundant ones removed.
 
@@ -149,9 +148,8 @@ def get_low_redundancy_features(
     all_protected = set(PROTECTED_COLUMNS) | set(protected_cols or [])
 
     to_drop: set[str] = set()
-    seen_pairs: set[tuple[str, str]] = set()
     # Process pairs grouped by unordered (a,b) key to avoid double decisions.
-    by_key: Dict[tuple, Dict] = {}
+    by_key: dict[tuple, dict] = {}
     for _, row in report.iterrows():
         a = row["feature_a"]
         b = row["feature_b"]

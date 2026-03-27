@@ -1,0 +1,35 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+src = ["."]
+exclude = [
+  ".git",
+  "data",
+  "output",
+  "__pycache__",
+  ".venv",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+# E402: path/bootstrap before imports in scripts and optional lazy imports.
+# B028: warnings without stacklevel; low signal vs churn for this codebase.
+ignore = ["E501", "E402", "B028"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011", "I001"]
+"run_live_trading.py" = ["E402"]
+"run_retrain_model.py" = ["E402"]
+# Package re-exports: explicit `import X as X` would be noisy; these are public API barrels.
+"backtesting/__init__.py" = ["F401"]
+"agents/trend_agent/__init__.py" = ["F401"]
+"agents/volatility_agent/__init__.py" = ["F401"]
+"agents/weight_learning_agent/__init__.py" = ["F401"]
+"archive/global_news_agent/__init__.py" = ["F401"]
+"archive/regional_news_agent/__init__.py" = ["F401"]
+"archive/social_sentiment_agent/__init__.py" = ["F401"]

@@ -4,12 +4,14 @@ Run from project root: python scripts/validate_backtest.py
 """
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from backtesting.config import load_config
 from backtesting.backtester import Backtester
-from main import TICKERS
+from backtesting.config import load_config
 from config import get_effective_tickers
+from main import TICKERS
+
 
 def main():
     cfg = load_config("backtest_config.yaml")

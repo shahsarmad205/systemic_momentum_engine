@@ -51,8 +51,10 @@ python run_backtest.py --cost-sensitivity
 # 3. Zero-cost baseline: set execution_costs.enabled: false and execution_costs_commission_bps/slippage to 0,
 # then run and compare final_capital to the run with costs enabled.
 
-# 4. Unit test metrics (gross equity curve and before/after metrics)
-python -m pytest tests/test_metrics.py -v
+# 4. CI unit tests (slippage helpers, OOS windows, adv cache, regime multipliers, golden smoke, kill switch)
+python -m pytest tests/ -v
+# Note: ``pyproject.toml`` quarantines a few legacy test modules (broken imports or stale expectations)
+# so ``pytest`` matches CI; un-ignore there as those tests are repaired.
 ```
 
 ### Testing turnover reduction (dead zone + position-update threshold)

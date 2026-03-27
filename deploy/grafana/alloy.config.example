@@ -1,0 +1,49 @@
+// Grafana Alloy example config for journald -> Grafana Cloud Loki.
+// Replace URL/credentials with your Grafana Cloud stack values.
+
+logging {
+  level = "info"
+}
+
+// Read systemd journal for Trend Signal Engine units.
+loki.source.journal "tse" {
+  // Keep only TSE-related units. Add/remove as needed.
+  relabel_rules = loki.relabel_rules "tse_units" {}
+}
+
+loki.relabel_rules "tse_units" {
+  rule {
+    source_labels = ["__journal__systemd_unit"]
+    regex         = "trend-signal-engine.*\\.service"
+    action        = "keep"
+  }
+
+  rule {
+    source_labels = ["__journal__systemd_unit"]
+    target_label  = "unit"
+  }
+}
+
+loki.write "grafana_cloud" {
+  endpoint {
+    url = "REPLACE_WITH_GRAFANA_CLOUD_LOKI_URL"
+
+    // One of these auth methods will be used depending on your stack.
+    // (Keep as template; choose what Grafana Cloud provides.)
+    basic_auth {
+      username = "REPLACE_WITH_INSTANCE_ID_OR_USER"
+      password = "REPLACE_WITH_TOKEN"
+    }
+  }
+}
+
+loki.process "tse_labels" {
+  forward_to = [loki.write.grafana_cloud.receiver]
+
+  stage.labels {
+    values = {
+      "app" = "trend_signal_engine",
+    }
+  }
+}
+

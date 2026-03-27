@@ -5,158 +5,309 @@
 # All values shown are defaults; delete any line to use its default.
 
 # Tickers to backtest. Any list of symbols (e.g. ["AAPL", "MSFT", "NVDA"]).
-# Universe: Top 150 S&P 500 stocks by trailing-average daily volume (ranked via yfinance Volume).
+# Universe: Top ~150 liquid US names (staging toward ~300 / ~500: measure pipeline time,
+# data/cache size, and failures per docs/STRATEGY_SHORTS_UNIVERSE_LIVE.md before expanding).
 tickers:
-  - NVDA
-  - INTC
-  - TSLA
-  - "F"
-  - NFLX
-  - AMZN
-  - PFE
-  - AAPL
-  - PLTR
-  - "T"
-  - BAC
-  - KVUE
-  - CMCSA
-  - WBD
-  - AMD
-  - MU
-  - GOOGL
-  - MSFT
-  - HBAN
-  - SMCI
-  - AVGO
-  - VZ
-  - ORCL
-  - WMT
-  - HOOD
-  - CCL
-  - CSCO
-  - PCG
-  - GOOG
-  - PYPL
-  - UBER
-  - NCLH
-  - XOM
-  - HPE
-  - FCX
-  - SLB
-  - CMG
-  - KO
-  - HPQ
-  - NKE
-  - TTD
-  - SW
-  - KEY
-  - WFC
-  - NOW
-  - KHC
-  - META
-  - "C"
-  - BMY
-  - HAL
-  - RF
-  - KMI
-  - OXY
-  - BSX
-  - DOW
-  - CSX
-  - MRK
-  - CAG
-  - DVN
-  - KDP
-  - CVX
-  - DIS
-  - VICI
-  - CRM
-  - PG
-  - LRCX
-  - MDLZ
-  - PSKY
-  - COIN
-  - AES
-  - MRNA
-  - FITB
-  - JPM
-  - USB
-  - LUV
-  - QCOM
-  - CTRA
-  - SCHW
-  - NEM
-  - MO
-  - VTRS
-  - DAL
-  - ABT
-  - NEE
-  - EQT
-  - GLW
-  - BAX
-  - APH
-  - FISV
-  - BKR
-  - SBUX
-  - CPRT
-  - WDC
-  - TFC
-  - MCHP
-  - PANW
-  - COP
-  - "ON"
-  - JNJ
-  - GM
-  - UNH
-  - DOC
-  - MOS
-  - CVS
-  - PPL
-  - EXC
-  - FAST
-  - HST
-  - GIS
-  - XYZ
-  - PEP
-  - CPB
-  - DELL
-  - BA
-  - MDT
-  - CARR
+  - "NVDA"
+  - "TSLA"
+  - "MU"
+  - "MSFT"
+  - "SNDK"
+  - "AAPL"
+  - "AVGO"
+  - "AMZN"
+  - "GOOGL"
+  - "META"
+  - "PLTR"
+  - "AMD"
+  - "GOOG"
+  - "LITE"
+  - "NFLX"
+  - "ORCL"
+  - "INTC"
+  - "XOM"
+  - "JPM"
+  - "VRT"
+  - "CVX"
+  - "CRM"
+  - "LLY"
+  - "COHR"
+  - "WMT"
+  - "WDC"
+  - "COIN"
+  - "UNH"
+  - "LRCX"
+  - "AMAT"
+  - "APP"
+  - "BAC"
   - "V"
-  - VRT
-  - TXN
-  - CRH
-  - AMAT
-  - ANET
-  - LYB
-  - GILD
-  - WMB
-  - KR
-  - WY
-  - APA
-  - BX
-  - MS
-  - TGT
-  - ABBV
-  - CL
-  - INVH
+  - "GEV"
+  - "GS"
+  - "HOOD"
+  - "JNJ"
+  - "CAT"
+  - "NOW"
+  - "GLW"
+  - "INTU"
+  - "CSCO"
+  - "COST"
+  - "BKNG"
+  - "CRWD"
+  - "C"
+  - "PG"
+  - "MA"
+  - "ADBE"
+  - "ACN"
+  - "QCOM"
+  - "GE"
+  - "DELL"
+  - "ABBV"
+  - "WFC"
+  - "BA"
+  - "KLAC"
+  - "IBM"
+  - "HD"
+  - "COP"
+  - "STX"
+  - "UBER"
+  - "LIN"
+  - "VZ"
+  - "APH"
+  - "ABT"
+  - "NEM"
+  - "AXP"
+  - "KO"
+  - "ADI"
+  - "PANW"
+  - "TXN"
+  - "RTX"
+  - "BX"
+  - "T"
+  - "MRK"
+  - "MS"
+  - "CIEN"
+  - "LMT"
+  - "OXY"
+  - "DIS"
+  - "FCX"
+  - "TMUS"
+  - "SMCI"
+  - "PFE"
+  - "CMCSA"
+  - "VLO"
+  - "TER"
+  - "COF"
+  - "TMO"
+  - "MCD"
+  - "PEP"
+  - "SLB"
+  - "BLK"
+  - "SNPS"
+  - "NEE"
+  - "SPGI"
+  - "AMGN"
+  - "ETN"
+  - "DAL"
+  - "GILD"
+  - "HON"
+  - "CEG"
+  - "ADP"
+  - "BSX"
+  - "PYPL"
+  - "PM"
+  - "CVNA"
+  - "UAL"
+  - "NKE"
+  - "ANET"
+  - "DVN"
+  - "BMY"
+  - "CF"
+  - "SCHW"
+  - "SATS"
+  - "WBD"
+  - "PH"
+  - "EOG"
+  - "KKR"
+  - "TGT"
+  - "RCL"
+  - "SBUX"
+  - "DE"
+  - "FDX"
+  - "F"
+  - "CCL"
+  - "ISRG"
+  - "VST"
+  - "DHR"
+  - "UPS"
+  - "SYK"
+  - "WDAY"
+  - "APO"
+  - "TJX"
+  - "UNP"
+  - "ELV"
+  - "MPC"
+  - "MDT"
+  - "CME"
+  - "CDNS"
+  - "FANG"
+  - "MCK"
+  - "LYB"
+  - "WELL"
+  - "BKR"
+  - "MMM"
+  - "VRTX"
+  - "MO"
+  - "MCO"
+  - "LOW"
+  - "PGR"
+  - "CRH"
+  - "PWR"
+  - "XYZ"
+  - "PSX"
+  - "ROST"
+  - "DASH"
+  - "EQIX"
+  - "TTD"
+  - "HAL"
+  - "DUK"
+  - "NOC"
+  - "GM"
+  - "CVS"
+  - "FIX"
+  - "MDLZ"
+  - "CB"
+  - "EXPE"
+  - "AMT"
+  - "HCA"
+  - "CL"
+  - "HWM"
+  - "PNC"
+  - "MPWR"
+  - "HLT"
+  - "MCHP"
+  - "EQT"
+  - "USB"
+  - "ADSK"
+  - "CMG"
+  - "JCI"
+  - "TT"
+  - "ORLY"
+  - "ICE"
+  - "SHW"
+  - "LHX"
+  - "DDOG"
+  - "KR"
+  - "AZO"
+  - "DOW"
+  - "WM"
+  - "ABNB"
+  - "NRG"
+  - "SO"
+  - "NXPI"
+  - "MRSH"
+  - "ZTS"
+  - "ULTA"
+  - "AEP"
+  - "CSX"
+  - "MSI"
+  - "KEYS"
+  - "KMB"
+  - "MAR"
+  - "FITB"
+  - "LULU"
+  - "ROP"
+  - "MNST"
+  - "URI"
+  - "LYV"
+  - "DG"
+  - "CMI"
+  - "CI"
+  - "AJG"
+  - "FTNT"
+  - "NCLH"
+  - "EA"
+  - "ARES"
+  - "AKAM"
+  - "WMB"
+  - "TDG"
+  - "COR"
+  - "PLD"
+  - "TEL"
+  - "CTAS"
+  - "AXON"
+  - "KMI"
+  - "MRNA"
+  - "ECL"
+  - "EL"
+  - "EXC"
+  - "FICO"
+  - "REGN"
+  - "OKE"
+  - "HBAN"
+  - "AON"
+  - "HPE"
+  - "GD"
+  - "TRV"
+  - "EBAY"
+  - "ODFL"
+  - "KVUE"
+  - "EXE"
+  - "TFC"
+  - "ON"
+  - "PCG"
+  - "LUV"
+  - "BDX"
   - "O"
-  - KKR
-  - CNC
-  - UPS
-  - FTNT
-  - TSCO
-  - COHR
-  - IP
-  - UAL
-  - CTSH
-  - "D"
-  - SO
-  - CSGP
-  - GEN
-  - SATS
-  - ORLY
+  - "PAYX"
+  - "CTSH"
+  - "CAH"
+  - "RF"
+  - "APD"
+  - "TTWO"
+  - "VMC"
+  - "BK"
+  - "GIS"
+  - "EMR"
+  - "DPZ"
+  - "CTRA"
+  - "KHC"
+  - "VRSK"
+  - "PSA"
+  - "DHI"
+  - "OMC"
+  - "FSLR"
+  - "TRGP"
+  - "CARR"
+  - "NSC"
+  - "EW"
+  - "ROK"
+  - "FISV"
+  - "FAST"
+  - "MLM"
+  - "HSY"
+  - "ITW"
+  - "XEL"
+  - "APA"
+  - "WAT"
+  - "JBL"
+  - "PCAR"
+  - "ALB"
+  - "AIG"
+  - "BBY"
+  - "HPQ"
+  - "DLTR"
+  - "DLR"
+  - "AME"
+  - "IBKR"
+  - "DRI"
+  - "SPG"
+  - "OTIS"
+  - "SRE"
+  - "MOS"
+  - "CTVA"
+  - "KEY"
+  - "CPRT"
+  - "IQV"
 
 # Market data: provider and local cache (avoids repeated API calls)
 data:
@@ -175,6 +326,9 @@ feature_selection:
     - ret_20d
     - rolling_vol_20
     - cs_momentum_percentile
+    - rsi_14
+    - ret_1d
+    - vol_ratio_5_20
 
 # Model selection runner settings (trend_signal_engine/run_model_selection.py)
 model_selection:
@@ -183,13 +337,15 @@ model_selection:
   lookahead_horizon_days: 1   # forward return horizon (1 = next day)
 
 backtest:
-  start_date: "2018-01-01"
+  start_date: "2013-01-01"
   end_date: "2024-01-01"
   initial_capital: 100000
   max_positions: 10
-  holding_period_days: 3   # shorter = more turnover, more trades and days with positions
-  min_holding_period_days: 5
-  rebalance_every_trading_days: 5
+  max_longs: 5
+  max_shorts: 5
+  holding_period_days: 5   # matches min_holding so planned exit aligns with actual exit
+  min_holding_period_days: 3
+  rebalance_every_trading_days: 1
   # Base rolling-std gate multiplier (overrides signals.signal_confidence_multiplier if both set — see load_config)
   signal_confidence_multiplier: 0.8
   signal_confidence_multiplier_sideways: 0.3
@@ -214,8 +370,10 @@ backtest:
 execution:
   slippage_bps: 5.0            # basis points per trade side (used when execution_costs disabled)
   commission_per_trade: 1.00   # USD flat fee per trade (used when execution_costs disabled)
-  enable_shorts: false         # set true to allow short trades; false isolates bullish validation
-  long_only: true              # ignore bearish signals; long-only portfolio
+  # Shorts: keep false until OOS/walk-forward vs long-only justifies (see docs/STRATEGY_SHORTS_UNIVERSE_LIVE.md).
+  enable_shorts: true          # allow short trades
+  long_only: false             # allow both long and short
+  regime_suppress_shorts: []   # empty = allow shorts in all regimes (default: ["Bull", "Crisis"])
 
 # Transaction costs (realistic execution: when enabled, used for entry/exit cost and slippage)
 execution_costs:
@@ -228,6 +386,11 @@ execution_costs:
 
 # Risk and position management (see docs/INDUSTRY_ROADMAP.md for industry-level settings)
 risk:
+  # Industry-standard exposures (fractions of equity)
+  max_gross_exposure: 1.5       # e.g., 100% long + 50% short = 150% gross
+  max_net_exposure: 0.5         # cap |net| exposure (long - short) / equity
+  max_short_single_name: 0.12   # cap a single short name (fraction of equity)
+  short_borrow_cost_bps: 50     # annualized borrow cost (bps) modeled as daily drag in backtests
   # Bear: selective long entries + faster exits (see backtester Bear filters)
   bear_signal_window_days: 60
   bear_signal_quantile: 0.70
@@ -250,7 +413,7 @@ risk:
   # Crisis day 4+ selective entries: require score >= this quantile of rolling window (day 1-3 blocked in backtester)
   crisis_signal_window_days: 60
   crisis_signal_quantile: 0.95
-  position_sizing: "kelly"      # "equal" | "vol_scaled" | "kelly" — kelly = default (half-Kelly, rolling stats)
+  position_sizing: "equal"      # "equal" | "vol_scaled" | "kelly"
   vol_target_annual: 0.12      # target annual vol for vol_scaled sizing (10–15% typical)
   vol_lookback_days: 20        # rolling window for volatility estimate
   kelly_fraction: 0.5          # fraction of full Kelly when position_sizing="kelly"
@@ -263,6 +426,35 @@ risk:
   max_drawdown_pct: 0.0       # disable circuit breaker (research backtest; use in live only)
   drawdown_resume_pct: 0.0
   min_holding_early_exit_drawdown_pct: 0.03
+  # Live pre-flight: historical/parametric/MC VaR from OHLCV cache vs max loss fraction of equity
+  var_check:
+    enabled: true
+    confidence: 0.95
+    lookback_days: 60
+    max_var_pct: 0.05
+    method: "historical"       # historical | parametric | monte_carlo
+    check_target: false
+    strict_coverage: false
+    min_weight_coverage: 0.002
+
+# Live execution: greedy portfolio factor limits (beta / sector / single-name).
+# Overrides ``risk.max_beta`` / ``max_sector_exposure`` / paths when keys are set here.
+# ``max_beta`` is portfolio sum(weight * beta); ~1.0–1.3 typical for diversified long; lower = low-beta mandate.
+risk_factors:
+  max_beta: 1.25
+  max_sector_exposure: 0.30
+  max_single_name_pct: 0.12
+  sector_mapping_path: "config/sector_mapping.csv"
+  beta_cache_path: "output/beta_cache.csv"
+  beta_lookback_days: 60
+  compute_beta_on_fly: false
+  # Prevent position notional from exceeding max_adv_pct of (ADV shares × price); uses OHLCV cache.
+  liquidity:
+    enabled: true
+    max_adv_pct: 0.05           # shares_order <= max_adv_pct * ADV
+    adv_lookback_days: 20
+    adv_cache_path: "output/adv_cache.csv"
+    refresh_cache_on_run: false # if true, recompute ADV from parquet every check (slow)
 
 # Markowitz Mean-Variance position sizing (set enabled: true to use mv_max_sharpe / mv_min_variance)
 mean_variance:
@@ -277,15 +469,44 @@ signals:
   # This now drives both static and dynamic thresholds. For learned
   # weights with small coefficients, keep this low (e.g. 0.01–0.05).
   min_signal_strength: 0.01   # low so more tickers qualify for strict validation (trades≥300, tickers≥12)
+  flip_threshold: 0.005        # min score delta to flip direction (default 0.15 too high for ensemble scores ~0.007 std)
   # Skip new entry if abs(raw_score) < multiplier * rolling_60d_std(adjusted_score) per ticker (see backtester).
   # Global default; per-regime overrides below (Sideways more permissive).
-  signal_confidence_multiplier: 0.8
-  signal_confidence_multiplier_bull: 0.8
+  signal_confidence_multiplier: 0.0
+  signal_confidence_multiplier_bull: 0.0
   signal_confidence_multiplier_sideways: 0.3
-  signal_confidence_multiplier_bear: 0.8
-  signal_confidence_multiplier_crisis: 0.8
-  mode: "learned"              # "price" | "full" | "learned"
+  signal_confidence_multiplier_bear: 0.0
+  signal_confidence_multiplier_crisis: 0.0
+  dynamic_thresholds_enabled: false
+  base_signal_threshold: 0.01
+  mode: "ensemble"             # "price" | "full" | "learned" | "ml" | "ensemble"
   learned_weights_path: "output/learned_weights.json"   # used when mode=learned
+  ml_model_path: "output/models/best_model.pkl"
+  ml_model_type: "classifier"
+  ml_clip: false
+  ensemble:
+    models:
+      - path: "output/models/logisticregression.pkl"
+        weight: 0.15
+        type: "classifier"
+      - path: "output/models/xgbclassifier.pkl"
+        weight: 0.10
+        type: "classifier"
+      - path: "output/models/ridge.pkl"
+        weight: 0.20
+        type: "regressor"
+      - path: "output/models/xgbregressor.pkl"
+        weight: 0.20
+        type: "regressor"
+      - path: "output/models/shortlogistic.pkl"
+        weight: 0.15
+        type: "short_classifier"
+      - path: "output/models/shortxgb.pkl"
+        weight: 0.20
+        type: "short_classifier"
+    normalize: true
+    standardize: true
+    clip: false
   weights:
     trend: 1.0
     regional_news: 0.5
@@ -377,3 +598,80 @@ output:
   trades_csv_path: "output/backtests/trades.csv"
   equity_csv_path: "output/backtests/daily_equity.csv"
   cost_sensitivity_report_path: "output/backtests/cost_sensitivity_report.csv"
+
+# Daily automation (run_daily_pipeline.py): orchestration and optional strict data gate.
+pipeline:
+  learned_weights_path: "output/learned_weights.json"
+  retrain_interval_days: 30
+  retrain_script: "run_retrain_baseline.py"
+  pipeline_log: "output/live/pipeline.log"
+  # When true: exit non-zero if OHLCV is still older than last US session after a refresh attempt.
+  fail_if_cache_stale_after_refresh: false
+
+# Periodic full retrain (run_retrain_model.py or scripts/refresh_model.sh). Daily pipeline
+# may still call run_retrain_baseline.py when weights are stale (see pipeline:).
+retraining:
+  enabled: true
+  model_type: "learned_weights"   # learned_weights | ml
+  train_start_date: "2018-01-01"
+  train_window_years: 5
+  schedule: "monthly"              # informational; enforce via cron
+  run_hour: 0                      # UTC — for your scheduler docs only
+  run_minute: 0
+  output_path: "output/learned_weights.json"
+  scaler_output_path: "output/learned_weights_scaler.json"
+  log_path: "output/live/retrain.log"
+  backup_suffix: ".before_retrain"
+  skip_if_trained_within_days: 0  # e.g. 25 to no-op when last success was recent
+  validate_with_backtest: true
+  # True OOS: last N calendar days are NOT used in ridge fit; acceptance backtests only that tail.
+  # Set to 0 only for debugging (validation then overlaps training — not comparable to full-curve Sharpe).
+  validation_holdout_calendar_days: 252
+  # Split the OOS tail into K segments; acceptance uses mean Sharpe across them (less noisy than K=1).
+  validation_walk_forward_windows: 3
+  # If >0: require new>old on at least this many windows (in addition to mean ratio test below).
+  accept_if_better_on_windows: 0
+  # When holdout is 0, falls back to this single long window ending at train_end (overlapping).
+  validation_backtest_days: 380
+  min_sharpe_ratio_vs_previous: 0.85   # mean OOS Sharpe new >= ratio × mean OOS previous
+  # After a successful accept, mean OOS is stored; optional extra gate vs last good deploy:
+  compare_to_last_accepted_mean: false
+  min_sharpe_ratio_vs_last_accepted: 0.80
+  last_accepted_oos_path: "output/retraining_last_accepted_oos.json"
+  alert_on_failure: true
+  # Copy accepted artifacts to output/models/releases/<YYYYMMDD>/ (see docs/ARTIFACT_LAYOUT.md).
+  release_snapshot_on_success: true
+  releases_dir: "output/models/releases"
+  # Staged deploy: keep using live weights while shadow-testing new scores in parallel — not automated here;
+  # run a second checkout or copy weights + dry-run pipeline if you want a shadow week.
+  # For model_type: ml, set output_path: "output/models/best_model.pkl" (or add copy step in config).
+
+# Live broker orders: YAML toggle + env kill switch (see docs/RUNBOOK.md).
+live:
+  trading_enabled: true
+  trading_halt_env: "TRADING_HALTED"
+
+# Live execution: record fills vs signal reference for cost calibration (see scripts/fetch_fills.py).
+slippage_tracking:
+  enabled: true
+  trades_file: "output/live/trades.csv"
+  pending_trades_file: "output/live/trades_pending.csv"
+  signal_price_source: "close"     # close | open (last OHLCV bar in cache)
+  alert_threshold_bps: 10         # alert if rolling mean adverse slippage exceeds this (bps)
+  rolling_trades: 20
+  slippage_metrics_csv: "output/live/slippage_metrics.csv"
+
+# Live monitoring (run_performance_tracker.py): rolling IC/Sharpe, alerts, HTML dashboard
+monitoring:
+  ic_rolling_window: 20
+  sharpe_rolling_window: 20
+  ic_alert_threshold: 0.02
+  sharpe_alert_threshold: 0.0
+  # Drift escalation: treat IC/Sharpe vs thresholds as paging signals; document owner + action in docs/RUNBOOK.md.
+  alert_method: "print" # print | email | slack
+  email_recipient: "your@email.com"
+  # SMTP for email: set env SMTP_HOST, SMTP_PORT (default 587), SMTP_USER, SMTP_PASSWORD, SMTP_FROM
+  slack_webhook: "https://hooks.slack.com/services/..."
+  dashboard_path: "output/live/dashboard.html"
+  generate_dashboard: true
+  monitoring_metrics_path: "output/live/monitoring_metrics.csv"
