@@ -6,7 +6,8 @@ Runs a ordered sequence with unified logging:
 
 1. **Preflight** — config paths, learned weights presence, optional Alpaca auth probe.
 2. **Daily pipeline** — delegates to ``run_daily_pipeline.py`` (OHLCV / features, retrain, live).
-3. **Performance tracker** — delegates to ``run_performance_tracker.py`` (IC, dashboards, alerts).
+3. **Governance summary** — delegates to ``scripts/governance_daily_summary.py --strict``.
+4. **Performance tracker** — delegates to ``run_performance_tracker.py`` (IC, dashboards, alerts).
 
 **Safety:** By default this passes ``--dry-run`` to the daily pipeline (no broker orders).
 Use ``--execute`` only when you intend to place orders.
@@ -184,6 +185,8 @@ def _build_pipeline_argv(ns: argparse.Namespace) -> list[str]:
         cmd.append("--no-feature-refresh")
     if ns.live_extra.strip():
         cmd.extend(["--live-extra", ns.live_extra.strip()])
+    if ns.strict_governance:
+        cmd.append("--strict-preflight")
     return cmd
 
 
@@ -206,6 +209,18 @@ def main() -> None:
     parser.add_argument("--skip-preflight", action="store_true")
     parser.add_argument("--skip-pipeline", action="store_true")
     parser.add_argument("--skip-tracker", action="store_true")
+    parser.add_argument(
+        "--strict-governance",
+        action="store_true",
+        default=True,
+        help="Force strict governance preflight in pipeline and require strict governance summary pass.",
+    )
+    parser.add_argument(
+        "--no-strict-governance",
+        dest="strict_governance",
+        action="store_false",
+        help="Disable strict governance enforcement in ops suite.",
+    )
     parser.add_argument(
         "--strict-alpaca",
         action="store_true",
@@ -244,8 +259,10 @@ def main() -> None:
         _emit(logf, "=" * 70)
         _emit(logf, "ops_suite start")
         _emit(logf, f"execute_orders={ns.execute} config={ns.config}")
+        _emit(logf, f"strict_governance={ns.strict_governance}")
 
         try:
+            pipeline_ran = False
             if not ns.skip_preflight:
                 if not _preflight(
                     config_rel=ns.config,
@@ -263,8 +280,24 @@ def main() -> None:
                 if rc != 0:
                     _emit(logf, "ops_suite ABORT (pipeline)")
                     sys.exit(rc)
+                pipeline_ran = True
             else:
                 _emit(logf, "pipeline skipped")
+
+            if ns.strict_governance and pipeline_ran:
+                gcmd = [
+                    sys.executable,
+                    str(_ROOT / "scripts" / "governance_daily_summary.py"),
+                    "--config",
+                    ns.config,
+                    "--strict",
+                ]
+                grc = _run_subprocess(gcmd, logf=logf, label="governance_summary")
+                if grc != 0:
+                    _emit(logf, "ops_suite ABORT (governance_summary)")
+                    sys.exit(grc)
+            else:
+                _emit(logf, "governance summary skipped")
 
             if not ns.skip_tracker:
                 tracker = [sys.executable, str(_ROOT / "run_performance_tracker.py")]

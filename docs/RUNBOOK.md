@@ -9,6 +9,18 @@ Short recovery paths for batch jobs and live execution. Log paths: see [ARTIFACT
 3. **`run_live_trading` failed:** Check `output/live/execution_log.jsonl` last line for `skipped`, `reason`, `orders_placed`.
 4. Re-run after fix: `python run_daily_pipeline.py --dry-run` then full run if clean.
 
+## Ops Suite strict governance (Phase 8)
+
+`run_ops_suite.py` now enforces strict governance by default:
+
+1. Pipeline runs with `--strict-preflight`.
+2. Governance summary must pass via `scripts/governance_daily_summary.py --strict`.
+3. Any non-pass governance status aborts the suite before tracker.
+
+Debug-only bypass:
+
+- `python run_ops_suite.py --no-strict-governance`
+
 ## Alpaca 401 / unauthorized
 
 1. Confirm `ALPACA_API_KEY` and `ALPACA_SECRET_KEY` are **different** strings (Key ID vs Secret). See `brokers/alpaca_broker.py` validation.
@@ -26,6 +38,13 @@ Short recovery paths for batch jobs and live execution. Log paths: see [ARTIFACT
 1. Confirm `slippage_tracking.enabled: true` and paths in `backtest_config.yaml`.
 2. Ensure `scripts/fetch_fills.py` (or your scheduled job) runs after fills appear in Alpaca.
 3. Review `output/live/trades_pending.csv` vs `trades.csv` for stuck rows.
+
+## Strict preflight TCA failure
+
+1. Run `python scripts/check_tca_health.py --config backtest_config.yaml --strict` and inspect `output/live/tca/tca_health_latest.json`.
+2. If `INSUFFICIENT_FILLS` and this is a fresh rollout, either gather more fills or set `governance.tca_health.fail_on_no_data: false`.
+3. If slippage exceeds thresholds, review recent fills in `output/live/trades.csv`, adjust execution assumptions (`execution_costs.slippage_bps`) and signal aggressiveness before re-enabling live.
+4. Clear/refresh preflight state by rerunning `python run_daily_pipeline.py --strict-preflight --dry-run` after fixes.
 
 ## Execution skipped liquidity / risk
 

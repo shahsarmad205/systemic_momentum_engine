@@ -28,12 +28,13 @@ Examples::
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shlex
 import subprocess
 import sys
 import traceback
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -216,6 +217,180 @@ def run_subprocess(
         raise
 
 
+def _write_preflight_incident_artifact(
+    *,
+    run_id: str,
+    error: Exception,
+    check_labels: list[str],
+    failed_label: str,
+    root: Path,
+) -> Path:
+    rd = _run_dir(run_id, root=root)
+    incident_path = rd / "strict_preflight_incident.json"
+    tb_tail = "\n".join(traceback.format_exception(type(error), error, error.__traceback__)[-50:])
+    payload = {
+        "run_id": run_id,
+        "run_at_utc": datetime.now(timezone.utc).isoformat(),
+        "stage": "run_daily_pipeline.strict_preflight",
+        "status": "FAIL",
+        "failed_check_label": failed_label,
+        "configured_checks": list(check_labels),
+        "exception_type": type(error).__name__,
+        "exception_message": str(error),
+        "traceback_tail": tb_tail,
+    }
+    incident_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return incident_path
+
+
+def run_governance_preflight(
+    *,
+    cfg: dict[str, Any],
+    cfg_path: Path,
+    cwd: Path,
+    logf: TextIO,
+) -> bool:
+    from utils.trading_control import set_trading_halt_latch
+
+    try:
+        gov = cfg.get("governance") or {}
+        pre = gov.get("preflight") or {}
+        if not isinstance(pre, dict):
+            pre = {}
+        models_dir = cwd / "output" / "models"
+        pointer_path = models_dir / "production_pointer.json"
+
+        try:
+            cfg_arg = cfg_path.relative_to(cwd)
+        except ValueError:
+            cfg_arg = cfg_path
+
+        checks: list[tuple[str, list[str]]] = []
+        shadow_enabled = bool(pre.get("run_shadow_monitor", True))
+        bootstrap_allow_missing_production = bool(pre.get("bootstrap_allow_missing_production", True))
+        if shadow_enabled and (not pointer_path.exists()) and bootstrap_allow_missing_production:
+            log_line(logf, f"strict preflight: skipping shadow monitor (bootstrap; missing {pointer_path})")
+            shadow_enabled = False
+
+        if shadow_enabled:
+            checks.append(
+                (
+                    "strict_preflight:shadow_monitor",
+                    [
+                        sys.executable,
+                        str(cwd / "scripts" / "run_shadow_monitor.py"),
+                        "--config",
+                        str(cfg_arg),
+                        "--strict",
+                    ],
+                )
+            )
+        if bool(pre.get("run_hard_limit_check", True)):
+            target_rel = str(pre.get("hard_limit_target_csv", "output/live/target_executable_latest.csv") or "output/live/target_executable_latest.csv")
+            target_path = Path(target_rel)
+            if not target_path.is_absolute():
+                target_path = (cwd / target_path).resolve()
+
+            fresh_hours = float(pre.get("hard_limit_target_max_age_hours", 6.0) or 6.0)
+            allow_skip_hard_limit = bool(pre.get("allow_skip_hard_limit_check", False))
+            target_is_fresh = False
+            if target_path.exists():
+                age_hours = (datetime.now().timestamp() - float(target_path.stat().st_mtime)) / 3600.0
+                target_is_fresh = age_hours <= fresh_hours
+                if not target_is_fresh:
+                    msg = f"strict preflight: hard-limit target stale age={age_hours:.2f}h > {fresh_hours:.2f}h"
+                    if allow_skip_hard_limit:
+                        log_line(logf, msg + "; skipping by config")
+                    else:
+                        raise RuntimeError(msg)
+            else:
+                msg = f"strict preflight: hard-limit target missing: {target_path}"
+                if allow_skip_hard_limit:
+                    log_line(logf, msg + "; skipping by config")
+                else:
+                    raise RuntimeError(msg)
+
+            if target_is_fresh:
+                target_arg = target_path
+                try:
+                    target_arg = target_path.relative_to(cwd)
+                except ValueError:
+                    pass
+                checks.append(
+                    (
+                        "strict_preflight:hard_limit_check",
+                        [
+                            sys.executable,
+                            str(cwd / "scripts" / "check_risk_limits.py"),
+                            "--config",
+                            str(cfg_arg),
+                            "--target-csv",
+                            str(target_arg),
+                            "--strict",
+                        ],
+                    )
+                )
+        if bool(pre.get("run_tca_health_check", True)):
+            checks.append(
+                (
+                    "strict_preflight:tca_health_check",
+                    [
+                        sys.executable,
+                        str(cwd / "scripts" / "check_tca_health.py"),
+                        "--config",
+                        str(cfg_arg),
+                        "--strict",
+                    ],
+                )
+            )
+
+        if not checks:
+            if bool(pre.get("allow_empty_checks", False)):
+                log_line(logf, "strict preflight enabled with no checks; continuing by config")
+                return True
+            raise RuntimeError("strict preflight enabled but no checks executed")
+
+        failed_label = ""
+        for label, argv in checks:
+            failed_label = label
+            run_subprocess(argv, cwd=cwd, logf=logf, label=label)
+
+        latch_path = set_trading_halt_latch(
+            cfg,
+            active=False,
+            reason="strict preflight passed",
+            source="run_daily_pipeline.strict_preflight",
+            details={"checks": [name for name, _ in checks]},
+        )
+        log_line(logf, f"strict preflight PASS; cleared halt latch at {latch_path}")
+        return True
+    except Exception as exc:
+        # Best-effort incident artifact for postmortem; never block fail-closed latch.
+        try:
+            rid = (os.environ.get("RUN_ID") or "").strip() or ensure_run_id_in_env()
+            check_labels = [name for name, _ in checks] if "checks" in locals() else []
+            failed = failed_label if "failed_label" in locals() else ""
+            incident_path = _write_preflight_incident_artifact(
+                run_id=rid,
+                error=exc,
+                check_labels=check_labels,
+                failed_label=failed,
+                root=cwd,
+            )
+            log_line(logf, f"strict preflight incident artifact: {incident_path}")
+        except Exception as incident_exc:
+            log_line(logf, f"strict preflight incident artifact failed: {incident_exc}")
+
+        latch_path = set_trading_halt_latch(
+            cfg,
+            active=True,
+            reason=f"strict preflight failed: {exc}",
+            source="run_daily_pipeline.strict_preflight",
+        )
+        log_line(logf, f"strict preflight FAIL; activated halt latch at {latch_path}")
+        return False
+
+
 def main() -> None:
     _require_python311()
     parser = argparse.ArgumentParser(description="Daily cache / retrain / live pipeline")
@@ -257,6 +432,11 @@ def main() -> None:
         help="Extra arguments for run_live_trading.py, as a single quoted string "
         '(e.g. \'--date 2025-03-24\')',
     )
+    parser.add_argument(
+        "--strict-preflight",
+        action="store_true",
+        help="Run strict governance checks (shadow monitor + hard-limit + TCA health) before live step; set/clear halt latch",
+    )
     args = parser.parse_args()
 
     _chdir_root()
@@ -269,6 +449,8 @@ def main() -> None:
         sys.exit(1)
 
     cfg = load_config(cfg_path)
+    pl_cfg = cfg.get("pipeline") or {}
+    strict_preflight_enabled = bool(args.strict_preflight or bool(pl_cfg.get("strict_preflight_default", False)))
     # Snapshot key inputs for auditability (best-effort; never fails the run).
     try:
         snaps: dict[str, Any] = {}
@@ -300,7 +482,7 @@ def main() -> None:
         log_line(logf, "pipeline start")
         log_line(
             logf,
-            f"dry_run={args.dry_run} no_retrain={args.no_retrain} force_retrain={args.force_retrain}",
+            f"dry_run={args.dry_run} no_retrain={args.no_retrain} force_retrain={args.force_retrain} strict_preflight={strict_preflight_enabled}",
         )
 
         try:
@@ -391,6 +573,17 @@ def main() -> None:
             live_script = _ROOT / "run_live_trading.py"
             if not live_script.is_file():
                 raise FileNotFoundError(f"Missing {live_script}")
+
+            if strict_preflight_enabled:
+                ok = run_governance_preflight(
+                    cfg=cfg,
+                    cfg_path=cfg_path,
+                    cwd=_ROOT,
+                    logf=logf,
+                )
+                if not ok:
+                    log_line(logf, "FATAL: strict preflight failed; live step skipped")
+                    sys.exit(1)
 
             live_argv = [sys.executable, str(live_script)]
             if not args.dry_run:
