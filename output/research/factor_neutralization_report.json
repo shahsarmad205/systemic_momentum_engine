@@ -1,30 +1,30 @@
 {
-  "n_dates": 2768,
+  "n_dates": 1655,
   "factor_correlations_before": {
-    "sector_Other": 0.0018826652317167124,
-    "sector_Financials": -0.008868659985795783,
-    "market_beta": -0.04022297371788968,
-    "sector_Technology": -0.012269400185930486,
-    "sector_Utilities": -0.002916799570414736,
-    "sector_Consumer Discretionary": -0.013134682002006215,
-    "size_factor": -0.023214064122016837,
-    "sector_Consumer Staples": 0.015168213465955725,
-    "sector_Industrials": 0.009182213130678664,
-    "sector_Energy": 0.013384833294429811,
-    "sector_Healthcare": 0.004599929320620908
+    "sector_Consumer Staples": -7.544989412864843e-06,
+    "size_factor": 0.034410506099187554,
+    "market_beta": -0.027835408974918357,
+    "sector_Healthcare": 0.00675589527190544,
+    "sector_Consumer Discretionary": 0.015098990767886395,
+    "sector_Other": -0.02074967437599002,
+    "sector_Technology": 0.021310839491382936,
+    "sector_Utilities": 0.009278974718815034,
+    "sector_Industrials": -0.008218102059940566,
+    "sector_Energy": -0.021709953084679434,
+    "sector_Financials": 0.014918743912928856
   },
   "factor_correlations_after": {
-    "sector_Other": 3.4749517130278195e-19,
-    "sector_Financials": -1.8482883153917045e-17,
-    "market_beta": 1.522989572569968e-17,
-    "sector_Technology": 6.888350759233974e-17,
-    "sector_Utilities": -1.410457285128472e-17,
-    "sector_Consumer Discretionary": -2.3545276372917217e-17,
-    "size_factor": -7.549684770984286e-19,
-    "sector_Consumer Staples": -1.8205116900780044e-17,
-    "sector_Industrials": -1.231843608083914e-17,
-    "sector_Energy": -3.677765050777502e-19,
-    "sector_Healthcare": -1.9275559466507964e-17
+    "sector_Consumer Staples": -1.3699313064766269e-18,
+    "size_factor": -1.3262951097578388e-16,
+    "market_beta": -4.4939945286910856e-17,
+    "sector_Healthcare": -4.8082363184983485e-18,
+    "sector_Consumer Discretionary": -6.309991668717033e-18,
+    "sector_Other": 3.282999302322585e-17,
+    "sector_Technology": -6.124034154583034e-17,
+    "sector_Utilities": 9.56093824289858e-18,
+    "sector_Industrials": 3.3527703741849083e-18,
+    "sector_Energy": 8.414445645669569e-18,
+    "sector_Financials": -1.875366169736188e-18
   },
-  "signal_ic_after_neutralization": 0.02623511192328974
+  "signal_ic_after_neutralization": 0.00022124534508841478
 }

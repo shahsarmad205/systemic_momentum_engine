@@ -24,7 +24,7 @@ from utils.adv_cache import (
 )
 from utils.live_trades import append_trade_row
 from utils.market_data import get_ohlcv
-from utils.risk_utils import load_beta_cache, load_sector_mapping
+from utils.quant_utils import load_beta_cache, load_sector_mapping
 from utils.trading_control import is_live_trading_allowed, trading_halt_reason
 
 

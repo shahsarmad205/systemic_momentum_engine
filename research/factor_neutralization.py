@@ -97,7 +97,7 @@ class FactorNeutralizer:
     def _compute_sector_dummies(self, tickers: list[str]) -> pd.DataFrame:
         """One-hot sector encoding; drop first to avoid collinearity."""
         try:
-            from utils.sectors import SECTOR_MAP
+            from utils.quant_utils import SECTOR_MAP
         except ImportError:
             return pd.DataFrame(index=tickers)
         sectors = [SECTOR_MAP.get(t, "Other") for t in tickers]
@@ -157,7 +157,10 @@ class FactorNeutralizer:
         if len(daily_signals) < self.min_observations:
             return list(daily_signals), None
         tickers = [t for t, _ in daily_signals]
-        y = np.array([float(_row_to_dict(r).get("adjusted_score", 0.0)) for _, r in daily_signals])
+        y_raw = np.array([float(_row_to_dict(r).get("adjusted_score", 0.0)) for _, r in daily_signals])
+        # Sanitize y before regression
+        y = np.clip(np.nan_to_num(y_raw, nan=0.0), -10.0, 10.0)
+        
         if len(tickers) != len(y):
             return list(daily_signals), None
         X_list: list[np.ndarray] = []
@@ -178,18 +181,22 @@ class FactorNeutralizer:
             col_names.append("size_factor")
         if not X_list:
             return list(daily_signals), None
+        
         X = np.column_stack(X_list)
-        X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+        # Aggressive sanitization of features
+        X = np.clip(np.nan_to_num(X, nan=0.0), -100.0, 100.0)
+        
         n, k = X.shape
         if n < self.min_observations or k >= n:
             return list(daily_signals), None
         # Add intercept
         X_with_const = np.column_stack([np.ones(n), X])
         try:
-            beta, _, _, _ = np.linalg.lstsq(X_with_const, y, rcond=None)
-            if beta.size == 0:
-                return list(daily_signals), None
-            fitted = X_with_const @ beta
+            with np.errstate(all="ignore"):
+                beta, _, _, _ = np.linalg.lstsq(X_with_const, y, rcond=None)
+                if beta.size == 0 or not np.isfinite(beta).all():
+                    return list(daily_signals), None
+                fitted = X_with_const @ beta
             residuals = y - fitted
         except Exception:
             return list(daily_signals), None

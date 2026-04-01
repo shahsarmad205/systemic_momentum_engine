@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from utils.vol_sizing import apply_vol_kill_switch
+from utils.quant_utils import apply_vol_kill_switch
 
 
 def test_scalar_trigger_and_no_trigger() -> None:

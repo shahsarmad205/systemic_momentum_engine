@@ -319,13 +319,16 @@ def _run_ic_decay(result, config):
 # Transaction cost sensitivity runner
 # ------------------------------------------------------------------
 
-def _run_cost_sensitivity(config, tickers):
+def _run_cost_sensitivity(config, tickers, price_data=None, signal_data=None):
     """Run backtests across cost scenarios and output a report (console + CSV)."""
     print("\n  Transaction cost sensitivity analysis")
     print("  (Strategy performance across different slippage & commission assumptions)\n")
 
     scenarios = getattr(config, "cost_sensitivity_scenarios", None)
-    df = run_transaction_cost_sensitivity(config, tickers, scenarios=scenarios, verbose=True)
+    df = run_transaction_cost_sensitivity(
+        config, tickers, scenarios=scenarios, verbose=True,
+        price_data=price_data, signal_data=signal_data
+    )
 
     # Console report
     print(f"\n{SEP}")
@@ -511,11 +514,15 @@ def main():
         print("  Signal-score std used per run comes from the backtester.")
         print()
 
+        # Phase 1: Prepare data and signals ONCE
+        engine_prep = BacktestEngine(config=config, config_path=args.config)
+        price_data, signal_data = engine_prep.prepare_universe_data(tickers)
+
         rows = []
         for mult in multipliers:
             config.signal_threshold_std_multiplier = float(mult)
             engine = BacktestEngine(config=config, config_path=args.config)
-            result = engine.run_backtest(tickers)
+            result = engine.run_backtest(tickers, price_data=price_data, signal_data=signal_data)
             m = result.metrics
 
             total_ret = float(m.get("total_return", 0.0) or 0.0)
@@ -566,11 +573,15 @@ def main():
         print("  Signal confidence scan (abs(raw_score) vs mult × rolling 60d std)")
         print(SEP)
 
+        # Phase 1: Prepare data and signals ONCE
+        engine_prep = BacktestEngine(config=config, config_path=args.config)
+        price_data, signal_data = engine_prep.prepare_universe_data(tickers)
+
         rows = []
         for mult in multipliers:
             config.signal_confidence_multiplier = float(mult)
             engine = BacktestEngine(config=config, config_path=args.config)
-            result = engine.run_backtest(tickers)
+            result = engine.run_backtest(tickers, price_data=price_data, signal_data=signal_data)
             m = result.metrics
 
             total_ret = float(m.get("total_return", 0.0) or 0.0)
@@ -604,7 +615,14 @@ def main():
         return
 
     engine = BacktestEngine(config=config, config_path=args.config)
-    result = engine.run_backtest(tickers)
+    
+    # Phase 1: Prepare data and signals ONCE for the entire universe (if not already done by a scan above)
+    # Note: If a scan was run above, price_data/signal_data will already be in local scope.
+    if 'price_data' not in locals() or 'signal_data' not in locals():
+        price_data, signal_data = engine.prepare_universe_data(tickers)
+    
+    # Run the primary backtest with pre-loaded data
+    result = engine.run_backtest(tickers, price_data=price_data, signal_data=signal_data)
 
     if result.trades.empty:
         _print_outputs_produced(config, result, outputs_written=[])
@@ -705,13 +723,13 @@ def main():
     # --- Optional transaction cost sensitivity ---
     if args.cost_sensitivity:
         print()
-        _run_cost_sensitivity(config, tickers)
+        _run_cost_sensitivity(config, tickers, price_data=price_data, signal_data=signal_data)
 
     # --- Execution costs sensitivity (config: execution_costs.sensitivity_test) ---
     if getattr(config, "execution_costs_sensitivity_test", False):
         print()
         print("  Execution cost sensitivity (total bps scenarios)…")
-        run_execution_costs_sensitivity(config, tickers)
+        run_execution_costs_sensitivity(config, tickers, price_data=price_data, signal_data=signal_data)
 
     # Experiment snapshot (timestamped run folder)
     exp_dir = engine.save_experiment_snapshot(result)

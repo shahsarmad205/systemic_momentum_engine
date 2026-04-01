@@ -21,12 +21,35 @@ import logging
 import numpy as np
 import pandas as pd
 
-from agents.trend_agent.feature_engineering import build_features
+from features.feature_pipeline import calculate_core_trend_features as build_features
 from agents.volatility_agent.volatility_model import (
     compute_rolling_confidence,
     compute_vol_term_structure,
 )
-from main import CONFIDENCE_MULTIPLIER, classify_final_signal, compute_rolling_trend_scores
+CONFIDENCE_MULTIPLIER = {
+    "High": 1.0,
+    "Medium": 0.6,
+    "Low": 0.3,
+}
+
+def classify_final_signal(adjusted_trend: float) -> str:
+    if adjusted_trend > 0.5:
+        return "Bullish"
+    elif adjusted_trend < -0.5:
+        return "Bearish"
+    else:
+        return "Neutral"
+
+def compute_rolling_trend_scores(features: pd.DataFrame) -> pd.Series:
+    scale = 10.0
+    scores = (
+        0.30 * features["momentum_3m"] * scale
+        + 0.25 * features["momentum_6m"] * scale
+        + 0.25 * features["ma_crossover_signal"]
+        + 0.20 * features["daily_return"] * scale
+    )
+    return scores
+
 from utils.ensemble_scoring import compute_ensemble_score, load_ensemble_models
 
 # Calendar-day buffers for downloading enough data around the backtest window
@@ -172,6 +195,9 @@ class SignalEngine:
         sector_relative_20d: pd.Series | None = None,
         sector_relative_60d: pd.Series | None = None,
         vol_rank: pd.Series | None = None,
+        spy_df: pd.DataFrame | None = None,
+        vix_df: pd.DataFrame | None = None,
+        vix3m_df: pd.DataFrame | None = None,
     ) -> pd.DataFrame:
         """
         Compute trend_score, confidence, adjusted_score, signal for every bar.
@@ -212,11 +238,13 @@ class SignalEngine:
         )
         if features.isna().all().any():
             bad_cols = [c for c in features.columns if features[c].isna().all()]
-            if not self._warned_all_nan_cols:
-                logger.warning("SignalEngine: all-NaN feature columns detected: %s", bad_cols)
-                self._warned_all_nan_cols = True
-            else:
-                logger.debug("SignalEngine: all-NaN feature columns detected: %s", bad_cols)
+            # Suppress warning for expected/benign empty columns like delisted_date or trailing missing
+            if bad_cols and bad_cols != ["delisted_date"]:
+                if not self._warned_all_nan_cols:
+                    logger.warning("SignalEngine: all-NaN feature columns detected: %s", bad_cols)
+                    self._warned_all_nan_cols = True
+                else:
+                    logger.debug("SignalEngine: all-NaN feature columns detected: %s", bad_cols)
 
         trend_scores = compute_rolling_trend_scores(features)
         if trend_scores.isna().all():
@@ -301,13 +329,11 @@ class SignalEngine:
 
         if need_macro:
             try:
-                from utils.market_data import get_ohlcv as _get_ohlcv
+                # Institutional Loop-Safety: Do NOT fetch macro data inside the loop.
+                # If spy_df/vix_df weren't passed in, macro features stay zero.
                 ix = features.index
-                start = ix.min().strftime("%Y-%m-%d") if hasattr(ix.min(), "strftime") else str(ix.min())[:10]
-                end = ix.max().strftime("%Y-%m-%d") if hasattr(ix.max(), "strftime") else str(ix.max())[:10]
 
-                # Vol spike = SPY realised vol (5d) / realised vol (60d)
-                spy_df = _get_ohlcv("SPY", start, end, use_cache=True, cache_ttl_days=0)
+                # 1) SPY Macro: realised vol spike
                 if spy_df is not None and not spy_df.empty and "Close" in spy_df.columns:
                     spy_close = pd.to_numeric(spy_df["Close"], errors="coerce").dropna().sort_index()
                     spy_ret = spy_close.pct_change()
@@ -315,9 +341,11 @@ class SignalEngine:
                     vol60 = spy_ret.rolling(60).std(ddof=0) * np.sqrt(252.0)
                     vol_spike = (vol5 / vol60).replace([np.inf, -np.inf], np.nan).shift(1)
                     vol_spike_series = vol_spike.reindex(features.index).fillna(0.0).astype(float)
+                elif not getattr(self, "_spy_missing_warned", False):
+                    logger.warning("SignalEngine: spy_df not provided; vol_spike features disabled for this run.")
+                    self._spy_missing_warned = True
 
-                # VIX z-score = (VIX - rolling_252d_mean) / rolling_252d_std, shifted by 1
-                vix_df = _get_ohlcv("^VIX", start, end, use_cache=True, cache_ttl_days=0)
+                # 2) VIX Macro
                 if vix_df is not None and not vix_df.empty and "Close" in vix_df.columns:
                     vix_close = pd.to_numeric(vix_df["Close"], errors="coerce").dropna().sort_index()
                     vix_mean_252 = vix_close.rolling(252).mean()
@@ -325,7 +353,7 @@ class SignalEngine:
                     vix_z = ((vix_close - vix_mean_252) / vix_std_252).shift(1)
                     vix_zscore_series = vix_z.reindex(features.index).fillna(0.0).astype(float)
 
-                    vix3m_df = _get_ohlcv("^VIX3M", start, end, use_cache=True, cache_ttl_days=0)
+                    # Thermal VIX (VIX/VIX3M)
                     if vix3m_df is not None and not vix3m_df.empty and "Close" in vix3m_df.columns:
                         vix3m_close = pd.to_numeric(vix3m_df["Close"], errors="coerce").dropna().sort_index()
                         vix3m_aligned = vix3m_close.reindex(vix_close.index).ffill()
@@ -340,8 +368,14 @@ class SignalEngine:
                             .shift(1)
                         )
                         vix_term_zscore_series = vix_tz.reindex(features.index).fillna(0.0).astype(float)
-            except Exception:
-                # If macro downloads fail, fall back to zeros.
+                    elif not getattr(self, "_vix3m_missing_warned", False):
+                        logger.warning("SignalEngine: vix3m_df not provided; VIX term structure features disabled.")
+                        self._vix3m_missing_warned = True
+                elif not getattr(self, "_vix_missing_warned", False):
+                    logger.warning("SignalEngine: vix_df not provided; VIX-based features disabled for this run.")
+                    self._vix_missing_warned = True
+            except Exception as e:
+                logger.debug("SignalEngine: Macro data processing failed; falling back to zeros. (%s)", e)
                 pass
 
         # CAPM beta (rolling 60d) if any learned/regime model uses it.
@@ -364,7 +398,7 @@ class SignalEngine:
                 ix = features.index
                 start = ix.min().strftime("%Y-%m-%d") if hasattr(ix.min(), "strftime") else str(ix.min())[:10]
                 end = ix.max().strftime("%Y-%m-%d") if hasattr(ix.max(), "strftime") else str(ix.max())[:10]
-                spy_df = _get_ohlcv("SPY", start, end, use_cache=True, cache_ttl_days=0)
+                # 3) CAPM Beta
                 if spy_df is not None and not spy_df.empty and "Close" in spy_df.columns:
                     spy_ret = pd.to_numeric(spy_df["Close"], errors="coerce").pct_change()
                     capm_df = compute_capm_features(daily_ret.astype(float), spy_ret.astype(float), window=60)
@@ -415,21 +449,21 @@ class SignalEngine:
                     + getattr(lw, "w_vol_of_vol", 0) * vol_of_vol_20.loc[mask].fillna(0)
                     + getattr(lw, "w_jump_indicator", 0) * jump_indicator.loc[mask].fillna(0)
                     + getattr(lw, "w_vol_rank", 0) * vr_series.loc[mask].fillna(0.5)
-                    + _learned_rel_vol_coef(lw) * relative_volume.loc[mask]
-                    + _learned_volume_zscore_coef(lw) * volume_zscore.loc[mask]
-                    + getattr(lw, "w_corr_market", 0) * rolling_corr_market_20.loc[mask]
-                    + getattr(lw, "w_vix_zscore", 0) * vix_zscore_series.loc[mask]
-                    + getattr(lw, "w_vol_spike", 0) * vol_spike_series.loc[mask]
-                    + _learned_vix_term_coef(lw) * vix_term_zscore_series.loc[mask]
-                    + getattr(lw, "w_rsi_zscore", 0) * mr_feat["rsi_zscore"].loc[mask]
-                    + getattr(lw, "w_bb_position", 0) * mr_feat["bb_position"].loc[mask]
-                    + getattr(lw, "w_dist_high", 0) * mr_feat["dist_high"].loc[mask]
-                    + getattr(lw, "w_dist_low", 0) * mr_feat["dist_low"].loc[mask]
-                    + getattr(lw, "w_overnight_gap", 0) * mr_feat["overnight_gap"].loc[mask]
-                    + getattr(lw, "w_intraday_rev", 0) * mr_feat["intraday_rev"].loc[mask]
-                    + getattr(lw, "w_sector_relative_20d", 0) * sr20.loc[mask]
-                    + getattr(lw, "w_sector_relative_60d", 0) * sr60.loc[mask]
-                    + getattr(lw, "w_capm_beta", 0) * capm_beta_series.loc[mask].fillna(0)
+                    + _learned_rel_vol_coef(lw) * relative_volume.loc[mask].fillna(1.0)
+                    + _learned_volume_zscore_coef(lw) * volume_zscore.loc[mask].fillna(0.0)
+                    + getattr(lw, "w_corr_market", 0) * rolling_corr_market_20.loc[mask].fillna(0.0)
+                    + getattr(lw, "w_vix_zscore", 0) * vix_zscore_series.loc[mask].fillna(0.0)
+                    + getattr(lw, "w_vol_spike", 0) * vol_spike_series.loc[mask].fillna(0.0)
+                    + _learned_vix_term_coef(lw) * vix_term_zscore_series.loc[mask].fillna(0.0)
+                    + getattr(lw, "w_rsi_zscore", 0) * mr_feat["rsi_zscore"].loc[mask].fillna(0.0)
+                    + getattr(lw, "w_bb_position", 0) * mr_feat["bb_position"].loc[mask].fillna(0.0)
+                    + getattr(lw, "w_dist_high", 0) * mr_feat["dist_high"].loc[mask].fillna(0.0)
+                    + getattr(lw, "w_dist_low", 0) * mr_feat["dist_low"].loc[mask].fillna(0.0)
+                    + getattr(lw, "w_overnight_gap", 0) * mr_feat["overnight_gap"].loc[mask].fillna(0.0)
+                    + getattr(lw, "w_intraday_rev", 0) * mr_feat["intraday_rev"].loc[mask].fillna(0.0)
+                    + getattr(lw, "w_sector_relative_20d", 0) * sr20.loc[mask].fillna(0.0)
+                    + getattr(lw, "w_sector_relative_60d", 0) * sr60.loc[mask].fillna(0.0)
+                    + getattr(lw, "w_capm_beta", 0) * capm_beta_series.loc[mask].fillna(0.0)
                 )
                 adjusted.loc[mask] = raw * getattr(lw, "score_scale", 1.0)
             still_missing = adjusted.isna()
@@ -447,21 +481,21 @@ class SignalEngine:
                     + getattr(default_lw, "w_vol_of_vol", 0) * vol_of_vol_20[still_missing].fillna(0)
                     + getattr(default_lw, "w_jump_indicator", 0) * jump_indicator[still_missing].fillna(0)
                     + getattr(default_lw, "w_vol_rank", 0) * vr_series[still_missing].fillna(0.5)
-                    + _learned_rel_vol_coef(default_lw) * relative_volume[still_missing]
-                    + _learned_volume_zscore_coef(default_lw) * volume_zscore[still_missing]
-                    + getattr(default_lw, "w_corr_market", 0) * rolling_corr_market_20[still_missing]
-                    + getattr(default_lw, "w_vix_zscore", 0) * vix_zscore_series[still_missing]
-                    + getattr(default_lw, "w_vol_spike", 0) * vol_spike_series[still_missing]
-                    + _learned_vix_term_coef(default_lw) * vix_term_zscore_series[still_missing]
-                    + getattr(default_lw, "w_rsi_zscore", 0) * mr_feat["rsi_zscore"][still_missing]
-                    + getattr(default_lw, "w_bb_position", 0) * mr_feat["bb_position"][still_missing]
-                    + getattr(default_lw, "w_dist_high", 0) * mr_feat["dist_high"][still_missing]
-                    + getattr(default_lw, "w_dist_low", 0) * mr_feat["dist_low"][still_missing]
-                    + getattr(default_lw, "w_overnight_gap", 0) * mr_feat["overnight_gap"][still_missing]
-                    + getattr(default_lw, "w_intraday_rev", 0) * mr_feat["intraday_rev"][still_missing]
-                    + getattr(default_lw, "w_sector_relative_20d", 0) * sr20[still_missing]
-                    + getattr(default_lw, "w_sector_relative_60d", 0) * sr60[still_missing]
-                    + getattr(default_lw, "w_capm_beta", 0) * capm_beta_series[still_missing].fillna(0)
+                    + _learned_rel_vol_coef(default_lw) * relative_volume[still_missing].fillna(1.0)
+                    + _learned_volume_zscore_coef(default_lw) * volume_zscore[still_missing].fillna(0.0)
+                    + getattr(default_lw, "w_corr_market", 0) * rolling_corr_market_20[still_missing].fillna(0.0)
+                    + getattr(default_lw, "w_vix_zscore", 0) * vix_zscore_series[still_missing].fillna(0.0)
+                    + getattr(default_lw, "w_vol_spike", 0) * vol_spike_series[still_missing].fillna(0.0)
+                    + _learned_vix_term_coef(default_lw) * vix_term_zscore_series[still_missing].fillna(0.0)
+                    + getattr(default_lw, "w_rsi_zscore", 0) * mr_feat["rsi_zscore"][still_missing].fillna(0.0)
+                    + getattr(default_lw, "w_bb_position", 0) * mr_feat["bb_position"][still_missing].fillna(0.0)
+                    + getattr(default_lw, "w_dist_high", 0) * mr_feat["dist_high"][still_missing].fillna(0.0)
+                    + getattr(default_lw, "w_dist_low", 0) * mr_feat["dist_low"][still_missing].fillna(0.0)
+                    + getattr(default_lw, "w_overnight_gap", 0) * mr_feat["overnight_gap"][still_missing].fillna(0.0)
+                    + getattr(default_lw, "w_intraday_rev", 0) * mr_feat["intraday_rev"][still_missing].fillna(0.0)
+                    + getattr(default_lw, "w_sector_relative_20d", 0) * sr20[still_missing].fillna(0.0)
+                    + getattr(default_lw, "w_sector_relative_60d", 0) * sr60[still_missing].fillna(0.0)
+                    + getattr(default_lw, "w_capm_beta", 0) * capm_beta_series[still_missing].fillna(0.0)
                 )
                 adjusted.loc[still_missing] = raw_def * getattr(default_lw, "score_scale", 1.0)
             adjusted = adjusted.fillna(0)
@@ -493,6 +527,7 @@ class SignalEngine:
                         }
                     ],
                     "normalize": False,
+                    "standardize": bool(getattr(self.config, "ml_standardize", False)),
                     "clip": bool(getattr(self.config, "ml_clip", False)),
                 }
             if self._ensemble_models_cache is None:
@@ -574,21 +609,21 @@ class SignalEngine:
                 + getattr(lw, "w_vol_of_vol", 0) * vol_of_vol_20.fillna(0)
                 + getattr(lw, "w_jump_indicator", 0) * jump_indicator.fillna(0)
                 + getattr(lw, "w_vol_rank", 0) * vr_series.fillna(0.5)
-                + _learned_rel_vol_coef(lw) * relative_volume
-                + _learned_volume_zscore_coef(lw) * volume_zscore
-                + getattr(lw, "w_corr_market", 0) * rolling_corr_market_20
-                + getattr(lw, "w_vix_zscore", 0) * vix_zscore_series
-                + getattr(lw, "w_vol_spike", 0) * vol_spike_series
-                + _learned_vix_term_coef(lw) * vix_term_zscore_series
-                + getattr(lw, "w_rsi_zscore", 0) * mr_feat["rsi_zscore"]
-                + getattr(lw, "w_bb_position", 0) * mr_feat["bb_position"]
-                + getattr(lw, "w_dist_high", 0) * mr_feat["dist_high"]
-                + getattr(lw, "w_dist_low", 0) * mr_feat["dist_low"]
-                + getattr(lw, "w_overnight_gap", 0) * mr_feat["overnight_gap"]
-                + getattr(lw, "w_intraday_rev", 0) * mr_feat["intraday_rev"]
-                + getattr(lw, "w_sector_relative_20d", 0) * sr20
-                + getattr(lw, "w_sector_relative_60d", 0) * sr60
-                + getattr(lw, "w_capm_beta", 0) * capm_beta_series.fillna(0)
+                + _learned_rel_vol_coef(lw) * relative_volume.fillna(1.0)
+                + _learned_volume_zscore_coef(lw) * volume_zscore.fillna(0.0)
+                + getattr(lw, "w_corr_market", 0) * rolling_corr_market_20.fillna(0.0)
+                + getattr(lw, "w_vix_zscore", 0) * vix_zscore_series.fillna(0.0)
+                + getattr(lw, "w_vol_spike", 0) * vol_spike_series.fillna(0.0)
+                + _learned_vix_term_coef(lw) * vix_term_zscore_series.fillna(0.0)
+                + getattr(lw, "w_rsi_zscore", 0) * mr_feat["rsi_zscore"].fillna(0.0)
+                + getattr(lw, "w_bb_position", 0) * mr_feat["bb_position"].fillna(0.0)
+                + getattr(lw, "w_dist_high", 0) * mr_feat["dist_high"].fillna(0.0)
+                + getattr(lw, "w_dist_low", 0) * mr_feat["dist_low"].fillna(0.0)
+                + getattr(lw, "w_overnight_gap", 0) * mr_feat["overnight_gap"].fillna(0.0)
+                + getattr(lw, "w_intraday_rev", 0) * mr_feat["intraday_rev"].fillna(0.0)
+                + getattr(lw, "w_sector_relative_20d", 0) * sr20.fillna(0.0)
+                + getattr(lw, "w_sector_relative_60d", 0) * sr60.fillna(0.0)
+                + getattr(lw, "w_capm_beta", 0) * capm_beta_series.fillna(0.0)
             )
             scale = getattr(lw, "score_scale", 1.0)
             direction = getattr(lw, "score_direction", 1)
@@ -696,7 +731,6 @@ class SignalEngine:
             ix = features.index
             start = ix.min().strftime("%Y-%m-%d") if hasattr(ix.min(), "strftime") else str(ix.min())[:10]
             end = ix.max().strftime("%Y-%m-%d") if hasattr(ix.max(), "strftime") else str(ix.max())[:10]
-            spy_df = _get_ohlcv("SPY", start, end, use_cache=True, cache_ttl_days=0)
             if spy_df is not None and not spy_df.empty and "Close" in spy_df.columns:
                 spy_ret = spy_df["Close"].pct_change()
                 capm_df = compute_capm_features(stock_ret, spy_ret)
@@ -711,6 +745,16 @@ class SignalEngine:
             signal_df["capm_alpha"] = np.nan
             signal_df["capm_beta"] = 1.0
             signal_df["capm_residual_vol"] = np.nan
+
+        # IPO Warm-up Mask: do not trade during the first HISTORY_BUFFER_DAYS of data.
+        # This ensures that lagging indicators (like 200-day MAs) have stabilized.
+        if len(signal_df) > 0:
+            warmup_cutoff = signal_df.index.min() + pd.Timedelta(days=HISTORY_BUFFER_DAYS)
+            mask = signal_df.index < warmup_cutoff
+            if mask.any():
+                signal_df.loc[mask, "signal"] = "Neutral"
+                if score_col in signal_df.columns:
+                    signal_df.loc[mask, score_col] = 0.0
 
         return signal_df
 

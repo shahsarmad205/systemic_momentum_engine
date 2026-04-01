@@ -701,7 +701,7 @@ def _build_models() -> list[tuple[str, Any, bool, str]]:
     from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
     from sklearn.linear_model import LogisticRegression, Ridge, RidgeClassifier
     from sklearn.pipeline import Pipeline
-    from sklearn.preprocessing import StandardScaler
+    from sklearn.preprocessing import RobustScaler
 
     models: list[tuple[str, Any, bool, str]] = []
 
@@ -711,7 +711,7 @@ def _build_models() -> list[tuple[str, Any, bool, str]]:
             "LogisticRegression",
             Pipeline(
                 [
-                    ("scaler", StandardScaler()),
+                    ("scaler", RobustScaler()),
                     ("model", LogisticRegression(C=0.01, max_iter=1000)),
                 ]
             ),
@@ -724,8 +724,8 @@ def _build_models() -> list[tuple[str, Any, bool, str]]:
             "RidgeClassifier",
             Pipeline(
                 [
-                    ("scaler", StandardScaler()),
-                    ("model", RidgeClassifier(alpha=1.0)),
+                    ("scaler", RobustScaler()),
+                    ("model", RidgeClassifier(alpha=10.0)),
                 ]
             ),
             False,
@@ -786,8 +786,8 @@ def _build_models() -> list[tuple[str, Any, bool, str]]:
             "Ridge",
             Pipeline(
                 [
-                    ("scaler", StandardScaler()),
-                    ("model", Ridge(alpha=1.0)),
+                    ("scaler", RobustScaler()),
+                    ("model", Ridge(alpha=10.0)),
                 ]
             ),
             False,
@@ -823,7 +823,7 @@ def _build_models() -> list[tuple[str, Any, bool, str]]:
             "ShortLogistic",
             Pipeline(
                 [
-                    ("scaler", StandardScaler()),
+                    ("scaler", RobustScaler()),
                     ("model", LogisticRegression(C=0.01, max_iter=1000)),
                 ]
             ),
@@ -1143,20 +1143,47 @@ def main() -> None:
                 continue
 
             try:
-                X_tr = tr[feat_cols].replace([np.inf, -np.inf], np.nan).fillna(0.0).values
+                X_tr = tr[feat_cols].replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(-10.0, 10.0).values
                 if is_regressor:
-                    y_tr = tr["forward_return"].values.astype(float)
+                    # Clip regression target to prevent exploding coefficients/gradients
+                    # A 30% return move in 1 trading day is a reasonable bound for stability.
+                    y_tr = tr["forward_return"].replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(-0.3, 0.3).values.astype(float)
                 elif is_short_classifier:
-                    y_tr = (tr["forward_return"].values < 0).astype(int)
+                    y_tr = (tr["forward_return"].replace([np.inf, -np.inf], np.nan).fillna(0.0) < 0).astype(int)
                 else:
-                    y_tr = tr["y_bin"].values.astype(int)
-                X_te = te[feat_cols].replace([np.inf, -np.inf], np.nan).fillna(0.0).values
-                y_te_ret = te["forward_return"].values.astype(float)
-                y_te_bin = te["y_bin"].values.astype(int)
+                    y_tr = tr["y_bin"].fillna(0).astype(int)
+                X_te = te[feat_cols].replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(-10.0, 10.0).values
+                y_te_ret = te["forward_return"].replace([np.inf, -np.inf], np.nan).fillna(0.0).values.astype(float)
+                y_te_bin = te["y_bin"].fillna(0).astype(int)
+
+                # Defensive: Drop singular or constant features to prevent StandardScaler zero-division.
+                # Standard deviation below 1e-6 causes numerical instability in linear solvers.
+                X_tr_df = pd.DataFrame(X_tr, columns=feat_cols)
+                stds = X_tr_df.std()
+                singular_cols = stds[stds < 1e-6].index.tolist()
+                
+                if singular_cols:
+                    # Sync X_tr and X_te by removing the problematic columns
+                    X_tr = X_tr_df.drop(columns=singular_cols).values
+                    X_te = pd.DataFrame(X_te, columns=feat_cols).drop(columns=singular_cols).values
+
+                # Final NumPy safety net for any values that bypassed pandas-level logic
+                # Using .copy() to ensure contiguous memory, which helps avoid some BLAS bugs on Mac
+                X_tr = np.nan_to_num(X_tr, nan=0.0, posinf=0.0, neginf=0.0).copy()
+                y_tr = np.nan_to_num(y_tr, nan=0.0, posinf=0.0, neginf=0.0).copy()
+                X_te = np.nan_to_num(X_te, nan=0.0, posinf=0.0, neginf=0.0).copy()
 
                 try:
+                    from sklearn.base import clone
+                    import warnings
+                    
+                    # Isolate this training window with a fresh model instance
+                    win_model = clone(model)
+                    
                     t0 = time.perf_counter()
-                    model.fit(X_tr, y_tr)
+                    # Silence known spurious BLAS matmul warnings on Apple Silicon
+                    with np.errstate(all="ignore"):
+                        win_model.fit(X_tr, y_tr)
                     t1 = time.perf_counter()
                 except Exception as exc:
                     print(f"  [window {win_idx}/{len(windows)}] train failed: {exc}")
@@ -1165,22 +1192,23 @@ def main() -> None:
 
                 try:
                     t2 = time.perf_counter()
-                    if is_regressor:
-                        score = model.predict(X_te).astype(float)
-                    elif is_short_classifier:
-                        if uses_proba and hasattr(model, "predict_proba"):
-                            p_down = model.predict_proba(X_te)[:, 1].astype(float)
-                            score = -(p_down - 0.5)
+                    with np.errstate(all="ignore"):
+                        if is_regressor:
+                            score = win_model.predict(X_te).astype(float)
+                        elif is_short_classifier:
+                            if uses_proba and hasattr(win_model, "predict_proba"):
+                                p_down = win_model.predict_proba(X_te)[:, 1].astype(float)
+                                score = -(p_down - 0.5)
+                            else:
+                                score = -win_model.predict(X_te).astype(float) + 0.5
+                        elif uses_proba and hasattr(win_model, "predict_proba"):
+                            p = win_model.predict_proba(X_te)[:, 1].astype(float)
+                            score = p - 0.5
+                        elif hasattr(win_model, "decision_function"):
+                            score = win_model.decision_function(X_te).astype(float)
                         else:
-                            score = -model.predict(X_te).astype(float) + 0.5
-                    elif uses_proba and hasattr(model, "predict_proba"):
-                        p = model.predict_proba(X_te)[:, 1].astype(float)
-                        score = p - 0.5
-                    elif hasattr(model, "decision_function"):
-                        score = model.decision_function(X_te).astype(float)
-                    else:
-                        pred = model.predict(X_te).astype(int)
-                        score = pred.astype(float) - 0.5
+                            pred = win_model.predict(X_te).astype(int)
+                            score = pred.astype(float) - 0.5
                     t3 = time.perf_counter()
                 except Exception as exc:
                     print(f"  [window {win_idx}/{len(windows)}] predict failed: {exc}")
@@ -1502,11 +1530,30 @@ def main() -> None:
     best_model, _best_uses_proba, best_kind = best_spec
 
     t0 = time.perf_counter()
-    X_all = df[feat_cols].replace([np.inf, -np.inf], np.nan).fillna(0.0).values
-    y_all_cls = df["y_bin"].values.astype(int)
-    y_all_reg = df["forward_return"].values.astype(float)
-    y_all_down = (df["forward_return"].values < 0).astype(int)
+    # Final full-dataset training: replicate the robust sanitization logic
+    X_all_raw = df[feat_cols].replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(-10.0, 10.0).values
+    y_all_cls = df["y_bin"].fillna(0).astype(int)
+    y_all_reg = df["forward_return"].replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(-0.5, 0.5).values.astype(float)
+    y_all_down = (df["forward_return"].replace([np.inf, -np.inf], np.nan).fillna(0.0) < 0).astype(int)
+
+    # Singular column purge 
+    X_all_df = pd.DataFrame(X_all_raw, columns=feat_cols)
+    all_stds = X_all_df.std()
+    all_singular = all_stds[all_stds < 1e-6].index.tolist()
+    if all_singular:
+        X_all = X_all_df.drop(columns=all_singular).values
+    else:
+        X_all = X_all_raw
+    
+    # Enforce copy for stability
+    X_all = X_all.copy()
+    y_all_cls = y_all_cls.copy()
+    y_all_reg = y_all_reg.copy()
+    y_all_down = y_all_down.copy()
+
     if args.save_all_models:
+        from sklearn.base import clone
+        import warnings
         for model_name, model_obj, _uses_proba, mkind in models:
             try:
                 if mkind == "regressor":
@@ -1515,15 +1562,19 @@ def main() -> None:
                     y_fit = y_all_down
                 else:
                     y_fit = y_all_cls
-                model_obj.fit(X_all, y_fit)
+                
+                final_model = clone(model_obj)
+                with np.errstate(all="ignore"):
+                    final_model.fit(X_all, y_fit)
+                
                 model_artifact = {
                     "model_name": model_name,
                     "model_type": mkind,
                     "horizon_days": int(horizon),
                     "target": "forward_return",
-                    "feature_columns": feat_cols,
+                    "feature_columns": [c for c in feat_cols if c not in all_singular],
                     "trained_at": pd.Timestamp.utcnow().isoformat(),
-                    "estimator": model_obj,
+                    "estimator": final_model,
                 }
                 model_path = out_dir / _model_filename(model_name)
                 with open(model_path, "wb") as fh:
@@ -1531,13 +1582,20 @@ def main() -> None:
                 print(f"Saved model copy: {model_path}")
             except Exception as exc:
                 print(f"WARNING: failed to save model copy for {model_name}: {exc}")
+                traceback.print_exc()
+
     if best_kind == "regressor":
         y_best = y_all_reg
     elif best_kind == "short_classifier":
         y_best = y_all_down
     else:
         y_best = y_all_cls
-    best_model.fit(X_all, y_best)
+    
+    # Final 'best' model training (fresh instance)
+    from sklearn.base import clone
+    best_model_fit = clone(best_model)
+    with np.errstate(all="ignore"):
+        best_model_fit.fit(X_all, y_best)
     t1 = time.perf_counter()
     print(f"Trained best model on full dataset in {t1 - t0:.2f}s")
 
@@ -1546,9 +1604,9 @@ def main() -> None:
         "model_type": best_kind,
         "horizon_days": int(horizon),
         "target": "forward_return",
-        "feature_columns": feat_cols,
+        "feature_columns": [c for c in feat_cols if c not in all_singular],
         "trained_at": pd.Timestamp.utcnow().isoformat(),
-        "estimator": best_model,
+        "estimator": best_model_fit,
     }
     best_path = out_dir / "best_model.pkl"
     with open(best_path, "wb") as fh:

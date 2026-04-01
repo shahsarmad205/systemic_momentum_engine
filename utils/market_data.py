@@ -37,11 +37,14 @@ def _safe_filename(ticker: str) -> str:
     return re.sub(r"[^\w\-.]", "_", ticker.upper())
 
 
-def _cache_path(cache_dir: str, ticker: str) -> Path:
+def _cache_path(cache_dir: str, ticker: str, provider: str = "yahoo") -> Path:
     """
-    Path for per-ticker cache (Parquet). All history for a ticker is stored in a single file.
+    Path for per-ticker cache (Parquet). Suffix with provider to isolate caches (except legacy Yahoo).
     """
-    return Path(cache_dir) / f"{_safe_filename(ticker)}.parquet"
+    prov_str = provider.lower() if provider else "yahoo"
+    if prov_str == "yahoo":
+        return Path(cache_dir) / f"{_safe_filename(ticker)}.parquet"
+    return Path(cache_dir) / f"{_safe_filename(ticker)}_{prov_str}.parquet"
 
 
 def _load_cached(path: Path, cache_ttl_days: int) -> pd.DataFrame | None:
@@ -242,6 +245,45 @@ def _download_finnhub(ticker: str, start: pd.Timestamp, end: pd.Timestamp) -> pd
     return df.sort_index()
 
 
+def _download_tiingo(ticker: str, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
+    """Fetch daily adjusted candles from Tiingo."""
+    import requests
+
+    api_key = os.environ.get("TIINGO_API_KEY", "d421c9893c8bea038597e0e5cfbdc1de6c02f4f1")
+    url = f"https://api.tiingo.com/tiingo/daily/{ticker.lower()}/prices"
+    params = {
+        "startDate": start.strftime("%Y-%m-%d"),
+        "endDate": end.strftime("%Y-%m-%d"),
+        "token": api_key,
+    }
+    
+    try:
+        resp = requests.get(url, params=params, timeout=10)
+        resp.raise_for_status()
+    except Exception as e:
+        logger.error("[_download_tiingo] Request failed for %s: %s", ticker, e)
+        return pd.DataFrame(columns=OHLCV_COLUMNS)
+
+    data = resp.json()
+    if not data:
+        return pd.DataFrame(columns=OHLCV_COLUMNS)
+
+    df = pd.DataFrame(data)
+    df["Date"] = pd.to_datetime(df["date"]).dt.tz_localize(None)
+    df.set_index("Date", inplace=True)
+
+    # Use natively split/dividend adjusted prices for institutional equivalence
+    res = pd.DataFrame({
+        "Open": df["adjOpen"],
+        "High": df["adjHigh"],
+        "Low": df["adjLow"],
+        "Close": df["adjClose"],
+        "Volume": df["adjVolume"],
+    })
+    
+    return res.sort_index()
+
+
 def _download_crypto_ccxt(
     symbol: str,
     start: pd.Timestamp,
@@ -397,8 +439,10 @@ def get_ohlcv(
         start.strftime("%Y-%m-%d"),
         end.strftime("%Y-%m-%d"),
     )
+    
+    provider = (provider or "yahoo").lower()
     cache_dir = cache_dir or DEFAULT_CACHE_DIR
-    path = _cache_path(cache_dir, ticker)
+    path = _cache_path(cache_dir, ticker, provider)
 
     if use_cache:
         cached = _load_cached(path, cache_ttl_days)
@@ -441,8 +485,6 @@ def get_ohlcv(
                     end.date(),
                 )
 
-    provider = (provider or "yahoo").lower()
-
     # --- Dispatch by asset type ------------------------------------
     if asset_type == "crypto":
         df = _download_crypto_ccxt(ticker, start, end, exchange_id=crypto_exchange)
@@ -457,8 +499,10 @@ def get_ohlcv(
                 c_df = _download_alpaca(contract, start, end)
             elif provider == "finnhub":
                 c_df = _download_finnhub(contract, start, end)
+            elif provider == "tiingo":
+                c_df = _download_tiingo(contract, start, end)
             else:
-                raise ValueError(f"Unknown provider for futures: {provider}. Use 'yahoo', 'alpaca', or 'finnhub'.")
+                raise ValueError(f"Unknown provider for futures: {provider}. Use 'yahoo', 'alpaca', 'finnhub', or 'tiingo'.")
             if not c_df.empty:
                 contract_data[contract] = c_df
         df = _build_continuous_futures(contract_data)
@@ -470,8 +514,10 @@ def get_ohlcv(
             df = _download_alpaca(ticker, start, end)
         elif provider == "finnhub":
             df = _download_finnhub(ticker, start, end)
+        elif provider == "tiingo":
+            df = _download_tiingo(ticker, start, end)
         else:
-            raise ValueError(f"Unknown provider: {provider}. Use 'yahoo', 'alpaca', or 'finnhub'.")
+            raise ValueError(f"Unknown provider: {provider}. Use 'yahoo', 'alpaca', 'finnhub', or 'tiingo'.")
 
     if df is None or df.empty:
         logger.debug("[get_ohlcv] %s: download returned EMPTY frame", ticker)
@@ -532,7 +578,7 @@ def get_ohlcv(
     return df
 
 
-def clear_cache(ticker: str | None = None, cache_dir: str | None = None) -> None:
+def clear_cache(ticker: str | None = None, cache_dir: str | None = None, provider: str = "yahoo") -> None:
     """
     Clear cached OHLCV data.
 
@@ -542,6 +588,8 @@ def clear_cache(ticker: str | None = None, cache_dir: str | None = None) -> None
         If provided, clear only this ticker's cache file. If None, clear all.
     cache_dir : str or None
         Cache directory to operate on. Defaults to DEFAULT_CACHE_DIR.
+    provider : str
+        The data provider namespace to clear (default: "yahoo").
     """
     cache_dir = cache_dir or DEFAULT_CACHE_DIR
     base = Path(cache_dir)
@@ -554,7 +602,7 @@ def clear_cache(ticker: str | None = None, cache_dir: str | None = None) -> None
             except OSError:
                 pass
     else:
-        path = _cache_path(cache_dir, ticker)
+        path = _cache_path(cache_dir, ticker, provider)
         if path.exists():
             try:
                 path.unlink()

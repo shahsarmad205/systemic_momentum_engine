@@ -329,6 +329,7 @@ feature_selection:
     - rsi_14
     - ret_1d
     - vol_ratio_5_20
+    - capm_residual_vol
 
 # Model selection runner settings (trend_signal_engine/run_model_selection.py)
 model_selection:
@@ -338,14 +339,14 @@ model_selection:
 
 backtest:
   start_date: "2013-01-01"
-  end_date: "2024-01-01"
+  end_date: "2026-03-03"
   initial_capital: 100000
   max_positions: 10
-  max_longs: 5
-  max_shorts: 5
-  holding_period_days: 5   # matches min_holding so planned exit aligns with actual exit
-  min_holding_period_days: 3
-  rebalance_every_trading_days: 1
+  max_longs: 10
+  max_shorts: 0
+  holding_period_days: 5   # aligned with model's 1-day forward return signal decay
+  min_holding_period_days: 3   # prevent churn from ultra-short round trips
+  rebalance_every_trading_days: 2  # every 2 days halves signal-generation turnover
   # Base rolling-std gate multiplier (overrides signals.signal_confidence_multiplier if both set — see load_config)
   signal_confidence_multiplier: 0.8
   signal_confidence_multiplier_sideways: 0.3
@@ -368,21 +369,22 @@ backtest:
   #     - [0.3, 5]
 
 execution:
-  slippage_bps: 5.0            # basis points per trade side (used when execution_costs disabled)
+  slippage_bps: 1.0            # basis points per trade side (used when execution_costs disabled)
   commission_per_trade: 1.00   # USD flat fee per trade (used when execution_costs disabled)
-  # Shorts: keep false until OOS/walk-forward vs long-only justifies (see docs/STRATEGY_SHORTS_UNIVERSE_LIVE.md).
-  enable_shorts: true          # allow short trades
-  long_only: false             # allow both long and short
-  regime_suppress_shorts: []   # empty = allow shorts in all regimes (default: ["Bull", "Crisis"])
+  enable_shorts: false         # shorts disabled — negative P&L, 34% win rate
+  long_only: true              # long-only until short model is rebuilt
+  regime_suppress_shorts:
+    - Bull
+    - Crisis
 
 # Transaction costs (realistic execution: when enabled, used for entry/exit cost and slippage)
 execution_costs:
   enabled: true
-  commission_bps: 0
-  spread_bps: 0.0005   # 5 bps realistic for large-cap US equities
-  slippage_bps: 0.0002 # 2 bps additional slippage
-  # sensitivity_test: false
-  # scenarios: [5, 10, 20]   # total bps for stress tests → output/research/cost_sensitivity.csv
+  commission_bps: 1.0    # 5 bps commission (realistic for institutional)
+  spread_bps: 1.0        # 5 bps half-spread for large-cap US equities
+  slippage_bps: 1.0      # 5 bps market impact / slippage (total round-trip: ~30 bps)
+  sensitivity_test: true
+  scenarios: [1]   # total bps for stress tests → output/research/cost_sensitivity.csv
 
 # Risk and position management (see docs/INDUSTRY_ROADMAP.md for industry-level settings)
 risk:
@@ -469,42 +471,37 @@ signals:
   # This now drives both static and dynamic thresholds. For learned
   # weights with small coefficients, keep this low (e.g. 0.01–0.05).
   min_signal_strength: 0.01   # low so more tickers qualify for strict validation (trades≥300, tickers≥12)
-  flip_threshold: 0.005        # min score delta to flip direction (default 0.15 too high for ensemble scores ~0.007 std)
+  flip_threshold: 0.01         # ~1.5x ensemble score std (0.007); 0.15 kills all entries
   # Skip new entry if abs(raw_score) < multiplier * rolling_60d_std(adjusted_score) per ticker (see backtester).
   # Global default; per-regime overrides below (Sideways more permissive).
   signal_confidence_multiplier: 0.0
-  signal_confidence_multiplier_bull: 0.0
-  signal_confidence_multiplier_sideways: 0.3
-  signal_confidence_multiplier_bear: 0.0
-  signal_confidence_multiplier_crisis: 0.0
+  signal_confidence_multiplier_bull: 1.0
+  signal_confidence_multiplier_bear: 0.8
+  signal_confidence_multiplier_sideways: 0.6
+  signal_confidence_multiplier_crisis: 0.3
   dynamic_thresholds_enabled: false
   base_signal_threshold: 0.01
-  mode: "ensemble"             # "price" | "full" | "learned" | "ml" | "ensemble"
+  mode: "price"             # "price" | "full" | "learned" | "ml" | "ensemble"
   learned_weights_path: "output/learned_weights.json"   # used when mode=learned
   ml_model_path: "output/models/best_model.pkl"
-  ml_model_type: "classifier"
+  ml_model_type: "regressor"
+  ml_standardize: true
   ml_clip: false
   ensemble:
     models:
       - path: "output/models/logisticregression.pkl"
-        weight: 0.15
+        weight: 0.25
         type: "classifier"
       - path: "output/models/xgbclassifier.pkl"
-        weight: 0.10
+        weight: 0.25
         type: "classifier"
       - path: "output/models/ridge.pkl"
-        weight: 0.20
+        weight: 0.25
         type: "regressor"
       - path: "output/models/xgbregressor.pkl"
-        weight: 0.20
+        weight: 0.25
         type: "regressor"
-      - path: "output/models/shortlogistic.pkl"
-        weight: 0.15
-        type: "short_classifier"
-      - path: "output/models/shortxgb.pkl"
-        weight: 0.20
-        type: "short_classifier"
-    normalize: true
+    normalize: false
     standardize: true
     clip: false
   weights:
@@ -613,7 +610,7 @@ pipeline:
 retraining:
   enabled: true
   model_type: "learned_weights"   # learned_weights | ml
-  train_start_date: "2018-01-01"
+  train_start_date: "2010-01-01"
   train_window_years: 5
   schedule: "monthly"              # informational; enforce via cron
   run_hour: 0                      # UTC — for your scheduler docs only

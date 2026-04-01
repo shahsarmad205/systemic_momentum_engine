@@ -1,0 +1,34 @@
+{
+  "generated_at_utc": "2026-03-29T20:43:17.806402+00:00",
+  "run_at_utc": "2026-03-29T20:43:17.806402+00:00",
+  "lookback_days": 90,
+  "top_k": 10,
+  "n_rows": 18711,
+  "n_days": 63,
+  "production": {
+    "path": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/output/models/best_model.pkl",
+    "model_name": "XGBRegressor",
+    "model_type": "regressor",
+    "horizon_days": 1
+  },
+  "shadow": {
+    "path": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/output/models/best_model.pkl",
+    "model_name": "XGBRegressor",
+    "model_type": "regressor",
+    "horizon_days": 1
+  },
+  "metrics": {
+    "score_correlation": 1.0,
+    "score_sign_agreement": 1.0,
+    "score_mae": 0.0,
+    "top_k_overlap_mean": 1.0
+  },
+  "gates": {
+    "min_score_correlation": 0.85,
+    "min_score_sign_agreement": 0.55,
+    "max_score_mae": 0.25,
+    "min_top_k_overlap_mean": 0.5
+  },
+  "status": "PASS",
+  "failures": []
+}

@@ -37,8 +37,8 @@ try:
 except ImportError:
     TransactionCostModel = None
 from utils.market_data import get_ohlcv
-from utils.sector_aggregates import apply_sector_adjustment, compute_sector_aggregates
-from utils.sectors import SECTOR_MAP
+from utils.quant_utils import apply_sector_adjustment, compute_sector_aggregates
+from utils.quant_utils import SECTOR_MAP
 
 from .metrics import compute_all_metrics, compute_capm_metrics
 from .signals import EXIT_BUFFER_DAYS, HISTORY_BUFFER_DAYS, SignalEngine
@@ -51,11 +51,11 @@ try:
 except ImportError:  # pragma: no cover
     sector_relative_features_by_ticker = None  # type: ignore[misc,assignment]
     vol_rank_features_by_ticker = None  # type: ignore[misc,assignment]
-from strategy.candidates import build_ranked_candidates
-from strategy.cross_sectional import build_cross_sectional_candidates
+from backtesting.candidates import build_ranked_candidates
+from backtesting.cross_sectional import build_cross_sectional_candidates
 
 try:
-    from strategy.regime_multipliers import get_multiplier, load_regime_multipliers
+    from backtesting.regime_multipliers import get_multiplier, load_regime_multipliers
 except ImportError:  # pragma: no cover
     load_regime_multipliers = None  # type: ignore[misc,assignment]
     get_multiplier = None  # type: ignore[misc,assignment]
@@ -221,7 +221,12 @@ class Backtester:
         "SPY", "QQQ", "IWM", "DIA", "XLK", "XLF", "VTI",
     ]
 
-    def run(self, tickers: list[str] | None = None) -> BacktestResult:
+    def run(
+        self,
+        tickers: list[str] | None = None,
+        price_data: dict[str, pd.DataFrame] | None = None,
+        signal_data: dict[str, pd.DataFrame] | None = None,
+    ) -> BacktestResult:
         tickers = tickers or self.config.tickers
         if not tickers:
             try:
@@ -231,15 +236,18 @@ class Backtester:
                 tickers = list(self._FALLBACK_TICKERS)
 
         # Phase 1 — data & signals
-        mode = self.config.signal_mode
-        mode_labels = {
-            "price": "price-only (trend + volatility)",
-            "full": "full (all agents)",
-            "learned": "learned weights (data-driven)",
-        }
-        mode_label = mode_labels.get(mode, mode)
-        print(f"Phase 1: Downloading data & generating signals [{mode_label}]…")
-        price_data, signal_data = self._prepare_data(tickers)
+        if price_data is not None and signal_data is not None:
+            print("Phase 1: Reusing pre-loaded data & signals…")
+        else:
+            mode = self.config.signal_mode
+            mode_labels = {
+                "price": "price-only (trend + volatility)",
+                "full": "full (all agents)",
+                "learned": "learned weights (data-driven)",
+            }
+            mode_label = mode_labels.get(mode, mode)
+            print(f"Phase 1: Downloading data & generating signals [{mode_label}]…")
+            price_data, signal_data = self.prepare_data(tickers)
 
         # Phase 1b — sector-level adjustment (momentum, volatility, sentiment)
         if self.config.sector_adjustment_enabled and price_data and signal_data:
@@ -573,10 +581,14 @@ class Backtester:
     # Phase 1 — data loading & signal generation
     # ==============================================================
 
-    def _prepare_data(self, tickers: list[str]):
+    def prepare_data(self, tickers: list[str]) -> tuple[dict, dict]:
         start_ts = pd.Timestamp(self.config.start_date)
         dl_start = start_ts - timedelta(days=HISTORY_BUFFER_DAYS)
+        # Date Clipping: ensure we never request data into the future which can cause Yahoo errors
+        today_ts = pd.Timestamp(datetime.datetime.now())
         dl_end = pd.Timestamp(self.config.end_date) + timedelta(days=EXIT_BUFFER_DAYS)
+        if dl_end > today_ts:
+            dl_end = today_ts
 
         price_data: dict[str, pd.DataFrame] = {}
         signal_data: dict[str, pd.DataFrame] = {}
@@ -587,12 +599,50 @@ class Backtester:
         provider = getattr(self.config, "data_provider", "yahoo") or "yahoo"
         cache = getattr(self.config, "cache_ohlcv", True)
         cache_dir = getattr(self.config, "cache_dir", "data/cache/ohlcv")
-        cache_ttl = getattr(self.config, "cache_ttl_days", 0)
+        # Institutional Caching Fix: Default to 1-day TTL if not specified.
+        # This prevents redundant 50-year downloads for 500 tickers on every run.
+        cache_ttl = getattr(self.config, "cache_ttl_days", 1)
+
+        # SPY/VIX Pre-load (Institutional Fix: load once with Tiingo to avoid Yahoo rate-limiting)
+        spy_df_global = None
+        vix_df_global = None
+        vix3m_df_global = None
+        try:
+            print("\nPre-loading benchmarks (SPY, ^VIX, ^VIX3M) using Tiingo…")
+            spy_df_global = get_ohlcv(
+                "SPY",
+                dl_start.strftime("%Y-%m-%d"),
+                dl_end.strftime("%Y-%m-%d"),
+                provider="tiingo",
+                cache_dir=cache_dir,
+                use_cache=cache,
+                cache_ttl_days=cache_ttl,
+            )
+            vix_df_global = get_ohlcv(
+                "^VIX",
+                dl_start.strftime("%Y-%m-%d"),
+                dl_end.strftime("%Y-%m-%d"),
+                provider="tiingo",
+                cache_dir=cache_dir,
+                use_cache=cache,
+                cache_ttl_days=cache_ttl,
+            )
+            vix3m_df_global = get_ohlcv(
+                "^VIX3M",
+                dl_start.strftime("%Y-%m-%d"),
+                dl_end.strftime("%Y-%m-%d"),
+                provider="tiingo",
+                cache_dir=cache_dir,
+                use_cache=cache,
+                cache_ttl_days=cache_ttl,
+            )
+        except Exception as exc:
+            logger.warning("Optional pre-load for benchmarks (SPY/VIX/VIX3M) failed: %s.", exc)
 
         for i, ticker in enumerate(tickers, 1):
             msg_prefix = f"[{i}/{len(tickers)}] {ticker}"
             print(f"  {msg_prefix}…", end=" ")
-            logger.info(
+            logger.debug(
                 "Requesting OHLCV for %s: %s → %s (provider=%s, cache_dir=%s, ttl=%d)",
                 ticker,
                 dl_start.strftime("%Y-%m-%d"),
@@ -643,17 +693,8 @@ class Backtester:
                     f"{msg_prefix} OHLCV window: first_date={first_date.date()}, "
                     f"last_date={last_date.date()}, n={len(data)}"
                 )
-                if (start_ts - first_date).days < min_history_days:
-                    print(f"insufficient pre-history (<{min_history_days}d before start)")
-                    excluded_for_history.append(ticker)
-                    logger.warning(
-                        "Excluding %s due to insufficient pre-history: first_date=%s, required=%d days before %s",
-                        ticker,
-                        first_date,
-                        min_history_days,
-                        start_ts,
-                    )
-                    continue
+                # Allow tickers that list after the backtest start date (Unbalanced Panel Support)
+                pass
 
                 pending_prices[ticker] = data
 
@@ -708,6 +749,9 @@ class Backtester:
                     sector_relative_20d=sr20_s,
                     sector_relative_60d=sr60_s,
                     vol_rank=vr_s,
+                    spy_df=spy_df_global,
+                    vix_df=vix_df_global,
+                    vix3m_df=vix3m_df_global,
                 )
                 if signals.empty:
                     print("no signals")
@@ -968,6 +1012,7 @@ class Backtester:
         crisis_consecutive_days = 0
         prev_regime: str | None = None
         crisis_entries_blocked_days_1_3 = 0
+        universe_sizes = []
 
         for i, date in enumerate(trading_days):
             # Trade rebalance day (used to gate expiry exits and new signal updates).
@@ -1465,6 +1510,10 @@ class Backtester:
             # Rebuild existing_tickers from current positions (after all exits) so closed
             # positions do not block re-entry on the same day.
             existing_tickers = {p.ticker for p in self.portfolio.positions}
+
+            # Track effective universe size for this day
+            active_tickers_today = [tk for tk, px in price_data.items() if date in px.index]
+            universe_sizes.append(len(active_tickers_today))
 
             # Regime gross exposure cap enforcement (on trade rebalance days).
             if is_trade_rebalance_day_current and gross_cap_fraction_today < 0.999:
@@ -2002,23 +2051,34 @@ class Backtester:
                 and prev_reg_before is not None
                 and prev_reg_before != "Crisis"
             )
+            to_remove = []
             for pos in self.portfolio.positions:
-                if pos.ticker in price_data and date in price_data[pos.ticker].index:
-                    bar = price_data[pos.ticker].loc[date]
-                    close_px = float(bar["Close"])
-                    use_open_mtm = False
-                    if regime_today == "Crisis" and getattr(pos, "crisis_accelerated_exit", False):
-                        if bool(getattr(self.config, "crisis_accelerated_mtm_at_open", False)):
-                            use_open_mtm = True
-                        elif is_first_crisis_day and bool(
-                            getattr(self.config, "crisis_first_day_winner_mtm_at_open", False)
-                        ):
-                            use_open_mtm = True
-                    if use_open_mtm:
-                        o = float(bar.get("Open", np.nan))
-                        pos.current_price = o if np.isfinite(o) and o > 0 else close_px
-                    else:
-                        pos.current_price = close_px
+                tk = pos.ticker
+                if tk not in price_data or date not in price_data[tk].index:
+                    # Delisting detected: data exists for some tickers but not this one today.
+                    logger.warning("Delisting/Gap detected for %s on %s; force-closing.", tk, date)
+                    pos.exit_reason = "delisted"
+                    to_remove.append(pos)
+                    continue
+
+                bar = price_data[pos.ticker].loc[date]
+                close_px = float(bar["Close"])
+                use_open_mtm = False
+                if regime_today == "Crisis" and getattr(pos, "crisis_accelerated_exit", False):
+                    if bool(getattr(self.config, "crisis_accelerated_mtm_at_open", False)):
+                        use_open_mtm = True
+                    elif is_first_crisis_day and bool(
+                        getattr(self.config, "crisis_first_day_winner_mtm_at_open", False)
+                    ):
+                        use_open_mtm = True
+                if use_open_mtm:
+                    o = float(bar.get("Open", np.nan))
+                    pos.current_price = o if np.isfinite(o) and o > 0 else close_px
+                else:
+                    pos.current_price = close_px
+
+            for pos in to_remove:
+                self._close_position(pos, date, price_data, reason=pos.exit_reason)
 
             # --- 3.5. Volatility-based position scaling (SPY vol target) ---
             # Apply the rule: scale all position sizes by min(1, 1/vol_ratio).
@@ -2178,6 +2238,8 @@ class Backtester:
         for pos in list(self.portfolio.positions):
             last_day = trading_days[-1] if trading_days else pd.Timestamp.now()
             self._close_position(pos, last_day, price_data, reason="force_close")
+        
+        self._universe_sizes = universe_sizes
 
     def _build_returns_matrix(
         self,

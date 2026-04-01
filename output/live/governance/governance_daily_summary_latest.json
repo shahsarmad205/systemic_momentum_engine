@@ -1,0 +1,81 @@
+{
+  "run_at_utc": "2026-03-29T20:41:12.630245+00:00",
+  "overall_status": "PASS",
+  "max_report_age_hours": 36.0,
+  "gates": {
+    "shadow_monitor": {
+      "status": "PASS",
+      "reason": "",
+      "age_hours": 1.1691746152777778,
+      "run_at_utc": "2026-03-29T19:31:03.601630+00:00",
+      "failures": [],
+      "metrics": {
+        "score_corr": 1.0,
+        "mean_abs_score_delta": 0.0,
+        "daily_topk_overlap": 1.0,
+        "n_rows": 18414,
+        "n_days": 62
+      },
+      "path": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/output/models/shadow_monitor_latest.json"
+    },
+    "shadow_comparison": {
+      "status": "PASS",
+      "reason": "",
+      "age_hours": 0.004005523055555555,
+      "run_at_utc": "2026-03-29T20:40:58.210362+00:00",
+      "failures": [],
+      "metrics": {
+        "score_correlation": 1.0,
+        "score_sign_agreement": 1.0,
+        "score_mae": 0.0,
+        "top_k_overlap_mean": 1.0
+      },
+      "path": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/output/models/shadow_reports/latest_shadow_compare.json"
+    },
+    "risk_gate": {
+      "status": "PASS",
+      "reason": "",
+      "age_hours": 1.1690829786111112,
+      "run_at_utc": "2026-03-29T19:31:03.931522+00:00",
+      "failures": [],
+      "metrics": {
+        "n_positions": 5,
+        "gross_exposure": 0.5,
+        "net_exposure": 0.5,
+        "max_single_name_abs": 0.1,
+        "max_short_single_name_abs": 0.0,
+        "max_sector_exposure": 0.1
+      },
+      "path": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/output/live/risk_gate/risk_gate_latest.json"
+    },
+    "tca_health": {
+      "status": "PASS",
+      "reason": "",
+      "age_hours": 1.1690167916666665,
+      "run_at_utc": "2026-03-29T19:31:04.169795+00:00",
+      "failures": [],
+      "metrics": {
+        "n_fills_total": 0,
+        "n_fills_window": 0,
+        "avg_slippage_bps": null,
+        "p95_slippage_bps": null
+      },
+      "path": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/output/live/tca/tca_health_latest.json"
+    }
+  },
+  "trading_halt_latch": {
+    "path": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/output/live/trading_halt_latch.json",
+    "present": true,
+    "halt_active": false,
+    "reason": "strict preflight passed",
+    "updated_at_utc": "2026-03-29T19:31:04.191874+00:00"
+  },
+  "production": {
+    "path": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/output/models/production_pointer.json",
+    "present": true,
+    "run_id": "20260329T164933Z",
+    "model_name": "XGBRegressor",
+    "promoted_at_utc": "2026-03-29T19:20:29.356181+00:00"
+  },
+  "failures": []
+}

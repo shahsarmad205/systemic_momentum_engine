@@ -1,0 +1,18 @@
+{
+  "run_id": "20260329T164933Z",
+  "model_name": "XGBRegressor",
+  "best_model_path": "output/models/best_model.pkl",
+  "best_meta_path": "output/models/best_model.meta.json",
+  "manifest_path": "output/models/latest_run_manifest.json",
+  "promoted_at_utc": "2026-03-29T19:20:29.356181+00:00",
+  "promoted_by": "ops_reconcile",
+  "reason": "align pointer with reconciled registry",
+  "config": {
+    "path": "backtest_config.yaml",
+    "sha256": "97338affa1539cea08b3beb29216c4a94813c83189b137403589d99a8741547b"
+  },
+  "git": {
+    "commit": "d96694528f8d7477fe84b8762cb5cd673ddc8d10",
+    "dirty": true
+  }
+}

@@ -21,7 +21,7 @@ weights.  All features use only past data (no look-ahead bias).
     Sector-relative momentum (panel):
         ret_20d/ret_60d minus sector median (same date), then shift(1), then
         cross_sectional z-score → sector_relative_20d, sector_relative_60d.
-        SECTOR_MAP / get_sector from utils.sectors. Backtests inject panel values
+        SECTOR_MAP / get_sector from utils.quant_utils. Backtests inject panel values
         via inject_sector_relative_panel_into_signals.
     Cross-sectional ranking (panel):
         ret_5d, ret_10d, rolling_vol_20, rolling_vol_60, volume_zscore, vix_zscore,
@@ -41,7 +41,7 @@ from datetime import timedelta
 import numpy as np
 import pandas as pd
 
-from agents.trend_agent.feature_engineering import build_features
+from features.feature_pipeline import calculate_core_trend_features as build_features
 from agents.volatility_agent.volatility_model import (
     compute_rolling_confidence,
     compute_vol_term_structure,
@@ -49,9 +49,9 @@ from agents.volatility_agent.volatility_model import (
 from agents.weight_learning_agent.feature_flags import feature_columns_to_zero_for_ablation
 from agents.weight_learning_agent.regime_detection import get_regime_series_for_dates
 from execution.cost_model import TransactionCostModel
-from main import CONFIDENCE_MULTIPLIER, compute_rolling_trend_scores
+from backtesting.signals import CONFIDENCE_MULTIPLIER, compute_rolling_trend_scores
 from utils.market_data import get_ohlcv
-from utils.sectors import get_sector
+from utils.quant_utils import get_sector
 
 HISTORY_BUFFER_DAYS = 400
 MARKET_TICKER = "SPY"  # for rolling correlation feature

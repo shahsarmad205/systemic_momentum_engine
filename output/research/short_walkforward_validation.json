@@ -1,0 +1,41 @@
+{
+  "target_regimes": [
+    "Bear",
+    "Crisis"
+  ],
+  "n_periods": 5,
+  "avg_win_rate": 0.39484126984126977,
+  "avg_sharpe": -2.682515896777979,
+  "periods": [
+    {
+      "period": 0,
+      "train_range": "2014-02-03 to 2016-01-08",
+      "test_range": "2016-01-08 to 2017-12-12",
+      "test_shorts_count": 8,
+      "win_rate": 0.375,
+      "avg_pnl": -6.1499999999999995,
+      "total_pnl": -49.199999999999996,
+      "sharpe": -0.6301706388866443
+    },
+    {
+      "period": 1,
+      "train_range": "2016-01-08 to 2017-12-12",
+      "test_range": "2017-12-12 to 2019-11-16",
+      "test_shorts_count": 3,
+      "win_rate": 0.3333333333333333,
+      "avg_pnl": -92.91333333333334,
+      "total_pnl": -278.74,
+      "sharpe": -7.647881879489222
+    },
+    {
+      "period": 3,
+      "train_range": "2019-11-16 to 2021-10-20",
+      "test_range": "2021-10-20 to 2023-09-24",
+      "test_shorts_count": 21,
+      "win_rate": 0.47619047619047616,
+      "avg_pnl": 5.656666666666669,
+      "total_pnl": 118.79000000000005,
+      "sharpe": 0.23050482804192818
+    }
+  ]
+}

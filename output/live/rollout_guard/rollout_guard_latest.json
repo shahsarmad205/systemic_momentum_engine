@@ -1,0 +1,11 @@
+{
+  "run_at_utc": "2026-03-30T02:34:00.746883+00:00",
+  "status": "PASS",
+  "reason": "guard_disabled",
+  "checks": {},
+  "failures": [],
+  "rollback": {
+    "attempted": false,
+    "executed": false
+  }
+}

@@ -39,7 +39,8 @@ def _rank_norm(s: pd.Series) -> pd.Series:
     s = pd.to_numeric(s, errors="coerce")
     if len(s) == 0:
         return s
-    return s.rank(pct=True, method="average").fillna(0.5).astype(float)
+    # Center on 0: map [0, 1] ranking to [-1, 1]
+    return (s.rank(pct=True, method="average").fillna(0.5).astype(float) * 2.0) - 1.0
 
 
 def _zscore_standardize(s: pd.Series) -> pd.Series:
@@ -107,42 +108,56 @@ def load_ensemble_models(ensemble_cfg: dict[str, Any]) -> list[LoadedEnsembleMod
 
 def _predict_model(model: LoadedEnsembleModel, features_df: pd.DataFrame, clip: bool) -> pd.Series:
     cols = model.feature_columns if model.feature_columns else list(features_df.columns)
-    X_df = features_df.reindex(columns=cols).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    # Aggressive sanitization similar to training pipeline
+    X_df = (
+        features_df.reindex(columns=cols)
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+        .clip(-10.0, 10.0)
+    )
     est_mod = getattr(model.estimator, "__module__", "") or ""
     # Use ndarray for sklearn estimators to avoid repetitive feature-name warnings.
-    X = X_df.to_numpy(dtype=float, copy=False) if est_mod.startswith("sklearn.") else X_df
+    # Force copy(True) to ensure contiguous memory for BLAS stability on Mac ARM64
+    X = X_df.to_numpy(dtype=float, copy=True) if est_mod.startswith("sklearn.") else X_df
+    
     est = model.estimator
     y: np.ndarray
-    if model.model_type == "classifier":
-        if hasattr(est, "predict_proba"):
-            proba = est.predict_proba(X)
-            y = np.asarray(proba)[:, 1] if np.asarray(proba).ndim == 2 else np.asarray(proba)
-            y = 2.0 * y - 1.0
-        else:
-            if hasattr(est, "decision_function"):
-                y = np.asarray(est.decision_function(X), dtype=float)
+    
+    # Silence known spurious BLAS matmul/overflow warnings on Apple Silicon during inference
+    with np.errstate(all="ignore"):
+        if model.model_type == "classifier":
+            if hasattr(est, "predict_proba"):
+                proba = est.predict_proba(X)
+                y = np.asarray(proba)[:, 1] if np.asarray(proba).ndim == 2 else np.asarray(proba)
+                y = 2.0 * y - 1.0
             else:
-                y = np.asarray(est.predict(X), dtype=float)
-        s = pd.Series(y, index=features_df.index, dtype=float)
-        if clip:
-            s = s.clip(-1.0, 1.0)
-        return s
-    if model.model_type == "short_classifier":
-        if hasattr(est, "predict_proba"):
-            proba = est.predict_proba(X)
-            p_down = np.asarray(proba)[:, 1] if np.asarray(proba).ndim == 2 else np.asarray(proba)
-            # High P(down) → strongly negative score (bearish)
-            y = -(2.0 * p_down - 1.0)
-        else:
-            if hasattr(est, "decision_function"):
-                y = -np.asarray(est.decision_function(X), dtype=float)
+                if hasattr(est, "decision_function"):
+                    y = np.asarray(est.decision_function(X), dtype=float)
+                else:
+                    y = np.asarray(est.predict(X), dtype=float)
+            s = pd.Series(y, index=features_df.index, dtype=float)
+            if clip:
+                s = s.clip(-1.0, 1.0)
+            return s
+        
+        if model.model_type == "short_classifier":
+            if hasattr(est, "predict_proba"):
+                proba = est.predict_proba(X)
+                p_down = np.asarray(proba)[:, 1] if np.asarray(proba).ndim == 2 else np.asarray(proba)
+                # High P(down) → strongly negative score (bearish)
+                y = -(2.0 * p_down - 1.0)
             else:
-                y = -np.asarray(est.predict(X), dtype=float)
-        s = pd.Series(y, index=features_df.index, dtype=float)
-        if clip:
-            s = s.clip(-1.0, 1.0)
-        return s
-    y = np.asarray(est.predict(X), dtype=float)
+                if hasattr(est, "decision_function"):
+                    y = -np.asarray(est.decision_function(X), dtype=float)
+                else:
+                    y = -np.asarray(est.predict(X), dtype=float)
+            s = pd.Series(y, index=features_df.index, dtype=float)
+            if clip:
+                s = s.clip(-1.0, 1.0)
+            return s
+            
+        y = np.asarray(est.predict(X), dtype=float)
+    
     return pd.Series(y, index=features_df.index, dtype=float)
 
 

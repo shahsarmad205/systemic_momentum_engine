@@ -12,7 +12,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 try:
-    from utils.vol_sizing import compute_realized_vol_annualized, compute_vol_target_scaling_factor
+    from utils.quant_utils import compute_realized_vol_annualized, compute_vol_target_scaling_factor
 except ModuleNotFoundError:  # pragma: no cover
     from trend_signal_engine.utils.vol_sizing import (  # type: ignore[no-redef]
         compute_realized_vol_annualized,

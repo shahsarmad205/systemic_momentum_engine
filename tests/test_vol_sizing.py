@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from utils.vol_sizing import (
+from utils.quant_utils import (
     compute_realized_vol_annualized,
     compute_vol_target_scaling_factor,
 )

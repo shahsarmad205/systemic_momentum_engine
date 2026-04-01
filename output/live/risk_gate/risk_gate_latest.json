@@ -1,0 +1,24 @@
+{
+  "run_at_utc": "2026-03-29T20:43:18.212364+00:00",
+  "target_csv": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/output/live/target_executable_latest.csv",
+  "equity": 100000.0,
+  "limits": {
+    "enabled": true,
+    "fail_closed": true,
+    "max_gross_exposure": 1.5,
+    "max_abs_net_exposure": 0.5,
+    "max_single_name_abs": 0.12,
+    "max_short_single_name_abs": 0.12,
+    "max_sector_exposure": 0.3
+  },
+  "status": "PASS",
+  "metrics": {
+    "n_positions": 5,
+    "gross_exposure": 0.5,
+    "net_exposure": 0.5,
+    "max_single_name_abs": 0.1,
+    "max_short_single_name_abs": 0.0,
+    "max_sector_exposure": 0.1
+  },
+  "failures": []
+}

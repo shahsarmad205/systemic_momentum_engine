@@ -1,0 +1,13 @@
+{
+  "sharpe_ratio": 0.535,
+  "net_sharpe_ratio": 1.002,
+  "sortino_ratio": 0.691,
+  "cagr": 11.29,
+  "max_drawdown": -14.75,
+  "win_rate": 49.0,
+  "trades_per_year": 638.0,
+  "annual_turnover": 4632.0,
+  "est._cost_drag_ann": 0.04,
+  "long_p&l_contrib": 137.11,
+  "short_p&l_contrib": 0.0
+}

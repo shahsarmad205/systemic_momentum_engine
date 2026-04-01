@@ -10,7 +10,7 @@ for p in (str(PKG_ROOT), str(PROJECT_ROOT)):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from strategy.regime_exposure import (
+from backtesting.regime_exposure import (
     CANONICAL_REGIME_EXPOSURE,
     exposure_path_for_regimes,
     resolve_regime_position_scale,

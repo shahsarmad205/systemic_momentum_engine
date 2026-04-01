@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from utils.vol_sizing import apply_vol_kill_switch
+from utils.quant_utils import apply_vol_kill_switch
 
 
 def test_volatility_spike_kill_switch_reduces_exposure() -> None:

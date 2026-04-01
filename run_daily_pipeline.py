@@ -43,7 +43,7 @@ import yaml
 
 from utils.artifacts import run_dir as _run_dir
 from utils.artifacts import snapshot_config, snapshot_file, write_run_metadata
-from utils.data_contracts import (
+from utils.data_governance import (
     cache_covers_session,
     max_ohlcv_cache_bar_date,
     ohlcv_cache_dir,

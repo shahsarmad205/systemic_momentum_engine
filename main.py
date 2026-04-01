@@ -52,41 +52,8 @@ matplotlib.use("Agg")
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 
-# --- Agent imports ---
-from agents.trend_agent import build_features, run_trend_model
-from agents.volatility_agent import run_volatility_model
-from data_loader import download_stock_data
-
-#
-# Some deployments of this repo include only the price-based / volatility
-# components needed for backtesting. The live multi-agent news/sentiment
-# agents are optional; make imports resilient so that signal generation and
-# backtests can run even when those modules are absent.
-#
-try:
-    from agents.regional_news_agent import run_regional_news_model
-except ModuleNotFoundError:  # pragma: no cover
-    def run_regional_news_model(*args, **kwargs):
-        return {"regional_sentiment_score": 0.0, "impact_factor": 1.0}
-
-try:
-    from agents.global_news_agent import run_global_news_model
-except ModuleNotFoundError:  # pragma: no cover
-    def run_global_news_model(*args, **kwargs):
-        return {"global_sentiment_score": 0.0, "impact_factor": 1.0}
-
-try:
-    from agents.social_sentiment_agent import run_social_sentiment_model
-except ModuleNotFoundError:  # pragma: no cover
-    def run_social_sentiment_model(*args, **kwargs):
-        return {"social_sentiment_score": 0.0, "impact_factor": 1.0}
-
-# Volatility helpers for rolling plots
-from agents.volatility_agent.volatility_model import (
-    compute_daily_returns,
-    compute_rolling_confidence,
-    compute_rolling_volatility,
-)
+# --- Deprecated Agents Removed ---
+# Live sentiment/news integration has been sidelined during institutional simplification.
 
 # News-impact detection utility (optional for backtests)
 try:
@@ -318,7 +285,7 @@ def process_ticker(ticker: str, global_news_result: dict, learned_weights=None) 
     final_signal = classify_final_signal(adjusted_score)
 
     # --- Combine into one row (include sector for multi-asset context) ---
-    from utils.sectors import get_sector
+    from utils.quant_utils import get_sector
     combined = {
         "Ticker": ticker,
         "Sector": get_sector(ticker),

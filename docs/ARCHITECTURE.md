@@ -5,7 +5,7 @@
 | Module | Path | Role |
 |--------|------|------|
 | **data** | `data/` | `MarketDataLoader` — cached + API OHLCV (`load_price_history`, `load_volume_history`) |
-| **features** | `features/` | `FeatureEngine.build_features(df)` — delegates to `agents.trend_agent.feature_engineering` |
+| **features** | `features/` | `build_feature_matrix` — consolidated technical indicators (EMA, MACD, RSI, etc.) in `features/feature_pipeline.py` using `pandas-ta` |
 | **signals** | `signals/` | `SignalEngineFacade` — wraps `backtesting.signals.SignalEngine`; `compute_signal_score(...)` |
 | **strategy** | `strategy/` | `StrategyEngine` + `build_ranked_candidates` (per-signal) + `build_cross_sectional_candidates` (top/bottom daily rank, optional market-neutral shorts) |
 | **portfolio** | `portfolio/` | `PortfolioEngine` — `open_position` / `close_position` / `update_portfolio` over `backtesting.portfolio.Portfolio` |

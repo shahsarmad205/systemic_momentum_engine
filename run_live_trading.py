@@ -73,7 +73,7 @@ def _preflight_var_check(
     Returns (ok, extras) where extras are merged into ``execution_log.jsonl``.
     """
     from risk.var import portfolio_var
-    from utils.returns import load_aligned_returns
+    from utils.quant_utils import load_aligned_returns
 
     risk = config.get("risk") or {}
     vc = risk.get("var_check") or {}

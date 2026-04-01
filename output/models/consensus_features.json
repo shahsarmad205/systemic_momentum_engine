@@ -1,0 +1,56 @@
+{
+  "selected_features": [
+    "ret_10d",
+    "rsi_14",
+    "ret_20d",
+    "cs_momentum_percentile",
+    "ret_5d",
+    "rolling_vol_20",
+    "ret_1d",
+    "f_trend",
+    "vol_ratio_5_20"
+  ],
+  "top_k_per_model_window": 20,
+  "vote_threshold_ratio": 0.5,
+  "threshold_mass": 40.87831326924701,
+  "total_vote_mass": 81.75662653849402,
+  "weighting": "sharpe_weighted",
+  "votes": [
+    {
+      "feature": "ret_10d",
+      "score": 81.75662653849402
+    },
+    {
+      "feature": "rsi_14",
+      "score": 81.75662653849402
+    },
+    {
+      "feature": "ret_20d",
+      "score": 81.75662653849402
+    },
+    {
+      "feature": "cs_momentum_percentile",
+      "score": 81.75662653849402
+    },
+    {
+      "feature": "ret_5d",
+      "score": 81.75662653849402
+    },
+    {
+      "feature": "rolling_vol_20",
+      "score": 81.75662653849402
+    },
+    {
+      "feature": "ret_1d",
+      "score": 81.75662653849402
+    },
+    {
+      "feature": "f_trend",
+      "score": 81.75662653849402
+    },
+    {
+      "feature": "vol_ratio_5_20",
+      "score": 81.75662653849402
+    }
+  ]
+}

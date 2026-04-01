@@ -44,7 +44,7 @@ def _load_signals_for_date(date: str) -> dict[str, Any]:
 
 def _get_sector(ticker: str) -> str:
     try:
-        from utils.sectors import get_sector as _gs
+        from utils.quant_utils import get_sector as _gs
         return _gs(ticker)
     except Exception:
         return "Other"

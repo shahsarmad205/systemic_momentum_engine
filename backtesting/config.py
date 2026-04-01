@@ -188,6 +188,7 @@ class BacktestConfig:
     learned_weights_path: str = ""  # path to learned_weights.json (used when signal_mode="learned")
     ml_model_path: str = "output/models/best_model.pkl"
     ml_model_type: str = "classifier"
+    ml_standardize: bool = False
     ml_clip: bool = False
     ensemble_models: list[dict] = field(default_factory=list)
     ensemble_normalize: bool = True
@@ -485,6 +486,7 @@ def load_config(path: str = "backtest_config.yaml") -> BacktestConfig:
     cfg.learned_weights_path = sig.get("learned_weights_path", cfg.learned_weights_path)
     cfg.ml_model_path = str(sig.get("ml_model_path", cfg.ml_model_path))
     cfg.ml_model_type = str(sig.get("ml_model_type", cfg.ml_model_type))
+    cfg.ml_standardize = bool(sig.get("ml_standardize", cfg.ml_standardize))
     cfg.ml_clip = bool(sig.get("ml_clip", cfg.ml_clip))
     ens = sig.get("ensemble", {}) or {}
     cfg.ensemble_models = list(ens.get("models", cfg.ensemble_models) or [])

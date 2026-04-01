@@ -25,8 +25,20 @@ class BacktestEngine:
         self.config = config or _load_config(config_path)
         self._backtester = Backtester(self.config)
 
-    def run_backtest(self, tickers: list[str] | None = None) -> BacktestResult:
-        return self._backtester.run(tickers)
+    def run_backtest(
+        self,
+        tickers: list[str] | None = None,
+        price_data: dict[str, pd.DataFrame] | None = None,
+        signal_data: dict[str, pd.DataFrame] | None = None,
+    ) -> BacktestResult:
+        return self._backtester.run(tickers, price_data=price_data, signal_data=signal_data)
+
+    def prepare_universe_data(self, tickers: list[str] | None = None) -> tuple[dict, dict]:
+        """
+        Public entry to Phase 1 (data + signals). Use this to generate
+        data once and reuse it for multiple sensitivity runs.
+        """
+        return self._backtester.prepare_data(tickers)
 
     def run_backtest_with_experiment(
         self,

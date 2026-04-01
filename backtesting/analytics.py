@@ -313,6 +313,8 @@ def run_parameter_sweep(
     param_ranges: dict[str, list],
     tickers: list[str] | None = None,
     target_metric: str = "sharpe_ratio",
+    price_data: dict[str, pd.DataFrame] | None = None,
+    signal_data: dict[str, pd.DataFrame] | None = None,
 ) -> pd.DataFrame:
     """
     Run a grid search over the parameter space and return a DataFrame
@@ -330,7 +332,7 @@ def run_parameter_sweep(
             setattr(cfg, key, val)
 
         bt = Backtester(cfg)
-        result = bt.run(tickers)
+        result = bt.run(tickers, price_data=price_data, signal_data=signal_data)
         row = dict(combo)
         row.update(result.metrics)
         rows.append(row)
@@ -362,6 +364,8 @@ def run_transaction_cost_sensitivity(
     tickers: list[str] | None = None,
     scenarios: list[dict] | None = None,
     verbose: bool = True,
+    price_data: dict[str, pd.DataFrame] | None = None,
+    signal_data: dict[str, pd.DataFrame] | None = None,
 ) -> pd.DataFrame:
     """
     Run backtests across multiple transaction-cost assumptions and return
@@ -394,7 +398,7 @@ def run_transaction_cost_sensitivity(
         cfg.execution_costs_enabled = False
 
         bt = Backtester(cfg)
-        result = bt.run(tickers)
+        result = bt.run(tickers, price_data=price_data, signal_data=signal_data)
 
         m = result.metrics
         row = {
@@ -427,6 +431,8 @@ def run_execution_costs_sensitivity(
     scenarios: list[float] | None = None,
     report_path: str | None = None,
     verbose: bool = True,
+    price_data: dict[str, pd.DataFrame] | None = None,
+    signal_data: dict[str, pd.DataFrame] | None = None,
 ) -> pd.DataFrame:
     """
     Run backtests with execution_costs enabled at different total cost levels (bps).
@@ -457,7 +463,7 @@ def run_execution_costs_sensitivity(
         cfg.execution_costs_slippage_bps = third
 
         bt = Backtester(cfg)
-        result = bt.run(tickers)
+        result = bt.run(tickers, price_data=price_data, signal_data=signal_data)
         m = result.metrics
 
         row = {

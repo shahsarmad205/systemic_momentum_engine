@@ -1,0 +1,18 @@
+{
+  "w_capm_beta": 0.0,
+  "intercept": -0.01347735179270103,
+  "model_type": "ridge_short",
+  "train_start": "2013-01-02",
+  "train_end": "2026-03-29",
+  "n_samples": 1,
+  "directional_accuracy": 0.0,
+  "ic": 0.0,
+  "score_direction": -1,
+  "target_type": "regression_short_specific",
+  "scaler_mean": [
+    1.0
+  ],
+  "scaler_scale": [
+    1.0
+  ]
+}
