@@ -339,24 +339,27 @@ model_selection:
 
 backtest:
   start_date: "2013-01-01"
-  end_date: "2026-03-03"
+  end_date: "2026-01-01"
   initial_capital: 100000
   max_positions: 10
-  max_longs: 10
-  max_shorts: 0
+  max_longs: 5
+  max_shorts: 5
   holding_period_days: 5   # aligned with model's 1-day forward return signal decay
   min_holding_period_days: 3   # prevent churn from ultra-short round trips
-  rebalance_every_trading_days: 2  # every 2 days halves signal-generation turnover
+  rebalance_every_trading_days: 5  # every 5 days (weekly) halves signal-generation turnover
   # Base rolling-std gate multiplier (overrides signals.signal_confidence_multiplier if both set — see load_config)
   signal_confidence_multiplier: 0.8
-  signal_confidence_multiplier_sideways: 0.3
+  signal_confidence_multiplier_sideways: 0.15
+  signal_confidence_multiplier_bear: 0.2
+  signal_confidence_multiplier_crisis: 0.1
   # Cross-sectional ranking (top/bottom portfolio). When enabled, execution.enable_shorts is forced on if market_neutral.
   cross_sectional:
-    enabled: false
-    market_neutral: false   # long-only from top; no short leg
-  #   top_longs: 5
-  #   top_shorts: 5
-  #   rebalance_daily: false  # if true, close positions not in today's target before opens
+    enabled: true
+    market_neutral: true    # [PHASE 8] Dollar-neutral for institutional IR test
+    target_long_positions: 10
+    top_longs: 5
+    top_shorts: 5
+    rebalance_daily: false  # if true, close positions not in today's target before opens
   #   daily_positions_csv_path: "output/portfolio/daily_positions.csv"
   # Optional: hold longer for stronger signals or by signal type (Bullish/Bearish)
   # dynamic_holding:
@@ -371,8 +374,8 @@ backtest:
 execution:
   slippage_bps: 1.0            # basis points per trade side (used when execution_costs disabled)
   commission_per_trade: 1.00   # USD flat fee per trade (used when execution_costs disabled)
-  enable_shorts: false         # shorts disabled — negative P&L, 34% win rate
-  long_only: true              # long-only until short model is rebuilt
+  enable_shorts: false         # [PHASE 8] Re-enabled with hardened logic
+  long_only: true            # [PHASE 8] Back to Long/Short
   regime_suppress_shorts:
     - Bull
     - Crisis
@@ -383,16 +386,24 @@ execution_costs:
   commission_bps: 1.0    # 5 bps commission (realistic for institutional)
   spread_bps: 1.0        # 5 bps half-spread for large-cap US equities
   slippage_bps: 1.0      # 5 bps market impact / slippage (total round-trip: ~30 bps)
-  sensitivity_test: true
+  sensitivity_test: false
   scenarios: [1]   # total bps for stress tests → output/research/cost_sensitivity.csv
 
 # Risk and position management (see docs/INDUSTRY_ROADMAP.md for industry-level settings)
 risk:
   # Industry-standard exposures (fractions of equity)
   max_gross_exposure: 1.5       # e.g., 100% long + 50% short = 150% gross
-  max_net_exposure: 0.5         # cap |net| exposure (long - short) / equity
+  max_net_exposure: 0.1         # strict net neutrality (long - short) / equity
   max_short_single_name: 0.12   # cap a single short name (fraction of equity)
   short_borrow_cost_bps: 50     # annualized borrow cost (bps) modeled as daily drag in backtests
+  vix_deleveraging:
+    enabled: true
+    high_vix_threshold: 30.0
+    scaling_factor: 0.5
+    short_conviction_multiplier: 1.5
+    short_trend_filter_ma: 200
+    short_stop_loss_pct: 0.03
+    short_ma_exit_enabled: true
   # Bear: selective long entries + faster exits (see backtester Bear filters)
   bear_signal_window_days: 60
   bear_signal_quantile: 0.70
@@ -470,18 +481,19 @@ signals:
   # Base |adjusted_score| threshold for classifying Bullish/Bearish.
   # This now drives both static and dynamic thresholds. For learned
   # weights with small coefficients, keep this low (e.g. 0.01–0.05).
-  min_signal_strength: 0.01   # low so more tickers qualify for strict validation (trades≥300, tickers≥12)
+  min_signal_strength: 0.01
   flip_threshold: 0.01         # ~1.5x ensemble score std (0.007); 0.15 kills all entries
   # Skip new entry if abs(raw_score) < multiplier * rolling_60d_std(adjusted_score) per ticker (see backtester).
   # Global default; per-regime overrides below (Sideways more permissive).
   signal_confidence_multiplier: 0.0
   signal_confidence_multiplier_bull: 1.0
   signal_confidence_multiplier_bear: 0.8
-  signal_confidence_multiplier_sideways: 0.6
+  signal_confidence_multiplier_sideways: 0.0
   signal_confidence_multiplier_crisis: 0.3
+  crisis_block_all_new_entries: true
   dynamic_thresholds_enabled: false
   base_signal_threshold: 0.01
-  mode: "price"             # "price" | "full" | "learned" | "ml" | "ensemble"
+  mode: "ml"             # "price" | "full" | "learned" | "ml" | "ensemble"
   learned_weights_path: "output/learned_weights.json"   # used when mode=learned
   ml_model_path: "output/models/best_model.pkl"
   ml_model_type: "regressor"
@@ -573,9 +585,9 @@ research:
   # Walk-forward validation (calendar-year windows)
   walk_forward_enabled: true
   train_years: 3
-  test_years: 0.5
-  step_years: 0.5
-  walk_forward_windows: 4
+  test_years: 0.25
+  step_years: 0.25
+  walk_forward_windows: 16
   walk_forward_train_ratio: 0.70
   # Train weight model on train window, backtest OOS (when signals.mode=learned)
   walk_forward_train_weights: true

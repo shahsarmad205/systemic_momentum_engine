@@ -27,22 +27,20 @@ def build_cross_sectional_candidates(
     trading_days: list,
     day_index: int,
     regime: str,
+    currently_held_tickers: set[str] | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """
     Build long and short candidate lists from cross-sectional rank.
-
-    daily_signals_at_date: list of (ticker, sig_row) — should include all
-    tickers with scores for the date (Neutral included for ranking).
-
-    Returns:
-        (pending_entries, daily_allocation_log_rows)
-        pending_entries: list of entry dicts (Bullish for longs, Bearish for shorts)
-        daily_allocation_log_rows: list of dicts for CSV (date, ticker, position_type, ...)
+    Includes a 'Conviction Buffer' (hysteresis) to reduce turnover.
     """
+    currently_held_tickers = currently_held_tickers or set()
     top_longs = getattr(config, "top_longs", 5)
     top_shorts = getattr(config, "top_shorts", 5)
     market_neutral = getattr(config, "market_neutral", True)
-    min_strength = config.min_signal_strength
+    
+    min_strength = float(getattr(config, "min_signal_strength", 0.05))
+    buffer = float(getattr(config, "conviction_buffer", 0.02) or 0.0)
+    
     # If std-based threshold scanning is enabled, override `min_strength`
     # with the equivalent abs(adjusted_score) threshold.
     std_mult = getattr(config, "signal_threshold_std_multiplier", None)
@@ -63,10 +61,15 @@ def build_cross_sectional_candidates(
     for ticker, sig_row in daily_signals_at_date:
         signal_raw = float(sig_row["adjusted_score"])
         adj_score = signal_raw * score_mult
-        # Optional: still require |signal_score| >= threshold for inclusion.
-        # When std-based scanning is enabled, `min_strength` is overridden by the caller.
-        if abs(signal_raw) < min_strength:
+        
+        # Hysteresis (Conviction Buffer): 
+        # Higher threshold for new entries, lower threshold for retention.
+        is_held = ticker in currently_held_tickers
+        effective_threshold = (min_strength - buffer) if is_held else (min_strength + buffer)
+        
+        if abs(signal_raw) < effective_threshold:
             continue
+            
         rows.append((ticker, adj_score, sig_row))
 
     if not rows:

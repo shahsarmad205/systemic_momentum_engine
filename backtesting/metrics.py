@@ -10,8 +10,18 @@ Expected trade DataFrame columns:
     adjusted_score, confidence, regime, entry_cost, exit_cost, holding_days
 """
 
+import math
 import numpy as np
 import pandas as pd
+import scipy.stats as stats
+import statsmodels.api as sm
+from statsmodels.regression.linear_model import OLS
+from statsmodels.tools import add_constant
+from scipy.stats import norm, beta as beta_dist
+try:
+    import pandas_datareader as pdr
+except ImportError:
+    pdr = None
 
 # ------------------------------------------------------------------
 # Win rate
@@ -53,6 +63,10 @@ def compute_profit_factor(trades: pd.DataFrame) -> float:
 # ------------------------------------------------------------------
 
 def compute_sharpe_ratio(trades: pd.DataFrame, holding_period_days: int = 5) -> float:
+    """
+    DEPRECATED: Use account-level Sharpe from daily equity curves instead.
+    Provided only for legacy compatibility.
+    """
     if len(trades) < 2:
         return 0.0
     mean_r = trades["return"].mean()
@@ -350,21 +364,43 @@ def compute_signal_accuracy(trades: pd.DataFrame) -> float:
 # ------------------------------------------------------------------
 
 def compute_information_coefficient(trades: pd.DataFrame) -> float:
-    if len(trades) < 3 or "adjusted_score" not in trades.columns:
+    """
+    Standard IC: spearman correlation between adjusted_score and return.
+    Now refactored to calculate daily cross-sectional mean (professional standard).
+    """
+    if len(trades) < 3 or "adjusted_score" not in trades.columns or "signal_date" not in trades.columns:
         return 0.0
-    ic = trades["adjusted_score"].corr(trades["return"])
-    return 0.0 if pd.isna(ic) else float(ic)
+    
+    # Daily cross-sectional IC
+    try:
+        daily_ic = trades.groupby("signal_date").apply(
+            lambda x: x["adjusted_score"].corr(x["return"], method="spearman") 
+            if len(x) > 1 else np.nan
+        )
+        # Drop NaNs (dates with <2 trades)
+        valid_ic = daily_ic.dropna()
+        return float(valid_ic.mean()) if not valid_ic.empty else 0.0
+    except Exception:
+        # Fallback to simple correlation
+        ic = trades["adjusted_score"].corr(trades["return"], method="spearman")
+        return 0.0 if pd.isna(ic) else float(ic)
 
 
-# ------------------------------------------------------------------
-# Rank IC (Spearman)
-# ------------------------------------------------------------------
+def compute_ic_series(trades: pd.DataFrame) -> pd.Series:
+    """Returns the daily cross-sectional IC series for Grinold/Breadth math."""
+    if len(trades) < 3 or "adjusted_score" not in trades.columns or "signal_date" not in trades.columns:
+        return pd.Series(dtype=float)
+    
+    daily_ic = trades.groupby("signal_date").apply(
+        lambda x: x["adjusted_score"].corr(x["return"], method="spearman") 
+        if len(x) > 1 else np.nan
+    ).dropna()
+    return daily_ic
+
 
 def compute_rank_ic(trades: pd.DataFrame) -> float:
-    if len(trades) < 3 or "adjusted_score" not in trades.columns:
-        return 0.0
-    ic = trades["adjusted_score"].corr(trades["return"], method="spearman")
-    return 0.0 if pd.isna(ic) else float(ic)
+    """Alias for spearman IC compatibility."""
+    return compute_information_coefficient(trades)
 
 
 # ------------------------------------------------------------------
@@ -472,6 +508,41 @@ def compute_turnover(trades: pd.DataFrame, initial_capital: float, avg_cost_bps:
         "annualised_turnover": annualised_turnover,
         "turnover_cost_drag_bps": turnover_cost_drag_bps,
     }
+
+
+def compute_regime_metrics(daily_equity: pd.DataFrame) -> dict:
+    """Compute Sharpe and returns broken down by market regime."""
+    if daily_equity.empty or "regime" not in daily_equity.columns:
+        return {}
+    
+    results = {}
+    for regime, group in daily_equity.groupby("regime"):
+        if len(group) < 5:
+            continue
+            
+        # Grouped Sharpe calculation
+        # Note: We use the daily returns WITHIN the regime blocks.
+        if "equity" not in group.columns:
+            continue
+            
+        equity_series = group.sort_values("date")["equity"]
+        returns = equity_series.pct_change().dropna()
+        
+        if returns.empty or returns.std() < 1e-12:
+            sharpe = 0.0
+        else:
+            sharpe = float((returns.mean() / returns.std()) * np.sqrt(252))
+            
+        results[f"sharpe_{regime.lower()}"] = round(sharpe, 3)
+        
+        # Cumulative return within this regime
+        start_eq = float(equity_series.iloc[0])
+        end_eq = float(equity_series.iloc[-1])
+        regime_ret = (end_eq - start_eq) / start_eq if start_eq > 0 else 0.0
+        results[f"return_{regime.lower()}"] = round(regime_ret, 4)
+        results[f"days_{regime.lower()}"] = len(group)
+        
+    return results
 
 
 def compute_turnover_corrected(
@@ -730,6 +801,16 @@ def compute_all_metrics(
     m["sharpe_ratio"] = compute_sharpe_ratio(trades, eff_holding_days)
     # Net Sharpe: computed from daily equity curve (already net of costs).
     m["net_sharpe_ratio"] = compute_equity_sharpe_ratio(daily_equity)
+    
+    # Gross Sharpe: computed from pre-cost daily equity curve (if available).
+    if "gross_equity" in daily_equity.columns:
+        gross_df = daily_equity.copy()
+        gross_df["equity"] = daily_equity["gross_equity"]
+        m["sharpe_ratio"] = compute_equity_sharpe_ratio(gross_df)
+    else:
+        # Fallback to trade-level approximation if no gross curve exists
+        m["sharpe_ratio"] = compute_sharpe_ratio(trades, eff_holding_days)
+
     m["sortino_ratio"] = compute_sortino_ratio(trades, eff_holding_days)
     m["calmar_ratio"] = compute_calmar_ratio(daily_equity, config.initial_capital)
     m["max_drawdown"] = compute_max_drawdown(daily_equity)
@@ -741,6 +822,9 @@ def compute_all_metrics(
     m["information_coefficient"] = compute_information_coefficient(trades)
     m["rank_ic"] = compute_rank_ic(trades)
     m["duration_stats"] = compute_trade_duration_stats(trades)
+    
+    # Regime breakdown (Institutional transparency)
+    m.update(compute_regime_metrics(daily_equity))
     to = compute_turnover(trades, config.initial_capital, config.execution_costs_commission_bps)
     # Keep old turnover for comparison/debugging.
     m["avg_daily_turnover_old"] = float(to.get("avg_daily_turnover", 0.0) or 0.0)
@@ -763,6 +847,49 @@ def compute_all_metrics(
         daily_ret = equity_series.pct_change().dropna()
         ci = bootstrap_performance_cis(daily_ret)
         m.update(ci)
+
+    # --- [NEW] ADVANCED STATISTICAL AUDIT ---
+    # 1. Grinold IR Decomposition
+    if "date" in daily_equity.columns:
+        dates = pd.to_datetime(daily_equity["date"])
+        total_days = (dates.max() - dates.min()).days
+        years = max(0.1, total_days / 365.25)
+    else:
+        # Fallback for integer index (trading days)
+        years = max(0.1, len(daily_equity) / 252.0)
+    
+    trades_per_year = len(trades) / years if years > 0 else len(trades)
+    
+    m["grinold_ir"] = compute_grinold_ir_decomposition(trades, trades_per_year)
+    
+    # 2. Sharpe Significance (Lo 2002)
+    m["sharpe_significance"] = compute_sharpe_significance(daily_equity)
+    
+    # 3. Win Rate MLE
+    m["win_rate_mle"] = win_rate_mle(float((trades["return"] > 0).sum()), len(trades))
+    
+    # 4. Kelly with Uncertainty
+    m["kelly_uncertainty"] = compute_kelly_with_uncertainty(trades)
+    
+    # 5. Newey-West Sharpe
+    m["newey_west_sharpe_stats"] = compute_newey_west_sharpe(daily_equity)
+    
+    # 6. Fama-French Attribution
+    m["ff_attribution"] = compute_fama_french_attribution(daily_equity)
+    
+    # 7. Probabilistic Sharpe Ratio (PSR)
+    # Get skew/kurt from daily returns
+    if not daily_equity.empty:
+        rets = daily_equity["equity"].pct_change().dropna()
+        if len(rets) > 10:
+            m["psr"] = compute_probabilistic_sharpe_ratio(
+                observed_sr=m["net_sharpe_ratio"],
+                n_days=len(rets),
+                skew=float(rets.skew()),
+                kurt=float(rets.kurtosis())
+            )
+
+    # ... existing institutional alpha ...
 
     # VaR metrics (Historical 95%/99%, CVaR 95%, 5d scaled, breach count/rate)
     try:
@@ -801,13 +928,39 @@ def compute_all_metrics(
         else:
             m["total_transaction_costs"] = 0.0
             m["average_cost_per_trade"] = 0.0
+        # Institutional Waterfall Attribution (Long Gross + Short Gross - Fees = Net P&L)
+        l_trades = trades[trades["direction"] > 0]
+        s_trades = trades[trades["direction"] < 0]
+        
+        # Use 'gross_return' (pre-slippage) for gross P&L if available
+        l_ret_col = "gross_return" if "gross_return" in trades.columns else "return"
+        s_ret_col = "gross_return" if "gross_return" in trades.columns else "return"
+        
+        long_gross_pnl = (l_trades["position_size"] * l_trades[l_ret_col]).sum()
+        short_gross_pnl = (s_trades["position_size"] * s_trades[s_ret_col]).sum()
+        
+        # Total Fees = Trade Costs (commission/impact) + Daily Borrow Costs (shorting)
+        total_trade_costs = trades["total_cost"].sum()
+        total_borrow_costs = daily_equity["short_borrow_cost"].sum() if "short_borrow_cost" in daily_equity.columns else 0.0
+        total_fees = total_trade_costs + total_borrow_costs
+        
+        m["long_pnl_contrib"] = float(long_gross_pnl)
+        m["short_pnl_contrib"] = float(short_gross_pnl)
+        m["total_fees"] = float(total_fees)
+        
+        # Final sanity check: Net P&L should match the sum of segments
+        m["total_pnl_waterfall"] = m["long_pnl_contrib"] + m["short_pnl_contrib"] - m["total_fees"]
+        
         if "gross_return" in trades.columns and "position_size" in trades.columns:
-            gross_pnl = (trades["position_size"] * trades["gross_return"]).sum()
-            m["gross_return"] = gross_pnl / m["starting_capital"]
+            m["gross_return"] = (long_gross_pnl + short_gross_pnl) / m["starting_capital"]
             m["net_return"] = m["total_return"]
         else:
             m["gross_return"] = m["total_return"]
             m["net_return"] = m["total_return"]
+        
+        # --- Institutional Alpha Analysis (Held-to-Expiry) ---
+        alpha_m = compute_institutional_alpha_metrics(trades, daily_equity, config)
+        m.update(alpha_m)
     else:
         m["starting_capital"] = config.initial_capital
         m["final_capital"] = config.initial_capital
@@ -819,3 +972,324 @@ def compute_all_metrics(
         m["average_cost_per_trade"] = 0.0
 
     return m
+
+
+# ------------------------------------------------------------------
+# Institutional Alpha analysis (Held-to-Expiry)
+# ------------------------------------------------------------------
+
+def compute_institutional_alpha_metrics(trades: pd.DataFrame, daily_equity: pd.DataFrame, config) -> dict:
+    """
+    Computes statistical significance and robustness metrics for signal-only 
+    'Held-to-Expiry' performance, plus realized exit diagnostics.
+    """
+    out = {
+        # Raw Paper Alpha (Paper-Expiry)
+        "expiry_win_rate": 0.0,
+        "expiry_avg_return": 0.0,
+        "expiry_sample_size": 0,
+        "expiry_p_value_50": 1.0,
+        "expiry_p_value_60": 1.0,
+        "expiry_p_value_70": 1.0,
+        "expiry_ci_low": 0.0,
+        "expiry_ci_high": 1.0,
+        "expiry_regime_robustness": {},
+        "expiry_yearly_persistence": {},
+        
+        # Realized Diagnostics
+        "exit_reason_counts": {},
+        "stop_loss_pct": 0.0,
+        "stopped_avg_return": 0.0,
+        "realized_expiry_avg_return": 0.0,
+        "realized_expiry_win_rate": 0.0,
+        
+        # [NEW] CLEAN PRE-2024 ANALYSIS (Paper analysis restricted to pre-2024 expiry-only samples)
+        "clean_pre2024_n": 0,
+        "clean_pre2024_wr": 0.0,
+        "clean_pre2024_ci_low": 0.0,
+        "clean_pre2024_ci_high": 1.0,
+        "clean_pre2024_p50": 1.0,
+        "clean_pre2024_p70": 1.0,
+        "clean_pre2024_p80": 1.0,
+    }
+    
+    if trades.empty:
+        return out
+        
+    # 1. Realized Exit Diagnostics (MATCHES USER MANUAL LOG)
+    if "exit_reason" in trades.columns:
+        out["exit_reason_counts"] = trades["exit_reason"].value_counts().to_dict()
+        out["stop_loss_pct"] = float(trades["exit_reason"].eq("stop_loss").mean())
+        
+        stopped = trades[trades["exit_reason"] == "stop_loss"]
+        if not stopped.empty:
+            out["stopped_avg_return"] = float(stopped["return"].mean())
+            
+        realized_held = trades[trades["exit_reason"] == "expiry"]
+        if not realized_held.empty:
+            out["realized_expiry_avg_return"] = float(realized_held["return"].mean())
+            out["realized_expiry_win_rate"] = float((realized_held["return"] > 0).mean())
+
+    # 2. Institutional Paper Alpha (Held-to-Expiry columns)
+    if "expiry_return" not in trades.columns:
+        return out
+        
+    rets = trades["expiry_return"].dropna()
+    if not rets.empty:
+        n = len(rets)
+        wins = (rets > 0).sum()
+        wr = float(wins / n)
+        
+        out["expiry_win_rate"] = wr
+        out["expiry_avg_return"] = float(rets.mean())
+        out["expiry_sample_size"] = n
+        
+        # p-values
+        out["expiry_p_value_50"] = float(stats.binomtest(wins, n, p=0.5, alternative="greater").pvalue)
+        out["expiry_p_value_60"] = float(stats.binomtest(wins, n, p=0.6, alternative="greater").pvalue)
+        out["expiry_p_value_70"] = float(stats.binomtest(wins, n, p=0.7, alternative="greater").pvalue)
+        
+        # 95% Confidence Interval
+        stderr = math.sqrt((wr * (1 - wr)) / n)
+        out["expiry_ci_low"] = max(0.0, wr - 1.96 * stderr)
+        out["expiry_ci_high"] = min(1.0, wr + 1.96 * stderr)
+        
+        # Regime Robustness (EXPIRY TRADES ONLY)
+        expiry_trades = trades[trades["exit_reason"] == "expiry"]
+        if not expiry_trades.empty and "regime" in expiry_trades.columns:
+            reg_groups = expiry_trades.groupby("regime")
+            for reg, group in reg_groups:
+                r_n = len(group)
+                r_wins = (group["return"] > 0).sum()
+                r_wr = float(r_wins / r_n) if r_n > 0 else 0.0
+                out["expiry_regime_robustness"][reg] = {"win_rate": r_wr, "count": r_n}
+                
+        # Yearly Persistence (EXPIRY TRADES ONLY)
+        if not expiry_trades.empty and "entry_date" in expiry_trades.columns:
+            trades_years = pd.to_datetime(expiry_trades["entry_date"]).dt.year
+            yr_groups = expiry_trades.groupby(trades_years)
+            for yr, group in yr_groups:
+                y_n = len(group)
+                y_wins = (group["return"] > 0).sum()
+                y_wr = float(y_wins / y_n) if y_n > 0 else 0.0
+                out["expiry_yearly_persistence"][yr] = y_wr
+
+    # 3. [NEW] CLEAN PRE-2024 ANALYSIS (Realized Expiry Trades only)
+    if not trades.empty and "signal_date" in trades.columns and "exit_reason" in trades.columns:
+        # User defined 'clean' as realized-held-to-expiry trades pre-2024
+        held_realized = trades[trades["exit_reason"] == "expiry"].copy()
+        if not held_realized.empty:
+            held_realized["dt"] = pd.to_datetime(held_realized["signal_date"])
+            clean = held_realized[held_realized["dt"] < "2024-01-01"]
+            
+            if not clean.empty:
+                n_c = len(clean)
+                w_c = (clean["return"] > 0).sum()
+                wr_c = float(w_c / n_c)
+                
+                out["clean_pre2024_n"] = n_c
+                out["clean_pre2024_wr"] = wr_c
+                
+                # Boostrapped CI (matches user's seed=42)
+                np.random.seed(42)
+                boot = [(clean["return"].sample(n=n_c, replace=True) > 0).mean() for _ in range(5000)] # 5k for speed
+                out["clean_pre2024_ci_low"] = float(np.percentile(boot, 2.5))
+                out["clean_pre2024_ci_high"] = float(np.percentile(boot, 97.5))
+                
+                out["clean_pre2024_p50"] = float(stats.binomtest(w_c, n_c, p=0.5, alternative="greater").pvalue)
+                out["clean_pre2024_p70"] = float(stats.binomtest(w_c, n_c, p=0.7, alternative="greater").pvalue)
+                out["clean_pre2024_p80"] = float(stats.binomtest(w_c, n_c, p=0.8, alternative="greater").pvalue)
+
+    return out
+
+
+# ------------------------------------------------------------------
+# [ADVANCED] Institutional Quantitative Auditing Modules
+# ------------------------------------------------------------------
+
+def compute_grinold_ir_decomposition(trades: pd.DataFrame, trades_per_year: float, universe_size: int = 300):
+    """
+    Fundamental Law: IR = IC * sqrt(breadth)
+    Correcting for cross-sectional correlation between signals.
+    """
+    ic_series = compute_ic_series(trades)
+    if ic_series.empty:
+        return {"ic_mean": 0, "effective_breadth": 0, "predicted_ir": 0, "realized_ir": 0}
+    
+    ic_mean = float(ic_series.mean())
+    ic_std = float(ic_series.std())
+    
+    # Breadth calculation: assumes ~ 0.3 avg pairwise correlation between stock signals
+    # Effective breadth = Total Trades / Adjustment Factor
+    avg_corr = 0.3
+    N = universe_size
+    eff_breadth = trades_per_year / (1 + (avg_corr * (N - 1)))
+    
+    predicted_ir = ic_mean * np.sqrt(eff_breadth)
+    # Realized T-stat / IR
+    realized_ir = ic_mean / (ic_std / np.sqrt(len(ic_series))) if ic_std > 0 else 0
+    
+    return {
+        "ic_mean": ic_mean,
+        "effective_breadth": eff_breadth,
+        "predicted_ir_grinold": predicted_ir,
+        "realized_ir": realized_ir,
+        "ic_t_stat": realized_ir
+    }
+
+
+def compute_sharpe_significance(daily_equity: pd.DataFrame):
+    """Lo (2002) correction for return non-normality in Sharpe significance."""
+    if daily_equity is None or daily_equity.empty or "equity" not in daily_equity.columns:
+         return None
+    
+    rets = daily_equity["equity"].pct_change().dropna()
+    if len(rets) < 60: # Need enough data for significance
+        return None
+    
+    sr_ann = (rets.mean() / rets.std()) * np.sqrt(252)
+    t = len(rets)
+    skew = rets.skew()
+    kurt = rets.kurtosis()
+    
+    # Lo (2002) non-normality correction for SR variance
+    sr_variance = (1/t) * (1 + 0.5 * sr_ann**2 - skew * sr_ann + ((kurt - 3)/4) * sr_ann**2)
+    t_stat = sr_ann / np.sqrt(sr_variance) if sr_variance > 0 else 0
+    
+    return {
+        "sharpe_ann": sr_ann,
+        "t_stat": t_stat,
+        "is_significant": float(t_stat) > 1.96,
+        "sample_days": t
+    }
+
+
+def win_rate_mle(wins: float, total: int):
+    """Beta-Binomial MLE for win rate with Posterior 95% Credible Interval."""
+    if total == 0:
+        return None
+    
+    losses = total - wins
+    # Posterior Beta(wins+1, losses+1) -> Uniform prior Beta(1,1)
+    post_alpha = wins + 1
+    post_beta = losses + 1
+    
+    map_est = (post_alpha - 1) / (post_alpha + post_beta - 2) if (post_alpha + post_beta - 2) > 0 else 0
+    ci_low = float(beta_dist.ppf(0.025, post_alpha, post_beta))
+    ci_high = float(beta_dist.ppf(0.975, post_alpha, post_beta))
+    
+    prob_gt_50 = 1 - float(beta_dist.cdf(0.50, post_alpha, post_beta))
+    prob_gt_70 = 1 - float(beta_dist.cdf(0.70, post_alpha, post_beta))
+    
+    return {
+        "map_win_rate": map_est,
+        "ci_95": (ci_low, ci_high),
+        "prob_gt_50": prob_gt_50,
+        "prob_gt_70": prob_gt_70
+    }
+
+
+def compute_kelly_with_uncertainty(trades: pd.DataFrame, n_bootstrap: int = 5000):
+    """Bootstrapped Kelly fraction accounting for parameter estimation error."""
+    if trades.empty:
+        return None
+    
+    rets = trades["return"].values
+    kelly_samples = []
+    
+    np.random.seed(42)
+    for _ in range(n_bootstrap):
+        # Resample with replacement
+        sample = np.random.choice(rets, size=len(rets), replace=True)
+        w_p = (sample > 0).mean()
+        if w_p == 0 or w_p == 1: continue
+        
+        w_ret = sample[sample > 0].mean()
+        l_ret = abs(sample[sample < 0].mean()) if (sample < 0).any() else 0.01
+        
+        b = w_ret / l_ret
+        f = (w_p * b - (1 - w_p)) / b
+        kelly_samples.append(f)
+        
+    if not kelly_samples: return None
+    
+    k_array = np.array(kelly_samples)
+    return {
+        "kelly_mean": float(k_array.mean()),
+        "kelly_std": float(k_array.std()),
+        "kelly_25th": float(np.percentile(k_array, 25)), # Conservative estimate
+        "kelly_5th": float(np.percentile(k_array, 5))
+    }
+
+
+def compute_newey_west_sharpe(daily_equity: pd.DataFrame, lags: int = 10):
+    """Autocorrelation-adjusted Sharpe using Newey-West HAC estimator."""
+    if daily_equity is None or daily_equity.empty: return None
+    rets = daily_equity["equity"].pct_change().dropna()
+    if len(rets) < 30: return None
+    
+    r = rets.values
+    mu = r.mean()
+    n = len(r)
+    
+    # HAC variance estimate of the mean
+    model = OLS(r, add_constant(np.ones(n)))
+    res = model.fit(cov_type='HAC', cov_kwds={'maxlags': lags})
+    
+    nw_mean_std = np.sqrt(res.cov_HC0[0,0])
+    # nw_std = nw_mean_std * sqrt(n)
+    nw_std = nw_mean_std * np.sqrt(n)
+    
+    nw_sharpe = (mu / nw_std) * np.sqrt(252) if nw_std > 0 else 0
+    std_sharpe = (mu / rets.std()) * np.sqrt(252)
+    
+    return {
+        "std_sharpe": std_sharpe,
+        "nw_sharpe": nw_sharpe,
+        "inflation_factor": std_sharpe / nw_sharpe if nw_sharpe > 0 else 1.0
+    }
+
+
+def compute_fama_french_attribution(daily_equity: pd.DataFrame):
+    """FF-5 Attribution to decompose alpha from known factors (requires Internet)."""
+    if pdr is None or daily_equity is None or daily_equity.empty:
+        return None
+    
+    rets = daily_equity["equity"].pct_change().dropna().to_frame("strategy")
+    start = rets.index[0]
+    end = rets.index[-1]
+    
+    try:
+        # Download Fama-French 5 factors
+        factors = pdr.DataReader('F-F_Research_Data_5_Factors_2x3_daily', 'famafrench', start, end)[0] / 100
+        mom = pdr.DataReader('F-F_Momentum_Factor_daily', 'famafrench', start, end)[0] / 100
+        ff = factors.join(mom, how='inner')
+        
+        # Align dates
+        data = rets.join(ff, how='inner')
+        if data.empty: return None
+        
+        y = data["strategy"] - data["RF"]
+        x = data[['Mkt-RF', 'SMB', 'HML', 'RMW', 'CMA', 'Mom']]
+        x = add_constant(x)
+        
+        model = sm.OLS(y, x).fit(cov_type='HAC', cov_kwds={'maxlags': 5})
+        
+        return {
+            "alpha_ann": float(model.params['const'] * 252),
+            "alpha_t_stat": float(model.tvalues['const']),
+            "r_squared": float(model.rsquared),
+            "betas": model.params.to_dict()
+        }
+    except Exception:
+        return None
+
+
+def compute_probabilistic_sharpe_ratio(observed_sr: float, n_days: int, skew: float, kurt: float, benchmark_sr: float = 0.5):
+    """Bailey & López de Prado (2012) PSR against benchmark (default 0.5)."""
+    # SR variance with non-normal correction
+    sr_variance = (1 - skew * observed_sr + ((kurt - 1) / 4) * observed_sr**2) / (n_days - 1)
+    if sr_variance <= 0: return 0.0
+    
+    psr = norm.cdf((observed_sr - benchmark_sr) / np.sqrt(sr_variance))
+    return float(psr)

@@ -1,5 +1,5 @@
 {
-  "model_name": "XGBRegressor",
+  "model_name": "XGBClassifier",
   "horizon_days": 1,
   "target": "forward_return",
   "n_rows": 940860,
@@ -13,7 +13,8 @@
     "cs_momentum_percentile",
     "rsi_14",
     "ret_1d",
-    "vol_ratio_5_20"
+    "vol_ratio_5_20",
+    "capm_residual_vol"
   ],
   "selected_by": "oos_sharpe_chained",
   "windows": [

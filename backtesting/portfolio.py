@@ -28,6 +28,7 @@ class Position:
     adjusted_score: float
     confidence: str
     regime: str
+    original_planned_exit_date: pd.Timestamp
     entry_cost: float
     impact_entry_cost: float = 0.0
     exit_reason: str = ""
@@ -38,6 +39,10 @@ class Position:
     entry_book_equity: float = 0.0
     # Set when Crisis transition shortens planned_exit — min-hold must not block expiry.
     crisis_accelerated_exit: bool = False
+    
+    # Gross accounting (pre-cost/pre-slippage)
+    gross_entry_price: float = 0.0
+    gross_position_size: float = 0.0
 
     @property
     def unrealized_return(self) -> float:
@@ -46,8 +51,20 @@ class Position:
         return self.direction * (self.current_price - self.entry_price) / self.entry_price
 
     @property
+    def gross_unrealized_return(self) -> float:
+        """Return based on pre-slippage/pre-cost price."""
+        if self.gross_entry_price <= 0:
+            return 0.0
+        return self.direction * (self.current_price - self.gross_entry_price) / self.gross_entry_price
+
+    @property
     def market_value(self) -> float:
         return self.position_size * (1 + self.unrealized_return)
+
+    @property
+    def gross_market_value(self) -> float:
+        """Market value using pre-cost basis."""
+        return self.gross_position_size * (1 + self.gross_unrealized_return)
 
 
 # ------------------------------------------------------------------
@@ -58,6 +75,7 @@ class Portfolio:
     def __init__(self, initial_capital: float, max_positions: int):
         self.initial_capital = initial_capital
         self.cash = initial_capital
+        self.gross_cash = initial_capital
         self.max_positions = max_positions
         self.positions: list[Position] = []
         self.trade_log: list[dict] = []
@@ -68,6 +86,11 @@ class Portfolio:
     @property
     def equity(self) -> float:
         return self.cash + sum(p.market_value for p in self.positions)
+
+    @property
+    def gross_equity(self) -> float:
+        """Pre-cost equity for institutional Sharpe comparisons."""
+        return self.gross_cash + sum(p.gross_market_value for p in self.positions)
 
     @property
     def available_slots(self) -> int:
@@ -127,6 +150,7 @@ class Portfolio:
         signal_date: pd.Timestamp,
         entry_date: pd.Timestamp,
         planned_exit_date: pd.Timestamp,
+        original_planned_exit_date: pd.Timestamp,
         entry_price: float,
         adjusted_score: float,
         confidence: str,
@@ -136,6 +160,7 @@ class Portfolio:
         position_scale: float = 1.0,
         size_dollars: float | None = None,
         max_position_pct_of_equity: float = 0.12,
+        gross_entry_price: float | None = None,
     ) -> Position | None:
         if self.available_slots <= 0:
             return None
@@ -174,6 +199,7 @@ class Portfolio:
             signal_date=signal_date,
             entry_date=entry_date,
             planned_exit_date=planned_exit_date,
+            original_planned_exit_date=original_planned_exit_date if original_planned_exit_date else planned_exit_date,
             entry_price=entry_price,
             position_size=size,
             shares=shares,
@@ -184,9 +210,12 @@ class Portfolio:
             impact_entry_cost=impact_entry_cost,
             current_price=entry_price,
             entry_book_equity=entry_book_equity,
+            gross_entry_price=gross_entry_price if gross_entry_price else entry_price,
+            gross_position_size=size,
         )
 
-        self.cash -= size + entry_cost
+        self.cash -= (size + entry_cost)
+        self.gross_cash -= size
         self.positions.append(pos)
         return pos
 
@@ -198,6 +227,8 @@ class Portfolio:
         exit_date: pd.Timestamp,
         exit_price: float,
         exit_cost: float,
+        gross_exit_price: float | None = None,
+        expiry_price: float | None = None,
         **extra_record: object,
     ) -> dict:
         trade_return = pos.direction * (exit_price - pos.entry_price) / pos.entry_price
@@ -205,7 +236,16 @@ class Portfolio:
         pnl = pos.position_size * trade_return - total_cost
         net_return = (pnl / pos.position_size) if pos.position_size > 0 else 0.0
 
+        # Gross return (pre-cost)
+        g_exit = gross_exit_price if gross_exit_price else exit_price
+        gross_trade_return = pos.direction * (g_exit - pos.gross_entry_price) / pos.gross_entry_price if pos.gross_entry_price > 0 else 0.0
+        
+        # Institutional 'Held-to-Expiry' Return (Paper Signal Edge)
+        exp_price = expiry_price if expiry_price else exit_price
+        expiry_trade_return = pos.direction * (exp_price - pos.entry_price) / pos.entry_price if pos.entry_price > 0 else 0.0
+
         self.cash += pos.position_size * (1 + trade_return) - exit_cost
+        self.gross_cash += pos.gross_position_size * (1 + gross_trade_return)
 
         planned_holding_days = (pos.planned_exit_date - pos.entry_date).days
         actual_holding_days = (exit_date - pos.entry_date).days
@@ -220,13 +260,16 @@ class Portfolio:
             "entry_date": pos.entry_date,
             "exit_date": exit_date,
             "planned_exit_date": pos.planned_exit_date,
+            "original_planned_exit_date": pos.original_planned_exit_date,
             "actual_exit_date": exit_date,
             "entry_price": round(pos.entry_price, 4),
             "exit_price": round(exit_price, 4),
+            "expiry_price": round(exp_price, 4),
             "position_size": round(pos.position_size, 2),
             "entry_book_equity": round(pos.entry_book_equity, 2),
             "shares": round(pos.shares, 4),
             "return": round(trade_return, 6),
+            "expiry_return": round(expiry_trade_return, 6),
             "pnl": round(pnl, 2),
             "adjusted_score": pos.adjusted_score,
             "confidence": pos.confidence,
@@ -262,8 +305,11 @@ class Portfolio:
         row = {
             "date": date,
             "equity": round(self.equity, 2),
+            "gross_equity": round(self.gross_equity, 2),
             "cash": round(self.cash, 2),
+            "gross_cash": round(self.gross_cash, 2),
             "invested": round(sum(p.market_value for p in self.positions), 2),
+            "gross_invested": round(sum(p.gross_market_value for p in self.positions), 2),
             "n_positions": len(self.positions),
             "regime": regime,
             "crisis_consecutive_days": int(crisis_consecutive_days),

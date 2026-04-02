@@ -678,6 +678,146 @@ def main():
         + "=" * 60 + "\n"
     )
 
+    # --- Institutional Alpha Analysis (Held-to-Expiry) ---
+    if "expiry_win_rate" in m:
+        wr_realized = m.get("realized_expiry_win_rate", 0.0)
+        avg_realized = m.get("realized_expiry_avg_return", 0.0)
+        n_realized = m.get("exit_reason_counts", {}).get("expiry", 0)
+        n_total = m.get("expiry_sample_size", 0)
+        
+        p50 = m.get("expiry_p_value_50", 1.0)
+        p60 = m.get("expiry_p_value_60", 1.0)
+        p70 = m.get("expiry_p_value_70", 1.0)
+        ci_l = m.get("expiry_ci_low", 0.0)
+        ci_h = m.get("expiry_ci_high", 1.0)
+        
+        summary_block += (
+            "\n"
+            "============================================================\n"
+            "  INSTITUTIONAL ALPHA ANALYSIS (HELD-TO-EXPIRY)\n"
+            "============================================================\n"
+            f"  Expiry Win Rate:  {wr_realized:.1%}  (exit_reason == 'expiry' only)\n"
+            f"  Avg Expiry Return: {avg_realized:+.3%}\n"
+            f"  Sample Size: {n_realized:,} expiry trades (of {n_total:,} total)\n\n"
+            
+            "  EXIT REASON BREAKDOWN\n"
+        )
+        
+        reasons = m.get("exit_reason_counts", {})
+        for r, count in reasons.items():
+            summary_block += f"  {r:<20} : {count}\n"
+            
+        summary_block += (
+            "\n"
+            "  STOP LOSS / EXPIRY REALIZED STATS\n"
+            f"  Stop loss pct        : {m.get('stop_loss_pct', 0.0):.1%}\n"
+            f"  Stopped avg return   : {m.get('stopped_avg_return', 0.0):+.3%}\n"
+            f"  Expiry avg return    : {m.get('realized_expiry_avg_return', 0.0):+.3%}\n"
+            f"  Expiry win rate      : {m.get('realized_expiry_win_rate', 0.0):.1%}\n\n"
+            
+            "  CLEAN PRE-2024 ANALYSIS (REALIZED EXPIRY)\n"
+            f"  Sample Size (n)      : {m.get('clean_pre2024_n', 0)}\n"
+            f"  Win Rate             : {m.get('clean_pre2024_wr', 0.0):.1%}\n"
+            f"  95% Conf. Interval   : [{m.get('clean_pre2024_ci_low', 0.0):.1%}, {m.get('clean_pre2024_ci_high', 1.0):.1%}]\n"
+            f"  p-value vs 50% null  : {m.get('clean_pre2024_p50', 1.0):.2e}\n"
+            f"  p-value vs 70% null  : {m.get('clean_pre2024_p70', 1.0):.2e}\n"
+            f"  p-value vs 80% null  : {m.get('clean_pre2024_p80', 1.0):.2e}\n\n"
+            
+            "  PAPER ALPHA (ALL SIGNALS - ILLUSTRATIVE)\n"
+            f"  p-value vs 50% null  : {p50:.2e}\n"
+            f"  p-value vs 60% null  : {p60:.2e}\n"
+            f"  p-value vs 70% null  : {p70:.2e}\n"
+            f"  95% Conf. Interval   : [{ci_l:.1%}, {ci_h:.1%}]\n\n"
+            
+            "  REGIME ROBUSTNESS (EXPIRY WIN RATE)\n"
+        )
+        
+        rob = m.get("expiry_regime_robustness", {})
+        for r_name in ["Bull", "Bear", "Sideways", "Crisis"]:
+            r_data = rob.get(r_name, {"win_rate": 0.0, "count": 0})
+            summary_block += f"  {r_name:<20} : {r_data['win_rate']:.1%} (n={r_data['count']})\n"
+            
+        summary_block += "\n  YEAR-BY-YEAR PERSISTENCE\n  "
+        years_p = m.get("expiry_yearly_persistence", {})
+        sorted_years = sorted(years_p.keys())
+        y_parts = [f"{y}: {years_p[y]:.1%}" for y in sorted_years]
+        summary_block += " | ".join(y_parts) + "\n"
+        summary_block += "============================================================\n"
+
+    # --- ADVANCED STATISTICAL AUDIT ---
+    summary_block += (
+        "\n"
+        "============================================================\n"
+        "  ADVANCED STATISTICAL AUDIT & RIGOR DIAGNOSTICS\n"
+        "============================================================\n"
+    )
+    
+    # 1. Grinold IR Decomposition
+    g = m.get("grinold_ir", {})
+    if g:
+        summary_block += (
+            "  INFORMATION RATIO DECOMPOSITION (Grinold)\n"
+            f"  IC (Daily mean)      : {g.get('ic_mean', 0.0):.4f}\n"
+            f"  Effective Breadth    : {g.get('effective_breadth', 0.0):.1f} independent bets/yr\n"
+            f"  Predicted IR         : {g.get('predicted_ir_grinold', 0.0):.3f}\n"
+            f"  Realized IR (t-stat) : {g.get('realized_ir', 0.0):.3f}\n\n"
+        )
+        
+    # 2. Sharpe Significance (Lo 2002 HAC-adjusted)
+    ls = m.get("sharpe_significance", {})
+    if ls:
+        summary_block += (
+            "  SHARPE SIGNIFICANCE (Lo 2002 Correction)\n"
+            f"  T-statistic          : {ls.get('t_stat', 0.0):.3f}\n"
+            f"  Significant (>1.96)  : {'YES' if ls.get('is_significant') else 'NO'}\n"
+            f"  Probabilistic Sharpe : {m.get('psr', 0.0):.1%}\n\n"
+        )
+        
+    # 3. Win Rate MLE (Beta-Binomial)
+    wm = m.get("win_rate_mle", {})
+    if wm:
+        ci = wm.get("ci_95", (0,0))
+        summary_block += (
+            "  WIN RATE MLE (BETA-BINOMIAL POSTERIOR)\n"
+            f"  MAP Estimate         : {wm.get('map_win_rate', 0.0):.1%}\n"
+            f"  95% Credible Int.    : [{ci[0]:.1%}, {ci[1]:.1%}]\n"
+            f"  P(True WR > 70%)     : {wm.get('prob_gt_70', 0.0):.1%}\n\n"
+        )
+        
+    # 4. Newey-West HAC Adjusted Sharpe
+    nw = m.get("newey_west_sharpe_stats", {})
+    if nw:
+        summary_block += (
+            "  AUTOCORRELATION ADJUSTMENT (Newey-West)\n"
+            f"  Standard Sharpe      : {nw.get('std_sharpe', 0.0):.3f}\n"
+            f"  HAC-Adjusted Sharpe  : {nw.get('nw_sharpe', 0.0):.3f}\n"
+            f"  Inflation Factor     : {nw.get('inflation_factor', 1.0):.2f}x\n\n"
+        )
+        
+    # 5. Kelly with Estimation Uncertainty
+    ku = m.get("kelly_uncertainty", {})
+    if ku:
+        summary_block += (
+            "  CONSERVATIVE KELLY (Bootstrap)\n"
+            f"  Kelly Mean           : {ku.get('kelly_mean', 0.0):.1%}\n"
+            f"  Kelly 25th Ptile     : {ku.get('kelly_25th', 0.0):.1%} (Recommended)\n"
+            f"  Kelly 5th Ptile      : {ku.get('kelly_5th', 0.0):.1%}\n\n"
+        )
+        
+    # 6. Fama-French Attribution
+    ff = m.get("ff_attribution", {})
+    if ff:
+        summary_block += (
+            "  FAMA-FRENCH 5-FACTOR ATTRIBUTION\n"
+            f"  Annualized Alpha     : {ff.get('alpha_ann', 0.0):+.2%}\n"
+            f"  Alpha t-stat         : {ff.get('alpha_t_stat', 0.0):.3f}\n"
+            f"  R-Squared            : {ff.get('r_squared', 0.0):.1%}\n"
+        )
+    else:
+        summary_block += "  FAMA-FRENCH ATTRIBUTION : [Skipped/No Internet]\n"
+        
+    summary_block += "============================================================\n"
+
     print(summary_block)
 
     out_dir = os.path.join("output", "backtests")
