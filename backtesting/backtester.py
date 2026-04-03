@@ -129,6 +129,7 @@ class Backtester:
     def __init__(self, config: BacktestConfig):
         self.config = config
         self.portfolio = Portfolio(config.initial_capital, config.max_positions)
+        self.ticker_trade_counts: dict[str, int] = {}
         # Regime-specific confidence multipliers (safe defaults to 1.0 if loader unavailable).
         self.regime_multipliers: dict[str, float] = {
             "Bull": 1.0,
@@ -997,6 +998,8 @@ class Backtester:
                 neutralize_market_beta=getattr(self.config, "factor_neutralize_market_beta", True),
                 neutralize_sector=getattr(self.config, "factor_neutralize_sector", True),
                 neutralize_size=getattr(self.config, "factor_neutralize_size", True),
+                neutralize_smb=getattr(self.config, "factor_neutralize_smb", True),
+                neutralize_rmw=getattr(self.config, "factor_neutralize_rmw", True),
                 market_index=getattr(self.config, "factor_market_index", "SPY"),
                 rolling_window=int(getattr(self.config, "factor_rolling_window", 60)),
                 min_observations=10,
@@ -1606,6 +1609,9 @@ class Backtester:
 
             for entry in pending_entries:
                 tk = entry["ticker"]
+                max_trades = int(getattr(self.config, "max_trades_per_ticker", 0) or 0)
+                if max_trades > 0 and self.ticker_trade_counts.get(tk, 0) >= max_trades:
+                    continue
                 # Shorts gate: do not open short trades when allow_shorts is False.
                 if entry.get("signal") == "Bearish" and not getattr(self.config, "allow_shorts", False):
                     continue
@@ -2020,6 +2026,7 @@ class Backtester:
                     signal_date=entry["signal_date"],
                     entry_date=date,
                     planned_exit_date=entry["exit_date"],
+                    original_planned_exit_date=entry.get("original_exit_date", entry["exit_date"]),
                     entry_price=entry_price,
                     adjusted_score=entry["adjusted_score"],
                     confidence=entry["confidence"],
@@ -2032,6 +2039,9 @@ class Backtester:
                         getattr(self.config, "max_position_pct_of_equity", 0.12)
                     ),
                 )
+                if pos:
+                    self.ticker_trade_counts[tk] = self.ticker_trade_counts.get(tk, 0) + 1
+                    
                 if pos is None:
                     # Reschedule so we retry tomorrow (e.g. entry_price was 0 or size 0 this bar)
                     next_at = i + 1

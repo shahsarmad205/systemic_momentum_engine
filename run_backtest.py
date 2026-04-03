@@ -489,6 +489,20 @@ def main():
     apply_dev_mode(config)
     tickers = _resolve_tickers(config)
 
+    # --- Ensemble Detail Logging ---
+    if getattr(config, "signal_mode", "price") == "ml":
+        models = getattr(config, "ensemble_models", [])
+        if models:
+            print(f"\n{SEP}")
+            print(f"  ML ENSEMBLE CONFIGURATION ({len(models)} models)")
+            print(SEP)
+            for m_cfg in models:
+                path = m_cfg.get("path", "unknown")
+                weight = m_cfg.get("weight", 0.0)
+                m_type = m_cfg.get("type", "unknown")
+                print(f"  - {os.path.basename(path):<30} | Weight: {weight:.2f} | Type: {m_type}")
+            print(f"{SEP}\n")
+
     # --- Walk-forward mode ---
     if args.walk_forward:
         _print_header(config, tickers)
@@ -723,7 +737,7 @@ def main():
             f"  p-value vs 70% null  : {m.get('clean_pre2024_p70', 1.0):.2e}\n"
             f"  p-value vs 80% null  : {m.get('clean_pre2024_p80', 1.0):.2e}\n\n"
             
-            "  PAPER ALPHA (ALL SIGNALS - ILLUSTRATIVE)\n"
+            "  ALL TRADES (ILLUSTRATIVE)\n"
             f"  p-value vs 50% null  : {p50:.2e}\n"
             f"  p-value vs 60% null  : {p60:.2e}\n"
             f"  p-value vs 70% null  : {p70:.2e}\n"

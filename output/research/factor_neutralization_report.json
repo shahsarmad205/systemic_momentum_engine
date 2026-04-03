@@ -1,30 +1,34 @@
 {
-  "n_dates": 654,
+  "n_dates": 666,
   "factor_correlations_before": {
-    "market_beta": -0.0033312606154442827,
-    "sector_Financials": 0.0007540027507973356,
-    "sector_Consumer Discretionary": 0.0009777453302913933,
-    "sector_Technology": 0.005427750892278466,
-    "sector_Other": -0.0008451353417151622,
-    "sector_Consumer Staples": -0.0013713637312999084,
-    "size_factor": 0.0030178316782132116,
-    "sector_Energy": 0.000994557151502799,
-    "sector_Healthcare": -0.0028665494463631347,
-    "sector_Industrials": -0.0024338991121946275,
-    "sector_Utilities": -0.0004883299951136519
+    "size_factor": -0.04411837314267814,
+    "smb_beta": 0.18426666156654406,
+    "sector_Financials": -0.03302620096329562,
+    "sector_Utilities": -0.028388253483332623,
+    "sector_Energy": -0.0322926201304737,
+    "rmw_beta": -0.19774667764222872,
+    "sector_Consumer Staples": -0.0653330965570566,
+    "sector_Technology": 0.016547907908741208,
+    "market_beta": 0.1813388119074234,
+    "sector_Industrials": -0.03441847874846278,
+    "sector_Healthcare": -0.07870006681776641,
+    "sector_Other": 0.08939132910952229,
+    "sector_Consumer Discretionary": 0.0029767326745085637
   },
   "factor_correlations_after": {
-    "market_beta": -1.8387464320919664e-18,
-    "sector_Financials": -3.022355847418335e-18,
-    "sector_Consumer Discretionary": -6.836434265999391e-18,
-    "sector_Technology": 9.129057459799553e-18,
-    "sector_Other": -1.147445352619124e-17,
-    "sector_Consumer Staples": 1.8911500115950263e-18,
-    "size_factor": 1.3143728912818749e-17,
-    "sector_Energy": 4.507665347672797e-18,
-    "sector_Healthcare": 1.3877289683840415e-17,
-    "sector_Industrials": 3.063251776071583e-18,
-    "sector_Utilities": 3.3658096729333333e-18
+    "size_factor": 1.4991821961022267e-16,
+    "smb_beta": 2.4551752036924804e-16,
+    "sector_Financials": 7.722256032249094e-17,
+    "sector_Utilities": -4.881899359354903e-17,
+    "sector_Energy": 2.7123338071286264e-17,
+    "rmw_beta": 5.871487712320153e-17,
+    "sector_Consumer Staples": 2.013315453274849e-18,
+    "sector_Technology": 3.278528383702132e-17,
+    "market_beta": 2.2135457574892904e-16,
+    "sector_Industrials": 3.829936776341507e-17,
+    "sector_Healthcare": -1.5047455442012267e-17,
+    "sector_Other": -5.658082784310081e-17,
+    "sector_Consumer Discretionary": 6.0269357710200545e-18
   },
-  "signal_ic_after_neutralization": -0.015173217493981752
+  "signal_ic_after_neutralization": -0.07416175600972202
 }

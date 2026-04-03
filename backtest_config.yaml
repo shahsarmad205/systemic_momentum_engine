@@ -339,7 +339,8 @@ model_selection:
 
 backtest:
   start_date: "2013-01-01"
-  end_date: "2026-01-01"
+  end_date: "2026-03-31"
+  max_trades_per_ticker: 20
   initial_capital: 100000
   max_positions: 10
   max_longs: 5
@@ -350,8 +351,8 @@ backtest:
   # Base rolling-std gate multiplier (overrides signals.signal_confidence_multiplier if both set — see load_config)
   signal_confidence_multiplier: 0.8
   signal_confidence_multiplier_sideways: 0.15
-  signal_confidence_multiplier_bear: 0.2
-  signal_confidence_multiplier_crisis: 0.1
+  signal_confidence_multiplier_bear: 0.3
+  signal_confidence_multiplier_crisis: 0.2
   # Cross-sectional ranking (top/bottom portfolio). When enabled, execution.enable_shorts is forced on if market_neutral.
   cross_sectional:
     enabled: true
@@ -481,6 +482,7 @@ signals:
   # Base |adjusted_score| threshold for classifying Bullish/Bearish.
   # This now drives both static and dynamic thresholds. For learned
   # weights with small coefficients, keep this low (e.g. 0.01–0.05).
+  score_direction: -1
   min_signal_strength: 0.01
   flip_threshold: 0.01         # ~1.5x ensemble score std (0.007); 0.15 kills all entries
   # Skip new entry if abs(raw_score) < multiplier * rolling_60d_std(adjusted_score) per ticker (see backtester).
@@ -565,13 +567,13 @@ regime:
       position_scale: 1.0
     Bear:
       score_mult: 0.8
-      position_scale: 0.5
+      position_scale: 0.3
     Sideways:
       score_mult: 1.0
       position_scale: 0.7
     Crisis:
       score_mult: 0.6
-      position_scale: 0.5
+      position_scale: 0.2
 
 sectors:
   enabled: false              # portfolio exposure limit per sector
@@ -622,8 +624,8 @@ pipeline:
 retraining:
   enabled: true
   model_type: "learned_weights"   # learned_weights | ml
-  train_start_date: "2010-01-01"
-  train_window_years: 5
+  train_start_date: "2013-01-01"
+  train_window_years: 10
   schedule: "monthly"              # informational; enforce via cron
   run_hour: 0                      # UTC — for your scheduler docs only
   run_minute: 0

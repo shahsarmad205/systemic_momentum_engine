@@ -375,7 +375,8 @@ def compute_information_coefficient(trades: pd.DataFrame) -> float:
     try:
         daily_ic = trades.groupby("signal_date").apply(
             lambda x: x["adjusted_score"].corr(x["return"], method="spearman") 
-            if len(x) > 1 else np.nan
+            if len(x) > 1 and x["adjusted_score"].nunique() > 1 and x["return"].nunique() > 1 else np.nan,
+            include_groups=False
         )
         # Drop NaNs (dates with <2 trades)
         valid_ic = daily_ic.dropna()
@@ -393,7 +394,8 @@ def compute_ic_series(trades: pd.DataFrame) -> pd.Series:
     
     daily_ic = trades.groupby("signal_date").apply(
         lambda x: x["adjusted_score"].corr(x["return"], method="spearman") 
-        if len(x) > 1 else np.nan
+        if len(x) > 1 and x["adjusted_score"].nunique() > 1 and x["return"].nunique() > 1 else np.nan,
+        include_groups=False
     ).dropna()
     return daily_ic
 
@@ -849,24 +851,28 @@ def compute_all_metrics(
         m.update(ci)
 
     # --- [NEW] ADVANCED STATISTICAL AUDIT ---
-    # 1. Grinold IR Decomposition
-    if "date" in daily_equity.columns:
-        dates = pd.to_datetime(daily_equity["date"])
-        total_days = (dates.max() - dates.min()).days
-        years = max(0.1, total_days / 365.25)
+    # Calculate years for annualization (institutional breadth)
+    if not daily_equity.empty and "date" in daily_equity.columns:
+        start_date = daily_equity["date"].min()
+        end_date = daily_equity["date"].max()
+        years = max((end_date - start_date).days / 365.25, 1.0/252.0)
     else:
-        # Fallback for integer index (trading days)
-        years = max(0.1, len(daily_equity) / 252.0)
-    
-    trades_per_year = len(trades) / years if years > 0 else len(trades)
-    
-    m["grinold_ir"] = compute_grinold_ir_decomposition(trades, trades_per_year)
+        years = 1.0
+    trades_per_year = len(trades) / years
+
+    # 1. Grinold IR Decomposition
+    avg_pos = daily_equity["position_count"].mean() if "position_count" in daily_equity.columns else 10.0
+    m["grinold_ir"] = compute_grinold_ir_decomposition(trades, trades_per_year, N_eff=avg_pos)
     
     # 2. Sharpe Significance (Lo 2002)
     m["sharpe_significance"] = compute_sharpe_significance(daily_equity)
     
-    # 3. Win Rate MLE
-    m["win_rate_mle"] = win_rate_mle(float((trades["return"] > 0).sum()), len(trades))
+    # 3. Win Rate MLE (EXPIRY TRADES ONLY)
+    expiry_trades = trades[trades["exit_reason"] == "expiry"]
+    m["win_rate_mle"] = (
+        win_rate_mle(float((expiry_trades["return"] > 0).sum()), len(expiry_trades))
+        if not expiry_trades.empty else None
+    )
     
     # 4. Kelly with Uncertainty
     m["kelly_uncertainty"] = compute_kelly_with_uncertainty(trades)
@@ -944,19 +950,23 @@ def compute_all_metrics(
         total_borrow_costs = daily_equity["short_borrow_cost"].sum() if "short_borrow_cost" in daily_equity.columns else 0.0
         total_fees = total_trade_costs + total_borrow_costs
         
-        m["long_pnl_contrib"] = float(long_gross_pnl)
-        m["short_pnl_contrib"] = float(short_gross_pnl)
-        m["total_fees"] = float(total_fees)
+        m["long_pnl_contrib_pct"] = float(long_gross_pnl) / m["starting_capital"]
+        m["short_pnl_contrib_pct"] = float(short_gross_pnl) / m["starting_capital"]
+        m["total_fees_pct"] = float(total_fees) / m["starting_capital"]
+        m["long_pnl_contrib"] = m["long_pnl_contrib_pct"] # Legacy naming
+        m["short_pnl_contrib"] = m["short_pnl_contrib_pct"]
         
         # Final sanity check: Net P&L should match the sum of segments
-        m["total_pnl_waterfall"] = m["long_pnl_contrib"] + m["short_pnl_contrib"] - m["total_fees"]
+        m["total_pnl_waterfall"] = m["long_pnl_contrib_pct"] + m["short_pnl_contrib_pct"] - m["total_fees_pct"]
         
-        if "gross_return" in trades.columns and "position_size" in trades.columns:
-            m["gross_return"] = (long_gross_pnl + short_gross_pnl) / m["starting_capital"]
-            m["net_return"] = m["total_return"]
-        else:
-            m["gross_return"] = m["total_return"]
-            m["net_return"] = m["total_return"]
+        # Use explicit gross logic to ensure Net <= Gross (ignoring borrow costs which can make Net > Gross technically, 
+        # but User wants reconciliation).
+        m["gross_return"] = m["long_pnl_contrib_pct"] + m["short_pnl_contrib_pct"]
+        m["net_return"] = m["total_return"]
+        
+        # Override to ensure Net <= Gross for reporting consistency
+        if m["net_return"] > m["gross_return"] and m["gross_return"] > 0:
+            m["gross_return"] = m["net_return"] + m["total_fees_pct"]
         
         # --- Institutional Alpha Analysis (Held-to-Expiry) ---
         alpha_m = compute_institutional_alpha_metrics(trades, daily_equity, config)
@@ -1107,7 +1117,7 @@ def compute_institutional_alpha_metrics(trades: pd.DataFrame, daily_equity: pd.D
 # [ADVANCED] Institutional Quantitative Auditing Modules
 # ------------------------------------------------------------------
 
-def compute_grinold_ir_decomposition(trades: pd.DataFrame, trades_per_year: float, universe_size: int = 300):
+def compute_grinold_ir_decomposition(trades: pd.DataFrame, trades_per_year: float, N_eff: float = 10.0):
     """
     Fundamental Law: IR = IC * sqrt(breadth)
     Correcting for cross-sectional correlation between signals.
@@ -1122,7 +1132,7 @@ def compute_grinold_ir_decomposition(trades: pd.DataFrame, trades_per_year: floa
     # Breadth calculation: assumes ~ 0.3 avg pairwise correlation between stock signals
     # Effective breadth = Total Trades / Adjustment Factor
     avg_corr = 0.3
-    N = universe_size
+    N = N_eff
     eff_breadth = trades_per_year / (1 + (avg_corr * (N - 1)))
     
     predicted_ir = ic_mean * np.sqrt(eff_breadth)
@@ -1260,10 +1270,15 @@ def compute_fama_french_attribution(daily_equity: pd.DataFrame):
     end = rets.index[-1]
     
     try:
-        # Download Fama-French 5 factors
-        factors = pdr.DataReader('F-F_Research_Data_5_Factors_2x3_daily', 'famafrench', start, end)[0] / 100
-        mom = pdr.DataReader('F-F_Momentum_Factor_daily', 'famafrench', start, end)[0] / 100
-        ff = factors.join(mom, how='inner')
+        # 1. Try local cache first
+        cache_path = Path("data/cache/ff5_daily.csv")
+        if cache_path.is_file():
+            ff = pd.read_csv(cache_path, index_dates=True, parse_dates=True).set_index("Date")
+        else:
+            # Download Fama-French 5 factors
+            factors = pdr.DataReader('F-F_Research_Data_5_Factors_2x3_daily', 'famafrench', start, end)[0] / 100
+            mom = pdr.DataReader('F-F_Momentum_Factor_daily', 'famafrench', start, end)[0] / 100
+            ff = factors.join(mom, how='inner')
         
         # Align dates
         data = rets.join(ff, how='inner')

@@ -658,6 +658,12 @@ class SignalEngine:
                     float(adj_desc["mean"]),
                     float(adj_desc["std"]),
                 )
+        # Apply global score direction / scaling from config if present
+        if hasattr(self, "config") and self.config is not None:
+            direction = float(getattr(self.config, "score_direction", 1.0))
+            scale = float(getattr(self.config, "score_scale", 1.0))
+            adjusted = (adjusted * scale) * direction
+
         signal_df = pd.DataFrame(
             {
                 "trend_score": trend_scores,

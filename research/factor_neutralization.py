@@ -43,6 +43,8 @@ class FactorNeutralizer:
         neutralize_market_beta: bool = True,
         neutralize_sector: bool = True,
         neutralize_size: bool = True,
+        neutralize_smb: bool = True,
+        neutralize_rmw: bool = True,
         market_index: str = "SPY",
         rolling_window: int = 60,
         min_observations: int = 10,
@@ -51,10 +53,13 @@ class FactorNeutralizer:
         self.neutralize_market_beta = neutralize_market_beta
         self.neutralize_sector = neutralize_sector
         self.neutralize_size = neutralize_size
+        self.neutralize_smb = neutralize_smb
+        self.neutralize_rmw = neutralize_rmw
         self.market_index = market_index
         self.rolling_window = int(rolling_window)
         self.min_observations = int(min_observations)
-        self.dev_mode_limit = dev_mode_limit  # if set, use only first N tickers for faster testing
+        self.dev_mode_limit = dev_mode_limit
+        self._ff_cache: pd.DataFrame | None = None
 
     def _compute_market_beta(
         self,
@@ -124,7 +129,6 @@ class FactorNeutralizer:
             price = float(row.get("Close", 1.0) or 1.0)
             if "Volume" in df.columns and df["Volume"].dtype in (np.float64, np.int64, float, int):
                 vol = float(row.get("Volume", 1.0) or 1.0)
-                # Optional: use rolling mean volume for stability
                 vol_series = df["Volume"].loc[df.index <= as_of_date].tail(21)
                 if len(vol_series) >= 5:
                     vol = float(vol_series.mean())
@@ -132,6 +136,62 @@ class FactorNeutralizer:
             else:
                 size = np.log(max(price, 1e-6))
             out[ticker] = size
+        return out
+
+    def _get_ff_factors(self) -> pd.DataFrame:
+        """Load FF factors from cache if available."""
+        if self._ff_cache is not None:
+            return self._ff_cache
+        path = Path("data/cache/ff5_daily.csv")
+        if path.is_file():
+            try:
+                df = pd.read_csv(path)
+                df["Date"] = pd.to_datetime(df["Date"])
+                df = df.set_index("Date")
+                self._ff_cache = df
+                return df
+            except Exception:
+                return pd.DataFrame()
+        return pd.DataFrame()
+
+    def _compute_ff_betas(
+        self,
+        price_data: dict[str, pd.DataFrame],
+        as_of_date: pd.Timestamp,
+        tickers: list[str],
+        factor_name: str,
+    ) -> dict[str, float]:
+        """Rolling beta vs specific FF factor (SMB, RMW, etc.)."""
+        out: dict[str, float] = {}
+        ff_df = self._get_ff_factors()
+        if ff_df.empty or factor_name not in ff_df.columns:
+            return {t: 0.0 for t in tickers}
+        
+        factor = ff_df[factor_name].loc[ff_df.index <= as_of_date].tail(self.rolling_window + 1)
+        factor_ret = factor.dropna()
+        if len(factor_ret) < self.min_observations:
+            return {t: 0.0 for t in tickers}
+        
+        var_f = float(factor_ret.var())
+        if var_f < 1e-12:
+            return {t: 0.0 for t in tickers}
+
+        for ticker in tickers:
+            if ticker not in price_data:
+                out[ticker] = 0.0
+                continue
+            df = price_data[ticker]
+            if "Close" not in df.columns or as_of_date not in df.index:
+                out[ticker] = 0.0
+                continue
+            close = df["Close"].loc[df.index <= as_of_date].tail(self.rolling_window + 1)
+            ret = close.pct_change().dropna()
+            common = ret.index.intersection(factor_ret.index)
+            if len(common) < self.min_observations:
+                out[ticker] = 0.0
+                continue
+            cov = float(ret.reindex(common).fillna(0).cov(factor_ret.reindex(common).fillna(0)))
+            out[ticker] = cov / var_f
         return out
 
     def neutralize(
@@ -179,6 +239,14 @@ class FactorNeutralizer:
             size_map = self._compute_size_factor(price_data, date, tickers)
             X_list.append(np.array([size_map.get(t, 0.0) for t in tickers]))
             col_names.append("size_factor")
+        if self.neutralize_smb:
+            smb_map = self._compute_ff_betas(price_data, date, tickers, "SMB")
+            X_list.append(np.array([smb_map.get(t, 0.0) for t in tickers]))
+            col_names.append("smb_beta")
+        if self.neutralize_rmw:
+            rmw_map = self._compute_ff_betas(price_data, date, tickers, "RMW")
+            X_list.append(np.array([rmw_map.get(t, 0.0) for t in tickers]))
+            col_names.append("rmw_beta")
         if not X_list:
             return list(daily_signals), None
         
