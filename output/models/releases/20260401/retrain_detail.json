@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-04-02T21:59:42.605388",
+  "model_type": "ml",
+  "train_end": "2026-04-01",
+  "matrix_start": "2016-04-01",
+  "train_window_years": 10.0,
+  "validation_holdout_calendar_days": 252,
+  "validation_walk_forward_windows": 3,
+  "status": "ok",
+  "release_dir": "output/models/releases/20260401"
+}

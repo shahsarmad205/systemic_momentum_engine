@@ -1,0 +1,207 @@
+2026-04-03 13:58:54,344 [WARNING] backtesting.regime_multipliers: Sideways multiplier 0.0000 is outside (0, 3.0]. Using 1.0 fallback.
+2026-04-03 13:58:54,344 [WARNING] backtesting.regime_multipliers: Crisis multiplier 0.3000 is outside recommended 0.5-2.0 range.
+2026-04-03 13:58:54,344 [INFO] backtesting.backtester: Regime multipliers loaded: {'Bull': 1.0, 'Bear': 0.8, 'Sideways': 1.0, 'Crisis': 0.3}
+2026-04-03 13:58:54,702 [ERROR] utils.market_data: [_download_tiingo] Request failed for ^VIX: 404 Client Error: Not Found for url: https://api.tiingo.com/tiingo/daily/%5Evix/prices?startDate=2016-11-27&endDate=2024-01-31&token=d421c9893c8bea038597e0e5cfbdc1de6c02f4f1
+2026-04-03 13:58:54,925 [ERROR] utils.market_data: [_download_tiingo] Request failed for ^VIX3M: 404 Client Error: Not Found for url: https://api.tiingo.com/tiingo/daily/%5Evix3m/prices?startDate=2016-11-27&endDate=2024-01-31&token=d421c9893c8bea038597e0e5cfbdc1de6c02f4f1
+2026-04-03 13:58:54,934 [INFO] backtesting.backtester: Loaded OHLCV for AAPL: shape=(1805, 9)
+2026-04-03 13:58:54,937 [INFO] backtesting.backtester: Loaded OHLCV for NVDA: shape=(1805, 9)
+2026-04-03 13:58:54,939 [INFO] backtesting.backtester: Loaded OHLCV for TSLA: shape=(1805, 9)
+2026-04-03 13:58:54,941 [INFO] backtesting.backtester: Loaded OHLCV for META: shape=(1805, 9)
+2026-04-03 13:58:54,943 [INFO] backtesting.backtester: Loaded OHLCV for AMZN: shape=(1805, 9)
+2026-04-03 13:58:54,946 [INFO] backtesting.backtester: Loaded OHLCV for MSFT: shape=(1805, 9)
+2026-04-03 13:58:54,948 [INFO] backtesting.backtester: Loaded OHLCV for GOOG: shape=(1805, 9)
+2026-04-03 13:58:54,950 [INFO] backtesting.backtester: Loaded OHLCV for AVGO: shape=(1805, 9)
+2026-04-03 13:58:54,952 [INFO] backtesting.backtester: Loaded OHLCV for ADBE: shape=(1805, 9)
+2026-04-03 13:58:54,954 [INFO] backtesting.backtester: Loaded OHLCV for CRM: shape=(1805, 9)
+2026-04-03 13:58:54,956 [INFO] backtesting.backtester: Loaded OHLCV for AMD: shape=(1805, 9)
+2026-04-03 13:58:54,958 [INFO] backtesting.backtester: Loaded OHLCV for INTC: shape=(1805, 9)
+2026-04-03 13:58:54,960 [INFO] backtesting.backtester: Loaded OHLCV for ORCL: shape=(1805, 9)
+2026-04-03 13:58:54,962 [INFO] backtesting.backtester: Loaded OHLCV for CSCO: shape=(1805, 9)
+2026-04-03 13:58:54,964 [INFO] backtesting.backtester: Loaded OHLCV for IBM: shape=(1805, 9)
+2026-04-03 13:58:54,966 [INFO] backtesting.backtester: Loaded OHLCV for SPY: shape=(1805, 9)
+2026-04-03 13:58:54,968 [INFO] backtesting.backtester: Loaded OHLCV for QQQ: shape=(1805, 9)
+2026-04-03 13:58:54,969 [INFO] backtesting.backtester: Loaded OHLCV for IWM: shape=(1805, 9)
+2026-04-03 13:58:54,971 [INFO] backtesting.backtester: Loaded OHLCV for ARKK: shape=(1805, 9)
+2026-04-03 13:58:54,973 [INFO] backtesting.backtester: Loaded OHLCV for DIA: shape=(1805, 9)
+2026-04-03 13:58:54,975 [INFO] backtesting.backtester: Loaded OHLCV for XLK: shape=(1805, 9)
+2026-04-03 13:58:54,976 [INFO] backtesting.backtester: Loaded OHLCV for VTI: shape=(1805, 9)
+2026-04-03 13:58:54,978 [INFO] backtesting.backtester: Loaded OHLCV for JPM: shape=(1805, 9)
+2026-04-03 13:58:54,980 [INFO] backtesting.backtester: Loaded OHLCV for BAC: shape=(1805, 9)
+2026-04-03 13:58:54,981 [INFO] backtesting.backtester: Loaded OHLCV for GS: shape=(1805, 9)
+2026-04-03 13:58:54,983 [INFO] backtesting.backtester: Loaded OHLCV for MS: shape=(1805, 9)
+2026-04-03 13:58:54,985 [INFO] backtesting.backtester: Loaded OHLCV for C: shape=(1805, 9)
+2026-04-03 13:58:54,986 [INFO] backtesting.backtester: Loaded OHLCV for WFC: shape=(1805, 9)
+2026-04-03 13:58:54,988 [INFO] backtesting.backtester: Loaded OHLCV for BLK: shape=(1805, 9)
+2026-04-03 13:58:54,990 [INFO] backtesting.backtester: Loaded OHLCV for SCHW: shape=(1805, 9)
+2026-04-03 13:58:54,991 [INFO] backtesting.backtester: Loaded OHLCV for JNJ: shape=(1805, 9)
+2026-04-03 13:58:54,993 [INFO] backtesting.backtester: Loaded OHLCV for UNH: shape=(1805, 9)
+2026-04-03 13:58:54,995 [INFO] backtesting.backtester: Loaded OHLCV for PFE: shape=(1805, 9)
+2026-04-03 13:58:54,996 [INFO] backtesting.backtester: Loaded OHLCV for ABBV: shape=(1805, 9)
+2026-04-03 13:58:54,998 [INFO] backtesting.backtester: Loaded OHLCV for MRK: shape=(1805, 9)
+2026-04-03 13:58:55,000 [INFO] backtesting.backtester: Loaded OHLCV for LLY: shape=(1805, 9)
+2026-04-03 13:58:55,001 [INFO] backtesting.backtester: Loaded OHLCV for TMO: shape=(1805, 9)
+2026-04-03 13:58:55,003 [INFO] backtesting.backtester: Loaded OHLCV for ABT: shape=(1805, 9)
+2026-04-03 13:58:55,005 [INFO] backtesting.backtester: Loaded OHLCV for KO: shape=(1805, 9)
+2026-04-03 13:58:55,006 [INFO] backtesting.backtester: Loaded OHLCV for PG: shape=(1805, 9)
+2026-04-03 13:58:55,008 [INFO] backtesting.backtester: Loaded OHLCV for PEP: shape=(1805, 9)
+2026-04-03 13:58:55,009 [INFO] backtesting.backtester: Loaded OHLCV for COST: shape=(1805, 9)
+2026-04-03 13:58:55,011 [INFO] backtesting.backtester: Loaded OHLCV for WMT: shape=(1805, 9)
+2026-04-03 13:58:55,013 [INFO] backtesting.backtester: Loaded OHLCV for MCD: shape=(1805, 9)
+2026-04-03 13:58:55,014 [INFO] backtesting.backtester: Loaded OHLCV for NKE: shape=(1805, 9)
+2026-04-03 13:58:55,016 [INFO] backtesting.backtester: Loaded OHLCV for SBUX: shape=(1805, 9)
+2026-04-03 13:58:55,017 [INFO] backtesting.backtester: Loaded OHLCV for XOM: shape=(1805, 9)
+2026-04-03 13:58:55,019 [INFO] backtesting.backtester: Loaded OHLCV for CVX: shape=(1805, 9)
+2026-04-03 13:58:55,020 [INFO] backtesting.backtester: Loaded OHLCV for CAT: shape=(1805, 9)
+2026-04-03 13:58:55,022 [INFO] backtesting.backtester: Loaded OHLCV for GE: shape=(1805, 9)
+2026-04-03 13:59:07,747 [INFO] backtesting.backtester: Precomputed regime score std: {'Bull': 0.02285687634463581, 'Bear': 0.02288998557259049, 'Sideways': 0.02050614162802967, 'Crisis': 0.02135157406559722}
+2026-04-03 13:59:08,423 [INFO] backtesting.backtester: Signal inclusion summary: days=0, avg_candidates_per_day=0.00, max_candidates_on_day=0
+/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/metrics.py:1160: RuntimeWarning: invalid value encountered in scalar divide
+  sr_ann = (rets.mean() / rets.std()) * np.sqrt(252)
+
+=================================================================
+  Trend Signal Engine — Quant Research Backtester
+=================================================================
+  Period        : 2018-01-01  →  2024-01-01
+  Tickers       : 50
+  Capital       : $100,000
+  Max Positions : 10
+  Holding       : 5 days
+  Slippage      : 5.0 bps
+  Commission    : $1.00 / trade
+  Min |Signal|  : 0.3
+  Signal Mode   : Single ML model
+  Shorts        : OFF
+  Regime        : ON
+  Sector Cap    : OFF
+  Risk          : sizing=equal, max_pos=12%
+=================================================================
+
+
+Pre-loading benchmarks (SPY, ^VIX, ^VIX3M) using Tiingo…
+  [1/50] AAPL… [1/50] AAPL OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [2/50] NVDA… [2/50] NVDA OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [3/50] TSLA… [3/50] TSLA OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [4/50] META… [4/50] META OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [5/50] AMZN… [5/50] AMZN OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [6/50] MSFT… [6/50] MSFT OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [7/50] GOOG… [7/50] GOOG OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [8/50] AVGO… [8/50] AVGO OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [9/50] ADBE… [9/50] ADBE OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [10/50] CRM… [10/50] CRM OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [11/50] AMD… [11/50] AMD OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [12/50] INTC… [12/50] INTC OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [13/50] ORCL… [13/50] ORCL OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [14/50] CSCO… [14/50] CSCO OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [15/50] IBM… [15/50] IBM OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [16/50] SPY… [16/50] SPY OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [17/50] QQQ… [17/50] QQQ OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [18/50] IWM… [18/50] IWM OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [19/50] ARKK… [19/50] ARKK OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [20/50] DIA… [20/50] DIA OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [21/50] XLK… [21/50] XLK OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [22/50] VTI… [22/50] VTI OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [23/50] JPM… [23/50] JPM OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [24/50] BAC… [24/50] BAC OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [25/50] GS… [25/50] GS OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [26/50] MS… [26/50] MS OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [27/50] C… [27/50] C OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [28/50] WFC… [28/50] WFC OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [29/50] BLK… [29/50] BLK OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [30/50] SCHW… [30/50] SCHW OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [31/50] JNJ… [31/50] JNJ OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [32/50] UNH… [32/50] UNH OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [33/50] PFE… [33/50] PFE OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [34/50] ABBV… [34/50] ABBV OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [35/50] MRK… [35/50] MRK OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [36/50] LLY… [36/50] LLY OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [37/50] TMO… [37/50] TMO OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [38/50] ABT… [38/50] ABT OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [39/50] KO… [39/50] KO OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [40/50] PG… [40/50] PG OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [41/50] PEP… [41/50] PEP OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [42/50] COST… [42/50] COST OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [43/50] WMT… [43/50] WMT OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [44/50] MCD… [44/50] MCD OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [45/50] NKE… [45/50] NKE OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [46/50] SBUX… [46/50] SBUX OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [47/50] XOM… [47/50] XOM OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [48/50] CVX… [48/50] CVX OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [49/50] CAT… [49/50] CAT OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [50/50] GE… [50/50] GE OHLCV window: first_date=2016-11-28, last_date=2024-01-31, n=1805
+  [signals 1/50] AAPL… 1804 bars, 0 signals
+  [signals 2/50] NVDA… 1804 bars, 0 signals
+  [signals 3/50] TSLA… 1804 bars, 0 signals
+  [signals 4/50] META… 1804 bars, 0 signals
+  [signals 5/50] AMZN… 1804 bars, 0 signals
+  [signals 6/50] MSFT… 1804 bars, 0 signals
+  [signals 7/50] GOOG… 1804 bars, 0 signals
+  [signals 8/50] AVGO… 1804 bars, 0 signals
+  [signals 9/50] ADBE… 1804 bars, 0 signals
+  [signals 10/50] CRM… 1804 bars, 0 signals
+  [signals 11/50] AMD… 1804 bars, 0 signals
+  [signals 12/50] INTC… 1804 bars, 0 signals
+  [signals 13/50] ORCL… 1804 bars, 0 signals
+  [signals 14/50] CSCO… 1804 bars, 0 signals
+  [signals 15/50] IBM… 1804 bars, 0 signals
+  [signals 16/50] SPY… 1804 bars, 0 signals
+  [signals 17/50] QQQ… 1804 bars, 0 signals
+  [signals 18/50] IWM… 1804 bars, 0 signals
+  [signals 19/50] ARKK… 1804 bars, 0 signals
+  [signals 20/50] DIA… 1804 bars, 0 signals
+  [signals 21/50] XLK… 1804 bars, 0 signals
+  [signals 22/50] VTI… 1804 bars, 0 signals
+  [signals 23/50] JPM… 1804 bars, 0 signals
+  [signals 24/50] BAC… 1804 bars, 0 signals
+  [signals 25/50] GS… 1804 bars, 0 signals
+  [signals 26/50] MS… 1804 bars, 0 signals
+  [signals 27/50] C… 1804 bars, 0 signals
+  [signals 28/50] WFC… 1804 bars, 0 signals
+  [signals 29/50] BLK… 1804 bars, 0 signals
+  [signals 30/50] SCHW… 1804 bars, 0 signals
+  [signals 31/50] JNJ… 1804 bars, 0 signals
+  [signals 32/50] UNH… 1804 bars, 0 signals
+  [signals 33/50] PFE… 1804 bars, 0 signals
+  [signals 34/50] ABBV… 1804 bars, 0 signals
+  [signals 35/50] MRK… 1804 bars, 0 signals
+  [signals 36/50] LLY… 1804 bars, 0 signals
+  [signals 37/50] TMO… 1804 bars, 0 signals
+  [signals 38/50] ABT… 1804 bars, 0 signals
+  [signals 39/50] KO… 1804 bars, 0 signals
+  [signals 40/50] PG… 1804 bars, 0 signals
+  [signals 41/50] PEP… 1804 bars, 0 signals
+  [signals 42/50] COST… 1804 bars, 0 signals
+  [signals 43/50] WMT… 1804 bars, 0 signals
+  [signals 44/50] MCD… 1804 bars, 0 signals
+  [signals 45/50] NKE… 1804 bars, 0 signals
+  [signals 46/50] SBUX… 1804 bars, 0 signals
+  [signals 47/50] XOM… 1804 bars, 0 signals
+  [signals 48/50] CVX… 1804 bars, 0 signals
+  [signals 49/50] CAT… 1804 bars, 0 signals
+  [signals 50/50] GE… 1804 bars, 0 signals
+Phase 1: Reusing pre-loaded data & signals…
+
+Phase 2: Detecting market regimes (SPY + VIX)…
+  Regimes: {'Bull': 1072, 'Crisis': 139, 'Sideways': 121, 'Bear': 197}
+
+Phase 3: Running day-by-day portfolio simulation…
+Phase 4: Computing metrics…
+
+Traceback (most recent call last):
+  File "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_backtest.py", line 906, in <module>
+    main()
+    ~~~~^^
+  File "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_backtest.py", line 639, in main
+    result = engine.run_backtest(tickers, price_data=price_data, signal_data=signal_data)
+  File "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtest/engine.py", line 34, in run_backtest
+    return self._backtester.run(tickers, price_data=price_data, signal_data=signal_data)
+           ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/backtester.py", line 299, in run
+    metrics = compute_all_metrics(trades, daily_equity, self.config)
+  File "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/metrics.py", line 871, in compute_all_metrics
+    expiry_trades = trades[trades["exit_reason"] == "expiry"]
+                           ~~~~~~^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/site-packages/pandas/core/frame.py", line 4113, in __getitem__
+    indexer = self.columns.get_loc(key)
+  File "/opt/anaconda3/lib/python3.13/site-packages/pandas/core/indexes/range.py", line 417, in get_loc
+    raise KeyError(key)
+KeyError: 'exit_reason'

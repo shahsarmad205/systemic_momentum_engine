@@ -1,0 +1,424 @@
+2026-04-03 14:23:38,944 [WARNING] backtesting.regime_multipliers: Sideways multiplier 0.0000 is outside (0, 3.0]. Using 1.0 fallback.
+2026-04-03 14:23:38,944 [WARNING] backtesting.regime_multipliers: Crisis multiplier 0.3000 is outside recommended 0.5-2.0 range.
+2026-04-03 14:23:38,944 [INFO] backtesting.backtester: Regime multipliers loaded: {'Bull': 1.0, 'Bear': 0.8, 'Sideways': 1.0, 'Crisis': 0.3}
+2026-04-03 14:23:39,218 [ERROR] utils.market_data: [_download_tiingo] Request failed for ^VIX: 404 Client Error: Not Found for url: https://api.tiingo.com/tiingo/daily/%5Evix/prices?startDate=2009-11-27&endDate=2024-01-30&token=d421c9893c8bea038597e0e5cfbdc1de6c02f4f1
+2026-04-03 14:23:39,402 [ERROR] utils.market_data: [_download_tiingo] Request failed for ^VIX3M: 404 Client Error: Not Found for url: https://api.tiingo.com/tiingo/daily/%5Evix3m/prices?startDate=2009-11-27&endDate=2024-01-30&token=d421c9893c8bea038597e0e5cfbdc1de6c02f4f1
+2026-04-03 14:23:39,410 [INFO] backtesting.backtester: Loaded OHLCV for AAPL: shape=(3566, 9)
+2026-04-03 14:23:39,413 [INFO] backtesting.backtester: Loaded OHLCV for NVDA: shape=(3566, 9)
+2026-04-03 14:23:40,113 [INFO] backtesting.backtester: Loaded OHLCV for TSLA: shape=(3419, 9)
+2026-04-03 14:23:40,387 [INFO] backtesting.backtester: Loaded OHLCV for META: shape=(2942, 9)
+2026-04-03 14:23:40,389 [INFO] backtesting.backtester: Loaded OHLCV for AMZN: shape=(3566, 9)
+2026-04-03 14:23:40,392 [INFO] backtesting.backtester: Loaded OHLCV for MSFT: shape=(3566, 9)
+2026-04-03 14:23:40,394 [INFO] backtesting.backtester: Loaded OHLCV for GOOG: shape=(3566, 9)
+2026-04-03 14:23:40,396 [INFO] backtesting.backtester: Loaded OHLCV for AVGO: shape=(3566, 9)
+2026-04-03 14:23:40,398 [INFO] backtesting.backtester: Loaded OHLCV for ADBE: shape=(3566, 9)
+2026-04-03 14:23:40,399 [INFO] backtesting.backtester: Loaded OHLCV for CRM: shape=(3566, 9)
+2026-04-03 14:23:40,401 [INFO] backtesting.backtester: Loaded OHLCV for AMD: shape=(3566, 9)
+2026-04-03 14:23:40,403 [INFO] backtesting.backtester: Loaded OHLCV for INTC: shape=(3566, 9)
+2026-04-03 14:23:40,404 [INFO] backtesting.backtester: Loaded OHLCV for ORCL: shape=(3566, 9)
+2026-04-03 14:23:40,406 [INFO] backtesting.backtester: Loaded OHLCV for CSCO: shape=(3566, 9)
+2026-04-03 14:23:40,407 [INFO] backtesting.backtester: Loaded OHLCV for IBM: shape=(3566, 9)
+2026-04-03 14:23:40,409 [INFO] backtesting.backtester: Loaded OHLCV for SPY: shape=(3566, 9)
+2026-04-03 14:23:40,411 [INFO] backtesting.backtester: Loaded OHLCV for QQQ: shape=(3566, 9)
+2026-04-03 14:23:40,412 [INFO] backtesting.backtester: Loaded OHLCV for IWM: shape=(3566, 9)
+2026-04-03 14:23:40,667 [INFO] backtesting.backtester: Loaded OHLCV for ARKK: shape=(2325, 9)
+2026-04-03 14:23:40,671 [INFO] backtesting.backtester: Loaded OHLCV for DIA: shape=(3566, 9)
+2026-04-03 14:23:40,673 [INFO] backtesting.backtester: Loaded OHLCV for V: shape=(3566, 9)
+2026-04-03 14:23:40,675 [INFO] backtesting.backtester: Loaded OHLCV for MA: shape=(3566, 9)
+2026-04-03 14:23:40,956 [INFO] backtesting.backtester: Loaded OHLCV for PYPL: shape=(2157, 9)
+2026-04-03 14:23:41,582 [ERROR] yfinance: $SQ: possibly delisted; no timezone found
+2026-04-03 14:23:41,592 [ERROR] yfinance: 
+1 Failed download:
+2026-04-03 14:23:41,592 [ERROR] yfinance: ['SQ']: possibly delisted; no timezone found
+2026-04-03 14:23:42,295 [ERROR] yfinance: $SQ: possibly delisted; no price data found  (period=6mo) (Yahoo error = "No data found, symbol may be delisted")
+2026-04-03 14:23:42,301 [ERROR] yfinance: 
+1 Failed download:
+2026-04-03 14:23:42,301 [ERROR] yfinance: ['SQ']: possibly delisted; no price data found  (period=6mo) (Yahoo error = "No data found, symbol may be delisted")
+2026-04-03 14:23:42,753 [ERROR] yfinance: $SQ: possibly delisted; no price data found  (period=1y) (Yahoo error = "No data found, symbol may be delisted")
+2026-04-03 14:23:42,753 [ERROR] yfinance: 
+1 Failed download:
+2026-04-03 14:23:42,753 [ERROR] yfinance: ['SQ']: possibly delisted; no price data found  (period=1y) (Yahoo error = "No data found, symbol may be delisted")
+2026-04-03 14:23:42,756 [INFO] backtesting.backtester: Loaded OHLCV for SQ: shape=(0, 5)
+2026-04-03 14:23:42,756 [WARNING] backtesting.backtester: Skipping SQ due to insufficient data (len=0 < 210 bars)
+2026-04-03 14:23:43,109 [INFO] backtesting.backtester: Loaded OHLCV for SHOP: shape=(2188, 9)
+2026-04-03 14:23:43,451 [INFO] backtesting.backtester: Loaded OHLCV for MSTR: shape=(3565, 9)
+2026-04-03 14:23:43,668 [INFO] backtesting.backtester: Loaded OHLCV for COIN: shape=(703, 9)
+2026-04-03 14:23:43,954 [INFO] backtesting.backtester: Loaded OHLCV for HOOD: shape=(629, 9)
+2026-04-03 14:23:44,157 [INFO] backtesting.backtester: Loaded OHLCV for NET: shape=(1101, 9)
+2026-04-03 14:23:44,378 [INFO] backtesting.backtester: Loaded OHLCV for CRWD: shape=(1166, 9)
+2026-04-03 14:23:44,636 [INFO] backtesting.backtester: Loaded OHLCV for SNOW: shape=(847, 9)
+2026-04-03 14:23:44,835 [INFO] backtesting.backtester: Loaded OHLCV for PLTR: shape=(837, 9)
+2026-04-03 14:23:45,119 [INFO] backtesting.backtester: Loaded OHLCV for AI: shape=(788, 9)
+2026-04-03 14:23:45,391 [INFO] backtesting.backtester: Loaded OHLCV for DDOG: shape=(1097, 9)
+2026-04-03 14:23:45,682 [INFO] backtesting.backtester: Loaded OHLCV for OKTA: shape=(1713, 9)
+2026-04-03 14:23:45,907 [INFO] backtesting.backtester: Loaded OHLCV for ZS: shape=(1477, 9)
+2026-04-03 14:23:46,181 [INFO] backtesting.backtester: Loaded OHLCV for TEAM: shape=(2047, 9)
+2026-04-03 14:23:46,415 [INFO] backtesting.backtester: Loaded OHLCV for MDB: shape=(1578, 9)
+2026-04-03 14:23:46,698 [INFO] backtesting.backtester: Loaded OHLCV for U: shape=(845, 9)
+2026-04-03 14:23:46,943 [INFO] backtesting.backtester: Loaded OHLCV for PATH: shape=(698, 9)
+2026-04-03 14:23:47,218 [INFO] backtesting.backtester: Loaded OHLCV for AFRM: shape=(765, 9)
+2026-04-03 14:23:47,417 [INFO] backtesting.backtester: Loaded OHLCV for UPST: shape=(783, 9)
+2026-04-03 14:23:47,660 [INFO] backtesting.backtester: Loaded OHLCV for RBLX: shape=(727, 9)
+2026-04-03 14:23:47,867 [INFO] backtesting.backtester: Loaded OHLCV for DOCU: shape=(1448, 9)
+2026-04-03 14:23:48,171 [INFO] backtesting.backtester: Loaded OHLCV for TWLO: shape=(1912, 9)
+2026-04-03 14:23:48,360 [INFO] backtesting.backtester: Loaded OHLCV for MQ: shape=(664, 9)
+2026-04-03 14:23:48,526 [INFO] backtesting.backtester: Loaded OHLCV for NU: shape=(536, 9)
+2026-04-03 14:23:48,784 [INFO] backtesting.backtester: Loaded OHLCV for SOFI: shape=(772, 9)
+2026-04-03 14:23:48,788 [INFO] backtesting.backtester: Loaded OHLCV for WMT: shape=(3566, 9)
+2026-04-03 14:23:48,791 [INFO] backtesting.backtester: Loaded OHLCV for MCD: shape=(3566, 9)
+2026-04-03 14:23:48,793 [INFO] backtesting.backtester: Loaded OHLCV for NKE: shape=(3566, 9)
+2026-04-03 14:23:48,795 [INFO] backtesting.backtester: Loaded OHLCV for SBUX: shape=(3566, 9)
+2026-04-03 14:23:48,798 [INFO] backtesting.backtester: Loaded OHLCV for XOM: shape=(3566, 9)
+2026-04-03 14:23:48,800 [INFO] backtesting.backtester: Loaded OHLCV for CVX: shape=(3566, 9)
+2026-04-03 14:23:48,801 [INFO] backtesting.backtester: Loaded OHLCV for CAT: shape=(3566, 9)
+2026-04-03 14:23:48,803 [INFO] backtesting.backtester: Loaded OHLCV for GE: shape=(3566, 9)
+
+=================================================================
+  ML ENSEMBLE CONFIGURATION (2 models)
+=================================================================
+  - ridge.pkl                      | Weight: 0.50 | Type: regressor
+  - xgbregressor.pkl               | Weight: 0.50 | Type: regressor
+=================================================================
+
+
+=================================================================
+  Trend Signal Engine — Quant Research Backtester
+=================================================================
+  Period        : 2011-01-01  →  2023-12-31
+  Tickers       : 56
+  Capital       : $100,000
+  Max Positions : 10
+  Holding       : 5 days
+  Slippage      : 1.0 bps
+  Commission    : $1.00 / trade
+  Min |Signal|  : 0.01
+  Signal Mode   : Single ML model
+  Shorts        : ON
+  Regime        : ON
+  Sector Cap    : OFF
+  Cross-section : TOP_LONGS=5  TOP_SHORTS=5  market_neutral=True
+  Risk          : sizing=equal, max_pos=12%
+=================================================================
+
+
+Pre-loading benchmarks (SPY, ^VIX, ^VIX3M) using Tiingo…
+  [1/56] AAPL… [1/56] AAPL OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [2/56] NVDA… [2/56] NVDA OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [3/56] TSLA… [3/56] TSLA OHLCV window: first_date=2010-06-29, last_date=2024-01-29, n=3419
+  [4/56] META… [4/56] META OHLCV window: first_date=2012-05-18, last_date=2024-01-29, n=2942
+  [5/56] AMZN… [5/56] AMZN OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [6/56] MSFT… [6/56] MSFT OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [7/56] GOOG… [7/56] GOOG OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [8/56] AVGO… [8/56] AVGO OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [9/56] ADBE… [9/56] ADBE OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [10/56] CRM… [10/56] CRM OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [11/56] AMD… [11/56] AMD OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [12/56] INTC… [12/56] INTC OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [13/56] ORCL… [13/56] ORCL OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [14/56] CSCO… [14/56] CSCO OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [15/56] IBM… [15/56] IBM OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [16/56] SPY… [16/56] SPY OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [17/56] QQQ… [17/56] QQQ OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [18/56] IWM… [18/56] IWM OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [19/56] ARKK… [19/56] ARKK OHLCV window: first_date=2014-10-31, last_date=2024-01-29, n=2325
+  [20/56] DIA… [20/56] DIA OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [21/56] V… [21/56] V OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [22/56] MA… [22/56] MA OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [23/56] PYPL… [23/56] PYPL OHLCV window: first_date=2015-07-06, last_date=2024-01-29, n=2157
+  [24/56] SQ… insufficient data
+  [25/56] SHOP… [25/56] SHOP OHLCV window: first_date=2015-05-20, last_date=2024-01-29, n=2188
+  [26/56] MSTR… [26/56] MSTR OHLCV window: first_date=2009-11-27, last_date=2024-01-29, n=3565
+  [27/56] COIN… [27/56] COIN OHLCV window: first_date=2021-04-14, last_date=2024-01-29, n=703
+  [28/56] HOOD… [28/56] HOOD OHLCV window: first_date=2021-07-29, last_date=2024-01-29, n=629
+  [29/56] NET… [29/56] NET OHLCV window: first_date=2019-09-13, last_date=2024-01-29, n=1101
+  [30/56] CRWD… [30/56] CRWD OHLCV window: first_date=2019-06-12, last_date=2024-01-29, n=1166
+  [31/56] SNOW… [31/56] SNOW OHLCV window: first_date=2020-09-16, last_date=2024-01-29, n=847
+  [32/56] PLTR… [32/56] PLTR OHLCV window: first_date=2020-09-30, last_date=2024-01-29, n=837
+  [33/56] AI… [33/56] AI OHLCV window: first_date=2020-12-09, last_date=2024-01-29, n=788
+  [34/56] DDOG… [34/56] DDOG OHLCV window: first_date=2019-09-19, last_date=2024-01-29, n=1097
+  [35/56] OKTA… [35/56] OKTA OHLCV window: first_date=2017-04-07, last_date=2024-01-29, n=1713
+  [36/56] ZS… [36/56] ZS OHLCV window: first_date=2018-03-16, last_date=2024-01-29, n=1477
+  [37/56] TEAM… [37/56] TEAM OHLCV window: first_date=2015-12-09, last_date=2024-01-29, n=2047
+  [38/56] MDB… [38/56] MDB OHLCV window: first_date=2017-10-19, last_date=2024-01-29, n=1578
+  [39/56] U… [39/56] U OHLCV window: first_date=2020-09-18, last_date=2024-01-29, n=845
+  [40/56] PATH… [40/56] PATH OHLCV window: first_date=2021-04-21, last_date=2024-01-29, n=698
+  [41/56] AFRM… [41/56] AFRM OHLCV window: first_date=2021-01-13, last_date=2024-01-29, n=765
+  [42/56] UPST… [42/56] UPST OHLCV window: first_date=2020-12-16, last_date=2024-01-29, n=783
+  [43/56] RBLX… [43/56] RBLX OHLCV window: first_date=2021-03-10, last_date=2024-01-29, n=727
+  [44/56] DOCU… [44/56] DOCU OHLCV window: first_date=2018-04-27, last_date=2024-01-29, n=1448
+  [45/56] TWLO… [45/56] TWLO OHLCV window: first_date=2016-06-23, last_date=2024-01-29, n=1912
+  [46/56] MQ… [46/56] MQ OHLCV window: first_date=2021-06-09, last_date=2024-01-29, n=664
+  [47/56] NU… [47/56] NU OHLCV window: first_date=2021-12-09, last_date=2024-01-29, n=536
+  [48/56] SOFI… [48/56] SOFI OHLCV window: first_date=2021-01-04, last_date=2024-01-29, n=772
+  [49/56] WMT… [49/56] WMT OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [50/56] MCD… [50/56] MCD OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [51/56] NKE… [51/56] NKE OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [52/56] SBUX… [52/56] SBUX OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [53/56] XOM… [53/56] XOM OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [54/56] CVX… [54/56] CVX OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [55/56] CAT… [55/56] CAT OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [56/56] GE… [56/56] GE OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [signals 1/55] AAPL… 3565 bars, 3244 signals
+  [signals 2/55] NVDA… 3565 bars, 3237 signals
+  [signals 3/55] TSLA… 3418 bars, 3074 signals
+  [signals 4/55] META… 2941 bars, 2624 signals
+  [signals 5/55] AMZN… 3565 bars, 3246 signals
+  [signals 6/55] MSFT… 3565 bars, 3231 signals
+  [signals 7/55] GOOG… 3565 bars, 3229 signals
+  [signals 8/55] AVGO… 3565 bars, 3237 signals
+  [signals 9/55] ADBE… 3565 bars, 3249 signals
+  [signals 10/55] CRM… 3565 bars, 3241 signals
+  [signals 11/55] AMD… 3565 bars, 3247 signals
+  [signals 12/55] INTC… 3565 bars, 3244 signals
+  [signals 13/55] ORCL… 3565 bars, 3228 signals
+  [signals 14/55] CSCO… 3565 bars, 3234 signals
+  [signals 15/55] IBM… 3565 bars, 3245 signals
+  [signals 16/55] SPY… 3565 bars, 3238 signals
+  [signals 17/55] QQQ… 3565 bars, 3242 signals
+  [signals 18/55] IWM… 3565 bars, 3243 signals
+  [signals 19/55] ARKK… 2324 bars, 2021 signals
+  [signals 20/55] DIA… 3565 bars, 3233 signals
+  [signals 21/55] V… 3565 bars, 3231 signals
+  [signals 22/55] MA… 3565 bars, 3227 signals
+  [signals 23/55] PYPL… 2156 bars, 1846 signals
+  [signals 24/55] SHOP… 2187 bars, 1876 signals
+  [signals 25/55] MSTR… 3564 bars, 3235 signals
+  [signals 26/55] COIN… 702 bars, 421 signals
+  [signals 27/55] HOOD… 628 bars, 348 signals
+  [signals 28/55] NET… 1100 bars, 814 signals
+  [signals 29/55] CRWD… 1165 bars, 877 signals
+  [signals 30/55] SNOW… 846 bars, 558 signals
+  [signals 31/55] PLTR… 836 bars, 547 signals
+  [signals 32/55] AI… 787 bars, 505 signals
+  [signals 33/55] DDOG… 1096 bars, 811 signals
+  [signals 34/55] OKTA… 1712 bars, 1417 signals
+  [signals 35/55] ZS… 1476 bars, 1183 signals
+  [signals 36/55] TEAM… 2046 bars, 1751 signals
+  [signals 37/55] MDB… 1577 bars, 1286 signals2026-04-03 14:24:06,770 [INFO] backtesting.backtester: Precomputed regime score std: {'Bull': 1.0761721856649442, 'Bear': 1.0339642761614094, 'Sideways': 1.2026729404071235, 'Crisis': 1.009678199284332}
+2026-04-03 14:24:08,507 [INFO] backtesting.backtester: Signal inclusion summary: days=3270, avg_candidates_per_day=38.85, max_candidates_on_day=55
+2026-04-03 14:24:36,854 [INFO] backtesting.backtester: Precomputed regime score std: {'Bull': 1.0761721856649442, 'Bear': 1.0339642761614094, 'Sideways': 1.2026729404071235, 'Crisis': 1.009678199284332}
+2026-04-03 14:24:38,642 [INFO] backtesting.backtester: Signal inclusion summary: days=3270, avg_candidates_per_day=38.85, max_candidates_on_day=55
+2026-04-03 14:25:07,537 [INFO] backtesting.backtester: Precomputed regime score std: {'Bull': 1.0761721856649442, 'Bear': 1.0339642761614094, 'Sideways': 1.2026729404071235, 'Crisis': 1.009678199284332}
+2026-04-03 14:25:09,123 [INFO] backtesting.backtester: Signal inclusion summary: days=3270, avg_candidates_per_day=38.85, max_candidates_on_day=55
+
+  [signals 38/55] U… 844 bars, 554 signals
+  [signals 39/55] PATH… 697 bars, 413 signals
+  [signals 40/55] AFRM… 764 bars, 483 signals
+  [signals 41/55] UPST… 782 bars, 496 signals
+  [signals 42/55] RBLX… 726 bars, 443 signals
+  [signals 43/55] DOCU… 1447 bars, 1151 signals
+  [signals 44/55] TWLO… 1911 bars, 1603 signals
+  [signals 45/55] MQ… 663 bars, 379 signals
+  [signals 46/55] NU… 535 bars, 253 signals
+  [signals 47/55] SOFI… 771 bars, 487 signals
+  [signals 48/55] WMT… 3565 bars, 3243 signals
+  [signals 49/55] MCD… 3565 bars, 3231 signals
+  [signals 50/55] NKE… 3565 bars, 3236 signals
+  [signals 51/55] SBUX… 3565 bars, 3216 signals
+  [signals 52/55] XOM… 3565 bars, 3243 signals
+  [signals 53/55] CVX… 3565 bars, 3231 signals
+  [signals 54/55] CAT… 3565 bars, 3237 signals
+  [signals 55/55] GE… 3565 bars, 3240 signals
+Phase 1: Reusing pre-loaded data & signals…
+
+Phase 2: Detecting market regimes (SPY + VIX)…
+  Regimes: {'Bull': 2545, 'Sideways': 239, 'Crisis': 218, 'Bear': 287}
+
+Phase 3: Running day-by-day portfolio simulation…
+Phase 4: Computing metrics…
+
+
+Trade-level diagnostics:
+  Avg P&L per long trade    :  38.75
+  Avg P&L per short trade   :  nan
+  Avg transaction cost / |P&L|:  10.28%
+  Fraction of trades that are shorts:  0.00%
+  P&L contribution:
+    Longs  :  49717.91
+    Shorts :  0.00
+    Costs  : -8919.69  (negative = drag)
+
+Sharpe by regime (daily equity):
+  Bull    :  0.72
+  Bear    :  0.71
+  Sideways:  1.09
+  Crisis  : -2.21
+  Overall:  0.64
+  CAPM (vs SPY):
+    Portfolio Beta     : 0.115
+    Portfolio Alpha    : 2.78% (ann.)
+    Treynor Ratio      : 0.013
+    Information Ratio : 0.168
+
+  Position Sizing Comparison:
+    Equal-weight Sharpe  : 0.726
+    Kelly (half) Sharpe  : 0.726
+    Kelly win_rate used  : —
+    Kelly fraction       : 0.5
+    Kelly avg position   : 11.5% of equity
+
+
+=================================================================
+  Backtest Results
+=================================================================
+
+  Total Trades            : 1,283
+    Bullish                : 1,283
+    Bearish                : 0
+
+  Win Rate                : 46.4%
+  Average Return          : 0.49%
+  Profit Factor           : 1.23
+  Sharpe Ratio            : 0.73
+  Net Sharpe Ratio        : 0.64
+    95% CI                : [0.11, 1.17]
+  Sortino Ratio           : 1.03
+    95% CI                : [0.10, 1.16]
+  Calmar Ratio            : 0.30
+    95% CI                : [0.03, 0.89]
+  Max Drawdown            : -13.14%
+  Max DD Duration (days)  : 1415
+  Avg Drawdown            : -1.86%
+  Avg DD Duration (days)  : 68.7
+
+  Annual Turnover (old)  : 86.29
+  Avg Daily Turnover      : 0.04
+  Annual Turnover         : 9.90
+  Turnover Cost Drag (bps): 60.0
+  Turnover (shares-based): 63.09
+  Position changes / avg positions held: 1642.44
+  Turnover (trades_per_year*avg_position_size): 10.24
+  Signal Accuracy         : 46.4%
+  Information Coefficient : 0.0431
+  Rank IC (Spearman)      : 0.0431
+
+  Avg Holding (days)      : 5.8
+  Med Holding (days)      : 7.0
+  Min / Max Holding       : 1 / 11
+
+  Starting Capital        : $    100,000.00
+  Final Capital           : $    167,120.89
+  Total PnL               : $     49,717.91
+  Total Return            : 67.12%
+  Gross Return (pre-cost)  : 76.04%
+  Net Return (after cost)  : 67.12%
+  Total Transaction Costs  : $      8,919.69
+  Average Cost per Trade   : $          6.95
+
+  Bullish Win Rate        : 46.4%
+  Bullish Avg Return      : 0.49%
+
+
+============================================================
+  BACKTEST RESULTS SUMMARY
+============================================================
+  Sharpe Ratio         : 0.726
+  Net Sharpe Ratio     : 0.640
+  Sortino Ratio        : 1.030
+  CAGR                 : 4.03%
+  Max Drawdown         : -13.14%
+  Win Rate             : 46.4%
+  Trades per Year      : 99
+  Annual Turnover      : 990%
+  Est. Cost Drag (ann) : 0.60%
+  Long P&L contrib     : 49.72%
+  Short P&L contrib    : 0.00%
+============================================================
+
+============================================================
+  INSTITUTIONAL ALPHA ANALYSIS (HELD-TO-EXPIRY)
+============================================================
+  Expiry Win Rate:  64.0%  (exit_reason == 'expiry' only)
+  Avg Expiry Return: +1.783%
+  Sample Size: 929 expiry trades (of 1,283 total)
+
+  EXIT REASON BREAKDOWN
+  expiry               : 929
+  stop_loss            : 300
+  bear_regime_drawdown : 41
+  crisis_transition_loser : 13
+
+  STOP LOSS / EXPIRY REALIZED STATS
+  Stop loss pct        : 23.4%
+  Stopped avg return   : -3.010%
+  Expiry avg return    : +1.783%
+  Expiry win rate      : 64.0%
+
+  CLEAN PRE-2024 ANALYSIS (REALIZED EXPIRY)
+  Sample Size (n)      : 929
+  Win Rate             : 64.0%
+  95% Conf. Interval   : [60.9%, 67.1%]
+  p-value vs 50% null  : 4.47e-18
+  p-value vs 70% null  : 1.00e+00
+  p-value vs 80% null  : 1.00e+00
+
+  ALL TRADES (ILLUSTRATIVE)
+  p-value vs 50% null  : 9.96e-01
+  p-value vs 60% null  : 1.00e+00
+  p-value vs 70% null  : 1.00e+00
+  95% Conf. Interval   : [43.6%, 49.1%]
+
+  REGIME ROBUSTNESS (EXPIRY WIN RATE)
+  Bull                 : 63.3% (n=818)
+  Bear                 : 80.8% (n=52)
+  Sideways             : 56.9% (n=51)
+  Crisis               : 75.0% (n=8)
+
+  YEAR-BY-YEAR PERSISTENCE
+  2011: 58.1% | 2012: 58.1% | 2013: 78.9% | 2014: 47.6% | 2015: 59.0% | 2016: 48.5% | 2017: 63.2% | 2018: 66.7% | 2019: 66.3% | 2020: 73.3% | 2021: 71.2% | 2022: 67.6% | 2023: 69.6%
+============================================================
+
+============================================================
+  ADVANCED STATISTICAL AUDIT & RIGOR DIAGNOSTICS
+============================================================
+  INFORMATION RATIO DECOMPOSITION (Grinold)
+  IC (Daily mean)      : 0.0431
+  Effective Breadth    : 26.5 independent bets/yr
+  Predicted IR         : 0.222
+  Realized IR (t-stat) : 1.033
+
+  SHARPE SIGNIFICANCE (Lo 2002 Correction)
+  T-statistic          : 28.865
+  Significant (>1.96)  : YES
+  Probabilistic Sharpe : 100.0%
+
+  WIN RATE MLE (BETA-BINOMIAL POSTERIOR)
+  MAP Estimate         : 64.0%
+  95% Credible Int.    : [60.9%, 67.1%]
+  P(True WR > 70%)     : 0.0%
+
+  AUTOCORRELATION ADJUSTMENT (Newey-West)
+  Standard Sharpe      : 0.640
+  HAC-Adjusted Sharpe  : 0.640
+  Inflation Factor     : 1.00x
+
+  CONSERVATIVE KELLY (Bootstrap)
+  Kelly Mean           : 11.9%
+  Kelly 25th Ptile     : 9.9% (Recommended)
+  Kelly 5th Ptile      : 6.8%
+
+  FAMA-FRENCH ATTRIBUTION : [Skipped/No Internet]
+============================================================
+
+  Trades CSV  → output/backtests/trades.csv
+  Equity CSV  → output/backtests/daily_equity.csv
+  Equity plot → output/backtests/equity_curve.png
+  Regime plot → output/backtests/regime_returns.png
+  Pos. count  → output/backtests/position_count.png
+  Experiment snapshot → output/experiments/20260403_182537
+
+=================================================================
+  OUTPUTS PRODUCED
+=================================================================
+  Result    : 1283 trades  |  Sharpe 0.726  |  Return 67.12%
+
+  → output/backtests/latest_summary.txt
+  → output/experiments/20260403_182537
+  → output/backtests/trades.csv
+  → output/backtests/daily_equity.csv
+  → output/backtests/equity_curve.png
+  → output/backtests/regime_returns.png
+  → output/backtests/position_count.png
+=================================================================
+  Backtest complete.
+=================================================================

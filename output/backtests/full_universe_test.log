@@ -1,0 +1,1151 @@
+2026-04-03 14:55:25,852 [WARNING] backtesting.regime_multipliers: Sideways multiplier 0.0000 is outside (0, 3.0]. Using 1.0 fallback.
+2026-04-03 14:55:25,852 [WARNING] backtesting.regime_multipliers: Crisis multiplier 0.3000 is outside recommended 0.5-2.0 range.
+2026-04-03 14:55:25,853 [INFO] backtesting.backtester: Regime multipliers loaded: {'Bull': 1.0, 'Bear': 0.8, 'Sideways': 1.0, 'Crisis': 0.3}
+2026-04-03 14:55:26,233 [ERROR] utils.market_data: [_download_tiingo] Request failed for ^VIX: 404 Client Error: Not Found for url: https://api.tiingo.com/tiingo/daily/%5Evix/prices?startDate=2009-11-27&endDate=2024-01-30&token=d421c9893c8bea038597e0e5cfbdc1de6c02f4f1
+2026-04-03 14:55:26,442 [ERROR] utils.market_data: [_download_tiingo] Request failed for ^VIX3M: 404 Client Error: Not Found for url: https://api.tiingo.com/tiingo/daily/%5Evix3m/prices?startDate=2009-11-27&endDate=2024-01-30&token=d421c9893c8bea038597e0e5cfbdc1de6c02f4f1
+2026-04-03 14:55:26,454 [INFO] backtesting.backtester: Loaded OHLCV for NVDA: shape=(3566, 9)
+2026-04-03 14:55:27,221 [INFO] backtesting.backtester: Loaded OHLCV for TSLA: shape=(3419, 9)
+2026-04-03 14:55:27,224 [INFO] backtesting.backtester: Loaded OHLCV for MU: shape=(3566, 9)
+2026-04-03 14:55:27,227 [INFO] backtesting.backtester: Loaded OHLCV for MSFT: shape=(3566, 9)
+2026-04-03 14:55:27,504 [ERROR] yfinance: $SNDK: possibly delisted; no price data found  (1d 2009-11-27 00:00:00 -> 2024-01-30 00:00:00) (Yahoo error = "Data doesn't exist for startDate = 1259298000, endDate = 1706590800")
+2026-04-03 14:55:27,507 [ERROR] yfinance: 
+1 Failed download:
+2026-04-03 14:55:27,507 [ERROR] yfinance: ['SNDK']: possibly delisted; no price data found  (1d 2009-11-27 00:00:00 -> 2024-01-30 00:00:00) (Yahoo error = "Data doesn't exist for startDate = 1259298000, endDate = 1706590800")
+2026-04-03 14:55:27,945 [INFO] backtesting.backtester: Loaded OHLCV for SNDK: shape=(0, 5)
+2026-04-03 14:55:27,945 [WARNING] backtesting.backtester: Skipping SNDK due to insufficient data (len=0 < 210 bars)
+2026-04-03 14:55:27,953 [INFO] backtesting.backtester: Loaded OHLCV for AAPL: shape=(3566, 9)
+2026-04-03 14:55:27,957 [INFO] backtesting.backtester: Loaded OHLCV for AVGO: shape=(3566, 9)
+2026-04-03 14:55:27,961 [INFO] backtesting.backtester: Loaded OHLCV for AMZN: shape=(3566, 9)
+2026-04-03 14:55:27,964 [INFO] backtesting.backtester: Loaded OHLCV for GOOGL: shape=(3566, 9)
+2026-04-03 14:55:28,316 [INFO] backtesting.backtester: Loaded OHLCV for META: shape=(2942, 9)
+2026-04-03 14:55:28,541 [INFO] backtesting.backtester: Loaded OHLCV for PLTR: shape=(837, 9)
+2026-04-03 14:55:28,545 [INFO] backtesting.backtester: Loaded OHLCV for AMD: shape=(3566, 9)
+2026-04-03 14:55:28,549 [INFO] backtesting.backtester: Loaded OHLCV for GOOG: shape=(3566, 9)
+2026-04-03 14:55:28,800 [INFO] backtesting.backtester: Loaded OHLCV for LITE: shape=(2144, 9)
+2026-04-03 14:55:28,803 [INFO] backtesting.backtester: Loaded OHLCV for NFLX: shape=(3566, 9)
+2026-04-03 14:55:28,807 [INFO] backtesting.backtester: Loaded OHLCV for ORCL: shape=(3566, 9)
+2026-04-03 14:55:28,810 [INFO] backtesting.backtester: Loaded OHLCV for INTC: shape=(3566, 9)
+2026-04-03 14:55:28,814 [INFO] backtesting.backtester: Loaded OHLCV for XOM: shape=(3566, 9)
+2026-04-03 14:55:28,816 [INFO] backtesting.backtester: Loaded OHLCV for JPM: shape=(3566, 9)
+2026-04-03 14:55:29,073 [INFO] backtesting.backtester: Loaded OHLCV for VRT: shape=(1381, 9)
+2026-04-03 14:55:29,078 [INFO] backtesting.backtester: Loaded OHLCV for CVX: shape=(3566, 9)
+2026-04-03 14:55:29,081 [INFO] backtesting.backtester: Loaded OHLCV for CRM: shape=(3566, 9)
+2026-04-03 14:55:29,085 [INFO] backtesting.backtester: Loaded OHLCV for LLY: shape=(3566, 9)
+2026-04-03 14:55:29,087 [INFO] backtesting.backtester: Loaded OHLCV for COHR: shape=(3566, 9)
+2026-04-03 14:55:29,090 [INFO] backtesting.backtester: Loaded OHLCV for WMT: shape=(3566, 9)
+2026-04-03 14:55:29,092 [INFO] backtesting.backtester: Loaded OHLCV for WDC: shape=(3566, 9)
+2026-04-03 14:55:29,354 [INFO] backtesting.backtester: Loaded OHLCV for COIN: shape=(703, 9)
+2026-04-03 14:55:29,359 [INFO] backtesting.backtester: Loaded OHLCV for UNH: shape=(3566, 9)
+2026-04-03 14:55:29,362 [INFO] backtesting.backtester: Loaded OHLCV for LRCX: shape=(3566, 9)
+2026-04-03 14:55:29,366 [INFO] backtesting.backtester: Loaded OHLCV for AMAT: shape=(3566, 9)
+2026-04-03 14:55:29,588 [INFO] backtesting.backtester: Loaded OHLCV for APP: shape=(702, 9)
+2026-04-03 14:55:29,593 [INFO] backtesting.backtester: Loaded OHLCV for BAC: shape=(3566, 9)
+2026-04-03 14:55:29,595 [INFO] backtesting.backtester: Loaded OHLCV for V: shape=(3566, 9)
+2026-04-03 14:55:30,037 [ERROR] yfinance: $GEV: possibly delisted; no price data found  (1d 2009-11-27 00:00:00 -> 2024-01-30 00:00:00) (Yahoo error = "Data doesn't exist for startDate = 1259298000, endDate = 1706590800")
+2026-04-03 14:55:30,039 [ERROR] yfinance: 
+1 Failed download:
+2026-04-03 14:55:30,039 [ERROR] yfinance: ['GEV']: possibly delisted; no price data found  (1d 2009-11-27 00:00:00 -> 2024-01-30 00:00:00) (Yahoo error = "Data doesn't exist for startDate = 1259298000, endDate = 1706590800")
+2026-04-03 14:55:30,404 [INFO] backtesting.backtester: Loaded OHLCV for GEV: shape=(0, 5)
+2026-04-03 14:55:30,404 [WARNING] backtesting.backtester: Skipping GEV due to insufficient data (len=0 < 210 bars)
+2026-04-03 14:55:30,411 [INFO] backtesting.backtester: Loaded OHLCV for GS: shape=(3566, 9)
+2026-04-03 14:55:30,601 [INFO] backtesting.backtester: Loaded OHLCV for HOOD: shape=(629, 9)
+2026-04-03 14:55:30,606 [INFO] backtesting.backtester: Loaded OHLCV for JNJ: shape=(3566, 9)
+2026-04-03 14:55:30,610 [INFO] backtesting.backtester: Loaded OHLCV for CAT: shape=(3566, 9)
+2026-04-03 14:55:30,917 [INFO] backtesting.backtester: Loaded OHLCV for NOW: shape=(2913, 9)
+2026-04-03 14:55:30,922 [INFO] backtesting.backtester: Loaded OHLCV for GLW: shape=(3566, 9)
+2026-04-03 14:55:30,925 [INFO] backtesting.backtester: Loaded OHLCV for INTU: shape=(3566, 9)
+2026-04-03 14:55:30,928 [INFO] backtesting.backtester: Loaded OHLCV for CSCO: shape=(3566, 9)
+2026-04-03 14:55:30,931 [INFO] backtesting.backtester: Loaded OHLCV for COST: shape=(3566, 9)
+2026-04-03 14:55:30,933 [INFO] backtesting.backtester: Loaded OHLCV for BKNG: shape=(3566, 9)
+2026-04-03 14:55:31,157 [INFO] backtesting.backtester: Loaded OHLCV for CRWD: shape=(1166, 9)
+2026-04-03 14:55:31,166 [INFO] backtesting.backtester: Loaded OHLCV for C: shape=(3566, 9)
+2026-04-03 14:55:31,169 [INFO] backtesting.backtester: Loaded OHLCV for PG: shape=(3566, 9)
+2026-04-03 14:55:31,172 [INFO] backtesting.backtester: Loaded OHLCV for MA: shape=(3566, 9)
+2026-04-03 14:55:31,175 [INFO] backtesting.backtester: Loaded OHLCV for ADBE: shape=(3566, 9)
+2026-04-03 14:55:31,177 [INFO] backtesting.backtester: Loaded OHLCV for ACN: shape=(3566, 9)
+2026-04-03 14:55:31,180 [INFO] backtesting.backtester: Loaded OHLCV for QCOM: shape=(3566, 9)
+2026-04-03 14:55:31,183 [INFO] backtesting.backtester: Loaded OHLCV for GE: shape=(3566, 9)
+2026-04-03 14:55:31,520 [INFO] backtesting.backtester: Loaded OHLCV for DELL: shape=(1874, 9)
+2026-04-03 14:55:31,790 [INFO] backtesting.backtester: Loaded OHLCV for ABBV: shape=(2787, 9)
+2026-04-03 14:55:31,794 [INFO] backtesting.backtester: Loaded OHLCV for WFC: shape=(3566, 9)
+2026-04-03 14:55:31,796 [INFO] backtesting.backtester: Loaded OHLCV for BA: shape=(3566, 9)
+2026-04-03 14:55:31,798 [INFO] backtesting.backtester: Loaded OHLCV for KLAC: shape=(3566, 9)
+2026-04-03 14:55:31,800 [INFO] backtesting.backtester: Loaded OHLCV for IBM: shape=(3566, 9)
+2026-04-03 14:55:31,802 [INFO] backtesting.backtester: Loaded OHLCV for HD: shape=(3566, 9)
+2026-04-03 14:55:31,805 [INFO] backtesting.backtester: Loaded OHLCV for COP: shape=(3566, 9)
+2026-04-03 14:55:31,807 [INFO] backtesting.backtester: Loaded OHLCV for STX: shape=(3566, 9)
+2026-04-03 14:55:32,090 [INFO] backtesting.backtester: Loaded OHLCV for UBER: shape=(1188, 9)
+2026-04-03 14:55:32,092 [INFO] backtesting.backtester: Loaded OHLCV for LIN: shape=(3566, 9)
+2026-04-03 14:55:32,094 [INFO] backtesting.backtester: Loaded OHLCV for VZ: shape=(3566, 9)
+2026-04-03 14:55:32,096 [INFO] backtesting.backtester: Loaded OHLCV for APH: shape=(3566, 9)
+2026-04-03 14:55:32,098 [INFO] backtesting.backtester: Loaded OHLCV for ABT: shape=(3566, 9)
+2026-04-03 14:55:32,100 [INFO] backtesting.backtester: Loaded OHLCV for NEM: shape=(3566, 9)
+2026-04-03 14:55:32,102 [INFO] backtesting.backtester: Loaded OHLCV for AXP: shape=(3566, 9)
+2026-04-03 14:55:32,103 [INFO] backtesting.backtester: Loaded OHLCV for KO: shape=(3566, 9)
+2026-04-03 14:55:32,105 [INFO] backtesting.backtester: Loaded OHLCV for ADI: shape=(3566, 9)
+2026-04-03 14:55:32,491 [INFO] backtesting.backtester: Loaded OHLCV for PANW: shape=(2899, 9)
+2026-04-03 14:55:32,496 [INFO] backtesting.backtester: Loaded OHLCV for TXN: shape=(3566, 9)
+2026-04-03 14:55:32,499 [INFO] backtesting.backtester: Loaded OHLCV for RTX: shape=(3566, 9)
+2026-04-03 14:55:32,502 [INFO] backtesting.backtester: Loaded OHLCV for BX: shape=(3566, 9)
+
+=================================================================
+  ML ENSEMBLE CONFIGURATION (2 models)
+=================================================================
+  - ridge.pkl                      | Weight: 0.50 | Type: regressor
+  - xgbregressor.pkl               | Weight: 0.50 | Type: regressor
+=================================================================
+
+
+=================================================================
+  Trend Signal Engine — Quant Research Backtester
+=================================================================
+  Period        : 2011-01-01  →  2023-12-31
+  Tickers       : 300
+  Capital       : $100,000
+  Max Positions : 10
+  Holding       : 5 days
+  Slippage      : 1.0 bps
+  Commission    : $1.00 / trade
+  Min |Signal|  : 0.01
+  Signal Mode   : Single ML model
+  Shorts        : ON
+  Regime        : ON
+  Sector Cap    : OFF
+  Cross-section : TOP_LONGS=5  TOP_SHORTS=5  market_neutral=True
+  Risk          : sizing=equal, max_pos=12%
+=================================================================
+
+
+Pre-loading benchmarks (SPY, ^VIX, ^VIX3M) using Tiingo…
+  [1/300] NVDA… [1/300] NVDA OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [2/300] TSLA… [2/300] TSLA OHLCV window: first_date=2010-06-29, last_date=2024-01-29, n=3419
+  [3/300] MU… [3/300] MU OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [4/300] MSFT… [4/300] MSFT OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [5/300] SNDK… insufficient data
+  [6/300] AAPL… [6/300] AAPL OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [7/300] AVGO… [7/300] AVGO OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [8/300] AMZN… [8/300] AMZN OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [9/300] GOOGL… [9/300] GOOGL OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [10/300] META… [10/300] META OHLCV window: first_date=2012-05-18, last_date=2024-01-29, n=2942
+  [11/300] PLTR… [11/300] PLTR OHLCV window: first_date=2020-09-30, last_date=2024-01-29, n=837
+  [12/300] AMD… [12/300] AMD OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [13/300] GOOG… [13/300] GOOG OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [14/300] LITE… [14/300] LITE OHLCV window: first_date=2015-07-23, last_date=2024-01-29, n=2144
+  [15/300] NFLX… [15/300] NFLX OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [16/300] ORCL… [16/300] ORCL OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [17/300] INTC… [17/300] INTC OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [18/300] XOM… [18/300] XOM OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [19/300] JPM… [19/300] JPM OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [20/300] VRT… [20/300] VRT OHLCV window: first_date=2018-08-02, last_date=2024-01-29, n=1381
+  [21/300] CVX… [21/300] CVX OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [22/300] CRM… [22/300] CRM OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [23/300] LLY… [23/300] LLY OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [24/300] COHR… [24/300] COHR OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [25/300] WMT… [25/300] WMT OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [26/300] WDC… [26/300] WDC OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [27/300] COIN… [27/300] COIN OHLCV window: first_date=2021-04-14, last_date=2024-01-29, n=703
+  [28/300] UNH… [28/300] UNH OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [29/300] LRCX… [29/300] LRCX OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [30/300] AMAT… [30/300] AMAT OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [31/300] APP… [31/300] APP OHLCV window: first_date=2021-04-15, last_date=2024-01-29, n=702
+  [32/300] BAC… [32/300] BAC OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [33/300] V… [33/300] V OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [34/300] GEV… insufficient data
+  [35/300] GS… [35/300] GS OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [36/300] HOOD… [36/300] HOOD OHLCV window: first_date=2021-07-29, last_date=2024-01-29, n=629
+  [37/300] JNJ… [37/300] JNJ OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [38/300] CAT… [38/300] CAT OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [39/300] NOW… [39/300] NOW OHLCV window: first_date=2012-06-29, last_date=2024-01-29, n=2913
+  [40/300] GLW… [40/300] GLW OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [41/300] INTU… [41/300] INTU OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [42/300] CSCO… [42/300] CSCO OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [43/300] COST… [43/300] COST OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [44/300] BKNG… [44/300] BKNG OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [45/300] CRWD… [45/300] CRWD OHLCV window: first_date=2019-06-12, last_date=2024-01-29, n=1166
+  [46/300] C… [46/300] C OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [47/300] PG… [47/300] PG OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [48/300] MA… [48/300] MA OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [49/300] ADBE… [49/300] ADBE OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [50/300] ACN… [50/300] ACN OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [51/300] QCOM… [51/300] QCOM OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [52/300] GE… [52/300] GE OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [53/300] DELL… [53/300] DELL OHLCV window: first_date=2016-08-17, last_date=2024-01-29, n=1874
+  [54/300] ABBV… [54/300] ABBV OHLCV window: first_date=2013-01-02, last_date=2024-01-29, n=2787
+  [55/300] WFC… [55/300] WFC OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [56/300] BA… [56/300] BA OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [57/300] KLAC… [57/300] KLAC OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [58/300] IBM… [58/300] IBM OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [59/300] HD… [59/300] HD OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [60/300] COP… [60/300] COP OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [61/300] STX… [61/300] STX OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [62/300] UBER… [62/300] UBER OHLCV window: first_date=2019-05-10, last_date=2024-01-29, n=1188
+  [63/300] LIN… [63/300] LIN OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [64/300] VZ… [64/300] VZ OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [65/300] APH… [65/300] APH OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [66/300] ABT… [66/300] ABT OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [67/300] NEM… [67/300] NEM OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [68/300] AXP… [68/300] AXP OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [69/300] KO… [69/300] KO OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [70/300] ADI… [70/300] ADI OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [71/300] PANW… [71/300] PANW OHLCV window: first_date=2012-07-20, last_date=2024-01-29, n=2899
+  [72/300] TXN… [72/300] TXN OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [73/300] RTX… [73/300] RTX OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [74/300] BX… [74/300] BX OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [75/300] T…2026-04-03 14:55:32,505 [INFO] backtesting.backtester: Loaded OHLCV for T: shape=(3566, 9)
+2026-04-03 14:55:32,507 [INFO] backtesting.backtester: Loaded OHLCV for MRK: shape=(3566, 9)
+2026-04-03 14:55:32,510 [INFO] backtesting.backtester: Loaded OHLCV for MS: shape=(3566, 9)
+2026-04-03 14:55:32,511 [INFO] backtesting.backtester: Loaded OHLCV for CIEN: shape=(3566, 9)
+2026-04-03 14:55:32,514 [INFO] backtesting.backtester: Loaded OHLCV for LMT: shape=(3566, 9)
+2026-04-03 14:55:32,516 [INFO] backtesting.backtester: Loaded OHLCV for OXY: shape=(3566, 9)
+2026-04-03 14:55:32,518 [INFO] backtesting.backtester: Loaded OHLCV for DIS: shape=(3566, 9)
+2026-04-03 14:55:32,519 [INFO] backtesting.backtester: Loaded OHLCV for FCX: shape=(3566, 9)
+2026-04-03 14:55:32,521 [INFO] backtesting.backtester: Loaded OHLCV for TMUS: shape=(3566, 9)
+2026-04-03 14:55:32,523 [INFO] backtesting.backtester: Loaded OHLCV for SMCI: shape=(3566, 9)
+2026-04-03 14:55:32,525 [INFO] backtesting.backtester: Loaded OHLCV for PFE: shape=(3566, 9)
+2026-04-03 14:55:32,527 [INFO] backtesting.backtester: Loaded OHLCV for CMCSA: shape=(3566, 9)
+2026-04-03 14:55:32,528 [INFO] backtesting.backtester: Loaded OHLCV for VLO: shape=(3566, 9)
+2026-04-03 14:55:32,530 [INFO] backtesting.backtester: Loaded OHLCV for TER: shape=(3566, 9)
+2026-04-03 14:55:32,532 [INFO] backtesting.backtester: Loaded OHLCV for COF: shape=(3566, 9)
+2026-04-03 14:55:32,533 [INFO] backtesting.backtester: Loaded OHLCV for TMO: shape=(3566, 9)
+2026-04-03 14:55:32,535 [INFO] backtesting.backtester: Loaded OHLCV for MCD: shape=(3566, 9)
+2026-04-03 14:55:32,537 [INFO] backtesting.backtester: Loaded OHLCV for PEP: shape=(3566, 9)
+2026-04-03 14:55:32,539 [INFO] backtesting.backtester: Loaded OHLCV for SLB: shape=(3566, 9)
+2026-04-03 14:55:32,540 [INFO] backtesting.backtester: Loaded OHLCV for BLK: shape=(3566, 9)
+2026-04-03 14:55:32,542 [INFO] backtesting.backtester: Loaded OHLCV for SNPS: shape=(3566, 9)
+2026-04-03 14:55:32,543 [INFO] backtesting.backtester: Loaded OHLCV for NEE: shape=(3566, 9)
+2026-04-03 14:55:32,545 [INFO] backtesting.backtester: Loaded OHLCV for SPGI: shape=(3566, 9)
+2026-04-03 14:55:32,547 [INFO] backtesting.backtester: Loaded OHLCV for AMGN: shape=(3566, 9)
+2026-04-03 14:55:32,548 [INFO] backtesting.backtester: Loaded OHLCV for ETN: shape=(3566, 9)
+2026-04-03 14:55:32,550 [INFO] backtesting.backtester: Loaded OHLCV for DAL: shape=(3566, 9)
+2026-04-03 14:55:32,552 [INFO] backtesting.backtester: Loaded OHLCV for GILD: shape=(3566, 9)
+2026-04-03 14:55:32,553 [INFO] backtesting.backtester: Loaded OHLCV for HON: shape=(3566, 9)
+2026-04-03 14:55:32,749 [INFO] backtesting.backtester: Loaded OHLCV for CEG: shape=(509, 9)
+2026-04-03 14:55:32,753 [INFO] backtesting.backtester: Loaded OHLCV for ADP: shape=(3566, 9)
+2026-04-03 14:55:32,756 [INFO] backtesting.backtester: Loaded OHLCV for BSX: shape=(3566, 9)
+2026-04-03 14:55:33,050 [INFO] backtesting.backtester: Loaded OHLCV for PYPL: shape=(2157, 9)
+2026-04-03 14:55:33,054 [INFO] backtesting.backtester: Loaded OHLCV for PM: shape=(3566, 9)
+2026-04-03 14:55:33,324 [INFO] backtesting.backtester: Loaded OHLCV for CVNA: shape=(1699, 9)
+2026-04-03 14:55:33,327 [INFO] backtesting.backtester: Loaded OHLCV for UAL: shape=(3566, 9)
+2026-04-03 14:55:33,331 [INFO] backtesting.backtester: Loaded OHLCV for NKE: shape=(3566, 9)
+2026-04-03 14:55:33,688 [INFO] backtesting.backtester: Loaded OHLCV for ANET: shape=(2428, 9)
+2026-04-03 14:55:33,693 [INFO] backtesting.backtester: Loaded OHLCV for DVN: shape=(3566, 9)
+2026-04-03 14:55:33,696 [INFO] backtesting.backtester: Loaded OHLCV for BMY: shape=(3566, 9)
+2026-04-03 14:55:33,699 [INFO] backtesting.backtester: Loaded OHLCV for CF: shape=(3566, 9)
+2026-04-03 14:55:33,702 [INFO] backtesting.backtester: Loaded OHLCV for SCHW: shape=(3566, 9)
+2026-04-03 14:55:33,704 [INFO] backtesting.backtester: Loaded OHLCV for SATS: shape=(3566, 9)
+2026-04-03 14:55:33,705 [INFO] backtesting.backtester: Loaded OHLCV for WBD: shape=(3566, 9)
+2026-04-03 14:55:33,707 [INFO] backtesting.backtester: Loaded OHLCV for PH: shape=(3566, 9)
+2026-04-03 14:55:33,709 [INFO] backtesting.backtester: Loaded OHLCV for EOG: shape=(3566, 9)
+2026-04-03 14:55:34,062 [INFO] backtesting.backtester: Loaded OHLCV for KKR: shape=(3408, 9)
+2026-04-03 14:55:34,065 [INFO] backtesting.backtester: Loaded OHLCV for TGT: shape=(3566, 9)
+2026-04-03 14:55:34,067 [INFO] backtesting.backtester: Loaded OHLCV for RCL: shape=(3566, 9)
+2026-04-03 14:55:34,070 [INFO] backtesting.backtester: Loaded OHLCV for SBUX: shape=(3566, 9)
+2026-04-03 14:55:34,072 [INFO] backtesting.backtester: Loaded OHLCV for DE: shape=(3566, 9)
+2026-04-03 14:55:34,074 [INFO] backtesting.backtester: Loaded OHLCV for FDX: shape=(3566, 9)
+2026-04-03 14:55:34,076 [INFO] backtesting.backtester: Loaded OHLCV for F: shape=(3566, 9)
+2026-04-03 14:55:34,078 [INFO] backtesting.backtester: Loaded OHLCV for CCL: shape=(3566, 9)
+2026-04-03 14:55:34,079 [INFO] backtesting.backtester: Loaded OHLCV for ISRG: shape=(3566, 9)
+2026-04-03 14:55:34,305 [INFO] backtesting.backtester: Loaded OHLCV for VST: shape=(1840, 9)
+2026-04-03 14:55:34,310 [INFO] backtesting.backtester: Loaded OHLCV for DHR: shape=(3566, 9)
+2026-04-03 14:55:34,313 [INFO] backtesting.backtester: Loaded OHLCV for UPS: shape=(3566, 9)
+2026-04-03 14:55:34,316 [INFO] backtesting.backtester: Loaded OHLCV for SYK: shape=(3566, 9)
+2026-04-03 14:55:34,662 [INFO] backtesting.backtester: Loaded OHLCV for WDAY: shape=(2840, 9)
+2026-04-03 14:55:35,027 [INFO] backtesting.backtester: Loaded OHLCV for APO: shape=(3229, 9)
+2026-04-03 14:55:35,031 [INFO] backtesting.backtester: Loaded OHLCV for TJX: shape=(3566, 9)
+2026-04-03 14:55:35,033 [INFO] backtesting.backtester: Loaded OHLCV for UNP: shape=(3566, 9)
+2026-04-03 14:55:35,035 [INFO] backtesting.backtester: Loaded OHLCV for ELV: shape=(3566, 9)
+2026-04-03 14:55:35,341 [INFO] backtesting.backtester: Loaded OHLCV for MPC: shape=(3169, 9)
+2026-04-03 14:55:35,345 [INFO] backtesting.backtester: Loaded OHLCV for MDT: shape=(3566, 9)
+2026-04-03 14:55:35,347 [INFO] backtesting.backtester: Loaded OHLCV for CME: shape=(3566, 9)
+2026-04-03 14:55:35,349 [INFO] backtesting.backtester: Loaded OHLCV for CDNS: shape=(3566, 9)
+2026-04-03 14:55:35,651 [INFO] backtesting.backtester: Loaded OHLCV for FANG: shape=(2840, 9)
+2026-04-03 14:55:35,654 [INFO] backtesting.backtester: Loaded OHLCV for MCK: shape=(3566, 9)
+2026-04-03 14:55:36,109 [INFO] backtesting.backtester: Loaded OHLCV for LYB: shape=(3462, 9)
+2026-04-03 14:55:36,112 [INFO] backtesting.backtester: Loaded OHLCV for WELL: shape=(3566, 9)
+2026-04-03 14:55:36,114 [INFO] backtesting.backtester: Loaded OHLCV for BKR: shape=(3566, 9)
+2026-04-03 14:55:36,116 [INFO] backtesting.backtester: Loaded OHLCV for MMM: shape=(3566, 9)
+2026-04-03 14:55:36,117 [INFO] backtesting.backtester: Loaded OHLCV for VRTX: shape=(3566, 9)
+2026-04-03 14:55:36,120 [INFO] backtesting.backtester: Loaded OHLCV for MO: shape=(3566, 9)
+2026-04-03 14:55:36,121 [INFO] backtesting.backtester: Loaded OHLCV for MCO: shape=(3566, 9)
+2026-04-03 14:55:36,123 [INFO] backtesting.backtester: Loaded OHLCV for LOW: shape=(3566, 9)
+2026-04-03 14:55:36,125 [INFO] backtesting.backtester: Loaded OHLCV for PGR: shape=(3566, 9)
+2026-04-03 14:55:36,127 [INFO] backtesting.backtester: Loaded OHLCV for CRH: shape=(3566, 9)
+2026-04-03 14:55:36,128 [INFO] backtesting.backtester: Loaded OHLCV for PWR: shape=(3566, 9)
+2026-04-03 14:55:36,384 [INFO] backtesting.backtester: Loaded OHLCV for XYZ: shape=(2060, 9)
+2026-04-03 14:55:36,694 [INFO] backtesting.backtester: Loaded OHLCV for PSX: shape=(2968, 9)
+2026-04-03 14:55:36,698 [INFO] backtesting.backtester: Loaded OHLCV for ROST: shape=(3566, 9)
+ [75/300] T OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [76/300] MRK… [76/300] MRK OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [77/300] MS… [77/300] MS OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [78/300] CIEN… [78/300] CIEN OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [79/300] LMT… [79/300] LMT OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [80/300] OXY… [80/300] OXY OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [81/300] DIS… [81/300] DIS OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [82/300] FCX… [82/300] FCX OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [83/300] TMUS… [83/300] TMUS OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [84/300] SMCI… [84/300] SMCI OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [85/300] PFE… [85/300] PFE OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [86/300] CMCSA… [86/300] CMCSA OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [87/300] VLO… [87/300] VLO OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [88/300] TER… [88/300] TER OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [89/300] COF… [89/300] COF OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [90/300] TMO… [90/300] TMO OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [91/300] MCD… [91/300] MCD OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [92/300] PEP… [92/300] PEP OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [93/300] SLB… [93/300] SLB OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [94/300] BLK… [94/300] BLK OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [95/300] SNPS… [95/300] SNPS OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [96/300] NEE… [96/300] NEE OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [97/300] SPGI… [97/300] SPGI OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [98/300] AMGN… [98/300] AMGN OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [99/300] ETN… [99/300] ETN OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [100/300] DAL… [100/300] DAL OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [101/300] GILD… [101/300] GILD OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [102/300] HON… [102/300] HON OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [103/300] CEG… [103/300] CEG OHLCV window: first_date=2022-01-19, last_date=2024-01-29, n=509
+  [104/300] ADP… [104/300] ADP OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [105/300] BSX… [105/300] BSX OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [106/300] PYPL… [106/300] PYPL OHLCV window: first_date=2015-07-06, last_date=2024-01-29, n=2157
+  [107/300] PM… [107/300] PM OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [108/300] CVNA… [108/300] CVNA OHLCV window: first_date=2017-04-28, last_date=2024-01-29, n=1699
+  [109/300] UAL… [109/300] UAL OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [110/300] NKE… [110/300] NKE OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [111/300] ANET… [111/300] ANET OHLCV window: first_date=2014-06-06, last_date=2024-01-29, n=2428
+  [112/300] DVN… [112/300] DVN OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [113/300] BMY… [113/300] BMY OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [114/300] CF… [114/300] CF OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [115/300] SCHW… [115/300] SCHW OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [116/300] SATS… [116/300] SATS OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [117/300] WBD… [117/300] WBD OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [118/300] PH… [118/300] PH OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [119/300] EOG… [119/300] EOG OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [120/300] KKR… [120/300] KKR OHLCV window: first_date=2010-07-15, last_date=2024-01-29, n=3408
+  [121/300] TGT… [121/300] TGT OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [122/300] RCL… [122/300] RCL OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [123/300] SBUX… [123/300] SBUX OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [124/300] DE… [124/300] DE OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [125/300] FDX… [125/300] FDX OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [126/300] F… [126/300] F OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [127/300] CCL… [127/300] CCL OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [128/300] ISRG… [128/300] ISRG OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [129/300] VST… [129/300] VST OHLCV window: first_date=2016-10-05, last_date=2024-01-29, n=1840
+  [130/300] DHR… [130/300] DHR OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [131/300] UPS… [131/300] UPS OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [132/300] SYK… [132/300] SYK OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [133/300] WDAY… [133/300] WDAY OHLCV window: first_date=2012-10-12, last_date=2024-01-29, n=2840
+  [134/300] APO… [134/300] APO OHLCV window: first_date=2011-03-30, last_date=2024-01-29, n=3229
+  [135/300] TJX… [135/300] TJX OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [136/300] UNP… [136/300] UNP OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [137/300] ELV… [137/300] ELV OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [138/300] MPC… [138/300] MPC OHLCV window: first_date=2011-06-24, last_date=2024-01-29, n=3169
+  [139/300] MDT… [139/300] MDT OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [140/300] CME… [140/300] CME OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [141/300] CDNS… [141/300] CDNS OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [142/300] FANG… [142/300] FANG OHLCV window: first_date=2012-10-12, last_date=2024-01-29, n=2840
+  [143/300] MCK… [143/300] MCK OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [144/300] LYB… [144/300] LYB OHLCV window: first_date=2010-04-28, last_date=2024-01-29, n=3462
+  [145/300] WELL… [145/300] WELL OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [146/300] BKR… [146/300] BKR OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [147/300] MMM… [147/300] MMM OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [148/300] VRTX… [148/300] VRTX OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [149/300] MO… [149/300] MO OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [150/300] MCO… [150/300] MCO OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [151/300] LOW… [151/300] LOW OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [152/300] PGR… [152/300] PGR OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [153/300] CRH… [153/300] CRH OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [154/300] PWR… [154/300] PWR OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [155/300] XYZ… [155/300] XYZ OHLCV window: first_date=2015-11-19, last_date=2024-01-29, n=2060
+  [156/300] PSX… [156/300] PSX OHLCV window: first_date=2012-04-12, last_date=2024-01-29, n=2968
+  [157/300] ROST… [157/300] ROST OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [158/300] DASH…2026-04-03 14:55:36,916 [INFO] backtesting.backtester: Loaded OHLCV for DASH: shape=(788, 9)
+2026-04-03 14:55:36,920 [INFO] backtesting.backtester: Loaded OHLCV for EQIX: shape=(3566, 9)
+2026-04-03 14:55:37,195 [INFO] backtesting.backtester: Loaded OHLCV for TTD: shape=(1850, 9)
+2026-04-03 14:55:37,197 [INFO] backtesting.backtester: Loaded OHLCV for HAL: shape=(3566, 9)
+2026-04-03 14:55:37,199 [INFO] backtesting.backtester: Loaded OHLCV for DUK: shape=(3566, 9)
+2026-04-03 14:55:37,201 [INFO] backtesting.backtester: Loaded OHLCV for NOC: shape=(3566, 9)
+2026-04-03 14:55:37,496 [INFO] backtesting.backtester: Loaded OHLCV for GM: shape=(3319, 9)
+2026-04-03 14:55:37,500 [INFO] backtesting.backtester: Loaded OHLCV for CVS: shape=(3566, 9)
+2026-04-03 14:55:37,502 [INFO] backtesting.backtester: Loaded OHLCV for FIX: shape=(3566, 9)
+2026-04-03 14:55:37,505 [INFO] backtesting.backtester: Loaded OHLCV for MDLZ: shape=(3566, 9)
+2026-04-03 14:55:37,507 [INFO] backtesting.backtester: Loaded OHLCV for CB: shape=(3566, 9)
+2026-04-03 14:55:37,509 [INFO] backtesting.backtester: Loaded OHLCV for EXPE: shape=(3566, 9)
+2026-04-03 14:55:37,511 [INFO] backtesting.backtester: Loaded OHLCV for AMT: shape=(3566, 9)
+2026-04-03 14:55:37,897 [INFO] backtesting.backtester: Loaded OHLCV for HCA: shape=(3243, 9)
+2026-04-03 14:55:37,903 [INFO] backtesting.backtester: Loaded OHLCV for CL: shape=(3566, 9)
+2026-04-03 14:55:38,239 [INFO] backtesting.backtester: Loaded OHLCV for HWM: shape=(1821, 9)
+2026-04-03 14:55:38,243 [INFO] backtesting.backtester: Loaded OHLCV for PNC: shape=(3566, 9)
+2026-04-03 14:55:38,246 [INFO] backtesting.backtester: Loaded OHLCV for MPWR: shape=(3566, 9)
+2026-04-03 14:55:38,552 [INFO] backtesting.backtester: Loaded OHLCV for HLT: shape=(2548, 9)
+2026-04-03 14:55:38,556 [INFO] backtesting.backtester: Loaded OHLCV for MCHP: shape=(3566, 9)
+2026-04-03 14:55:38,559 [INFO] backtesting.backtester: Loaded OHLCV for EQT: shape=(3566, 9)
+2026-04-03 14:55:38,561 [INFO] backtesting.backtester: Loaded OHLCV for USB: shape=(3566, 9)
+2026-04-03 14:55:38,563 [INFO] backtesting.backtester: Loaded OHLCV for ADSK: shape=(3566, 9)
+2026-04-03 14:55:38,565 [INFO] backtesting.backtester: Loaded OHLCV for CMG: shape=(3566, 9)
+2026-04-03 14:55:38,567 [INFO] backtesting.backtester: Loaded OHLCV for JCI: shape=(3566, 9)
+2026-04-03 14:55:38,569 [INFO] backtesting.backtester: Loaded OHLCV for TT: shape=(3566, 9)
+2026-04-03 14:55:38,571 [INFO] backtesting.backtester: Loaded OHLCV for ORLY: shape=(3566, 9)
+2026-04-03 14:55:38,573 [INFO] backtesting.backtester: Loaded OHLCV for ICE: shape=(3566, 9)
+2026-04-03 14:55:38,575 [INFO] backtesting.backtester: Loaded OHLCV for SHW: shape=(3566, 9)
+2026-04-03 14:55:38,577 [INFO] backtesting.backtester: Loaded OHLCV for LHX: shape=(3566, 9)
+2026-04-03 14:55:38,876 [INFO] backtesting.backtester: Loaded OHLCV for DDOG: shape=(1097, 9)
+2026-04-03 14:55:38,881 [INFO] backtesting.backtester: Loaded OHLCV for KR: shape=(3566, 9)
+2026-04-03 14:55:38,884 [INFO] backtesting.backtester: Loaded OHLCV for AZO: shape=(3566, 9)
+2026-04-03 14:55:39,138 [INFO] backtesting.backtester: Loaded OHLCV for DOW: shape=(1224, 9)
+2026-04-03 14:55:39,144 [INFO] backtesting.backtester: Loaded OHLCV for WM: shape=(3566, 9)
+2026-04-03 14:55:39,378 [INFO] backtesting.backtester: Loaded OHLCV for ABNB: shape=(787, 9)
+2026-04-03 14:55:39,383 [INFO] backtesting.backtester: Loaded OHLCV for NRG: shape=(3566, 9)
+2026-04-03 14:55:39,386 [INFO] backtesting.backtester: Loaded OHLCV for SO: shape=(3566, 9)
+2026-04-03 14:55:39,807 [INFO] backtesting.backtester: Loaded OHLCV for NXPI: shape=(3392, 9)
+2026-04-03 14:55:39,809 [INFO] backtesting.backtester: Loaded OHLCV for MRSH: shape=(3566, 9)
+2026-04-03 14:55:40,168 [INFO] backtesting.backtester: Loaded OHLCV for ZTS: shape=(2766, 9)
+2026-04-03 14:55:40,170 [INFO] backtesting.backtester: Loaded OHLCV for ULTA: shape=(3566, 9)
+2026-04-03 14:55:40,172 [INFO] backtesting.backtester: Loaded OHLCV for AEP: shape=(3566, 9)
+2026-04-03 14:55:40,174 [INFO] backtesting.backtester: Loaded OHLCV for CSX: shape=(3566, 9)
+2026-04-03 14:55:40,176 [INFO] backtesting.backtester: Loaded OHLCV for MSI: shape=(3566, 9)
+2026-04-03 14:55:40,484 [INFO] backtesting.backtester: Loaded OHLCV for KEYS: shape=(2334, 9)
+2026-04-03 14:55:40,489 [INFO] backtesting.backtester: Loaded OHLCV for KMB: shape=(3566, 9)
+2026-04-03 14:55:40,493 [INFO] backtesting.backtester: Loaded OHLCV for MAR: shape=(3566, 9)
+2026-04-03 14:55:40,496 [INFO] backtesting.backtester: Loaded OHLCV for FITB: shape=(3566, 9)
+2026-04-03 14:55:40,499 [INFO] backtesting.backtester: Loaded OHLCV for LULU: shape=(3566, 9)
+2026-04-03 14:55:40,501 [INFO] backtesting.backtester: Loaded OHLCV for ROP: shape=(3566, 9)
+2026-04-03 14:55:40,503 [INFO] backtesting.backtester: Loaded OHLCV for MNST: shape=(3566, 9)
+2026-04-03 14:55:40,506 [INFO] backtesting.backtester: Loaded OHLCV for URI: shape=(3566, 9)
+2026-04-03 14:55:40,508 [INFO] backtesting.backtester: Loaded OHLCV for LYV: shape=(3566, 9)
+2026-04-03 14:55:40,510 [INFO] backtesting.backtester: Loaded OHLCV for DG: shape=(3566, 9)
+2026-04-03 14:55:40,512 [INFO] backtesting.backtester: Loaded OHLCV for CMI: shape=(3566, 9)
+2026-04-03 14:55:40,514 [INFO] backtesting.backtester: Loaded OHLCV for CI: shape=(3566, 9)
+2026-04-03 14:55:40,516 [INFO] backtesting.backtester: Loaded OHLCV for AJG: shape=(3566, 9)
+2026-04-03 14:55:40,517 [INFO] backtesting.backtester: Loaded OHLCV for FTNT: shape=(3566, 9)
+2026-04-03 14:55:40,817 [INFO] backtesting.backtester: Loaded OHLCV for NCLH: shape=(2775, 9)
+2026-04-03 14:55:40,820 [INFO] backtesting.backtester: Loaded OHLCV for EA: shape=(3566, 9)
+2026-04-03 14:55:41,155 [INFO] backtesting.backtester: Loaded OHLCV for ARES: shape=(2452, 9)
+2026-04-03 14:55:41,157 [INFO] backtesting.backtester: Loaded OHLCV for AKAM: shape=(3566, 9)
+2026-04-03 14:55:41,160 [INFO] backtesting.backtester: Loaded OHLCV for WMB: shape=(3566, 9)
+2026-04-03 14:55:41,163 [INFO] backtesting.backtester: Loaded OHLCV for TDG: shape=(3566, 9)
+2026-04-03 14:55:41,165 [INFO] backtesting.backtester: Loaded OHLCV for COR: shape=(3566, 9)
+2026-04-03 14:55:41,168 [INFO] backtesting.backtester: Loaded OHLCV for PLD: shape=(3566, 9)
+2026-04-03 14:55:41,170 [INFO] backtesting.backtester: Loaded OHLCV for TEL: shape=(3566, 9)
+2026-04-03 14:55:41,172 [INFO] backtesting.backtester: Loaded OHLCV for CTAS: shape=(3566, 9)
+2026-04-03 14:55:41,173 [INFO] backtesting.backtester: Loaded OHLCV for AXON: shape=(3566, 9)
+2026-04-03 14:55:41,537 [INFO] backtesting.backtester: Loaded OHLCV for KMI: shape=(3261, 9)
+2026-04-03 14:55:41,752 [INFO] backtesting.backtester: Loaded OHLCV for MRNA: shape=(1293, 9)
+2026-04-03 14:55:41,755 [INFO] backtesting.backtester: Loaded OHLCV for ECL: shape=(3566, 9)
+2026-04-03 14:55:41,758 [INFO] backtesting.backtester: Loaded OHLCV for EL: shape=(3566, 9)
+2026-04-03 14:55:41,761 [INFO] backtesting.backtester: Loaded OHLCV for EXC: shape=(3566, 9)
+2026-04-03 14:55:41,764 [INFO] backtesting.backtester: Loaded OHLCV for FICO: shape=(3566, 9)
+2026-04-03 14:55:41,766 [INFO] backtesting.backtester: Loaded OHLCV for REGN: shape=(3566, 9)
+2026-04-03 14:55:41,769 [INFO] backtesting.backtester: Loaded OHLCV for OKE: shape=(3566, 9)
+2026-04-03 14:55:41,771 [INFO] backtesting.backtester: Loaded OHLCV for HBAN: shape=(3566, 9)
+2026-04-03 14:55:41,773 [INFO] backtesting.backtester: Loaded OHLCV for AON: shape=(3566, 9)
+2026-04-03 14:55:42,072 [INFO] backtesting.backtester: Loaded OHLCV for HPE: shape=(2083, 9)
+2026-04-03 14:55:42,077 [INFO] backtesting.backtester: Loaded OHLCV for GD: shape=(3566, 9)
+2026-04-03 14:55:42,079 [INFO] backtesting.backtester: Loaded OHLCV for TRV: shape=(3566, 9)
+ [158/300] DASH OHLCV window: first_date=2020-12-09, last_date=2024-01-29, n=788
+  [159/300] EQIX… [159/300] EQIX OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [160/300] TTD… [160/300] TTD OHLCV window: first_date=2016-09-21, last_date=2024-01-29, n=1850
+  [161/300] HAL… [161/300] HAL OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [162/300] DUK… [162/300] DUK OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [163/300] NOC… [163/300] NOC OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [164/300] GM… [164/300] GM OHLCV window: first_date=2010-11-18, last_date=2024-01-29, n=3319
+  [165/300] CVS… [165/300] CVS OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [166/300] FIX… [166/300] FIX OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [167/300] MDLZ… [167/300] MDLZ OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [168/300] CB… [168/300] CB OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [169/300] EXPE… [169/300] EXPE OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [170/300] AMT… [170/300] AMT OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [171/300] HCA… [171/300] HCA OHLCV window: first_date=2011-03-10, last_date=2024-01-29, n=3243
+  [172/300] CL… [172/300] CL OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [173/300] HWM… [173/300] HWM OHLCV window: first_date=2016-11-01, last_date=2024-01-29, n=1821
+  [174/300] PNC… [174/300] PNC OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [175/300] MPWR… [175/300] MPWR OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [176/300] HLT… [176/300] HLT OHLCV window: first_date=2013-12-12, last_date=2024-01-29, n=2548
+  [177/300] MCHP… [177/300] MCHP OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [178/300] EQT… [178/300] EQT OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [179/300] USB… [179/300] USB OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [180/300] ADSK… [180/300] ADSK OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [181/300] CMG… [181/300] CMG OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [182/300] JCI… [182/300] JCI OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [183/300] TT… [183/300] TT OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [184/300] ORLY… [184/300] ORLY OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [185/300] ICE… [185/300] ICE OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [186/300] SHW… [186/300] SHW OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [187/300] LHX… [187/300] LHX OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [188/300] DDOG… [188/300] DDOG OHLCV window: first_date=2019-09-19, last_date=2024-01-29, n=1097
+  [189/300] KR… [189/300] KR OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [190/300] AZO… [190/300] AZO OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [191/300] DOW… [191/300] DOW OHLCV window: first_date=2019-03-20, last_date=2024-01-29, n=1224
+  [192/300] WM… [192/300] WM OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [193/300] ABNB… [193/300] ABNB OHLCV window: first_date=2020-12-10, last_date=2024-01-29, n=787
+  [194/300] NRG… [194/300] NRG OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [195/300] SO… [195/300] SO OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [196/300] NXPI… [196/300] NXPI OHLCV window: first_date=2010-08-06, last_date=2024-01-29, n=3392
+  [197/300] MRSH… [197/300] MRSH OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [198/300] ZTS… [198/300] ZTS OHLCV window: first_date=2013-02-01, last_date=2024-01-29, n=2766
+  [199/300] ULTA… [199/300] ULTA OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [200/300] AEP… [200/300] AEP OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [201/300] CSX… [201/300] CSX OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [202/300] MSI… [202/300] MSI OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [203/300] KEYS… [203/300] KEYS OHLCV window: first_date=2014-10-20, last_date=2024-01-29, n=2334
+  [204/300] KMB… [204/300] KMB OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [205/300] MAR… [205/300] MAR OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [206/300] FITB… [206/300] FITB OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [207/300] LULU… [207/300] LULU OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [208/300] ROP… [208/300] ROP OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [209/300] MNST… [209/300] MNST OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [210/300] URI… [210/300] URI OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [211/300] LYV… [211/300] LYV OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [212/300] DG… [212/300] DG OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [213/300] CMI… [213/300] CMI OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [214/300] CI… [214/300] CI OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [215/300] AJG… [215/300] AJG OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [216/300] FTNT… [216/300] FTNT OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [217/300] NCLH… [217/300] NCLH OHLCV window: first_date=2013-01-18, last_date=2024-01-29, n=2775
+  [218/300] EA… [218/300] EA OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [219/300] ARES… [219/300] ARES OHLCV window: first_date=2014-05-02, last_date=2024-01-29, n=2452
+  [220/300] AKAM… [220/300] AKAM OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [221/300] WMB… [221/300] WMB OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [222/300] TDG… [222/300] TDG OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [223/300] COR… [223/300] COR OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [224/300] PLD… [224/300] PLD OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [225/300] TEL… [225/300] TEL OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [226/300] CTAS… [226/300] CTAS OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [227/300] AXON… [227/300] AXON OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [228/300] KMI… [228/300] KMI OHLCV window: first_date=2011-02-11, last_date=2024-01-29, n=3261
+  [229/300] MRNA… [229/300] MRNA OHLCV window: first_date=2018-12-07, last_date=2024-01-29, n=1293
+  [230/300] ECL… [230/300] ECL OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [231/300] EL… [231/300] EL OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [232/300] EXC… [232/300] EXC OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [233/300] FICO… [233/300] FICO OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [234/300] REGN… [234/300] REGN OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [235/300] OKE… [235/300] OKE OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [236/300] HBAN… [236/300] HBAN OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [237/300] AON… [237/300] AON OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [238/300] HPE… [238/300] HPE OHLCV window: first_date=2015-10-19, last_date=2024-01-29, n=2083
+  [239/300] GD… [239/300] GD OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [240/300] TRV… [240/300] TRV OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=35662026-04-03 14:55:42,082 [INFO] backtesting.backtester: Loaded OHLCV for EBAY: shape=(3566, 9)
+2026-04-03 14:55:42,084 [INFO] backtesting.backtester: Loaded OHLCV for ODFL: shape=(3566, 9)
+2026-04-03 14:55:42,259 [INFO] backtesting.backtester: Loaded OHLCV for KVUE: shape=(185, 9)
+2026-04-03 14:55:42,259 [WARNING] backtesting.backtester: Skipping KVUE due to insufficient data (len=185 < 210 bars)
+2026-04-03 14:55:42,592 [INFO] backtesting.backtester: Loaded OHLCV for EXE: shape=(746, 9)
+2026-04-03 14:55:42,596 [INFO] backtesting.backtester: Loaded OHLCV for TFC: shape=(3566, 9)
+2026-04-03 14:55:42,599 [INFO] backtesting.backtester: Loaded OHLCV for ON: shape=(3566, 9)
+2026-04-03 14:55:42,603 [INFO] backtesting.backtester: Loaded OHLCV for PCG: shape=(3566, 9)
+2026-04-03 14:55:42,606 [INFO] backtesting.backtester: Loaded OHLCV for LUV: shape=(3566, 9)
+2026-04-03 14:55:42,609 [INFO] backtesting.backtester: Loaded OHLCV for BDX: shape=(3566, 9)
+2026-04-03 14:55:42,611 [INFO] backtesting.backtester: Loaded OHLCV for O: shape=(3566, 9)
+2026-04-03 14:55:42,614 [INFO] backtesting.backtester: Loaded OHLCV for PAYX: shape=(3566, 9)
+2026-04-03 14:55:42,616 [INFO] backtesting.backtester: Loaded OHLCV for CTSH: shape=(3566, 9)
+2026-04-03 14:55:42,619 [INFO] backtesting.backtester: Loaded OHLCV for CAH: shape=(3566, 9)
+2026-04-03 14:55:42,621 [INFO] backtesting.backtester: Loaded OHLCV for RF: shape=(3566, 9)
+2026-04-03 14:55:42,623 [INFO] backtesting.backtester: Loaded OHLCV for APD: shape=(3566, 9)
+2026-04-03 14:55:42,625 [INFO] backtesting.backtester: Loaded OHLCV for TTWO: shape=(3566, 9)
+2026-04-03 14:55:42,627 [INFO] backtesting.backtester: Loaded OHLCV for VMC: shape=(3566, 9)
+2026-04-03 14:55:42,629 [INFO] backtesting.backtester: Loaded OHLCV for BK: shape=(3566, 9)
+2026-04-03 14:55:42,631 [INFO] backtesting.backtester: Loaded OHLCV for GIS: shape=(3566, 9)
+2026-04-03 14:55:42,633 [INFO] backtesting.backtester: Loaded OHLCV for EMR: shape=(3566, 9)
+2026-04-03 14:55:42,635 [INFO] backtesting.backtester: Loaded OHLCV for DPZ: shape=(3566, 9)
+2026-04-03 14:55:42,636 [INFO] backtesting.backtester: Loaded OHLCV for CTRA: shape=(3566, 9)
+2026-04-03 14:55:43,027 [INFO] backtesting.backtester: Loaded OHLCV for KHC: shape=(2157, 9)
+2026-04-03 14:55:43,032 [INFO] backtesting.backtester: Loaded OHLCV for VRSK: shape=(3566, 9)
+2026-04-03 14:55:43,034 [INFO] backtesting.backtester: Loaded OHLCV for PSA: shape=(3566, 9)
+2026-04-03 14:55:43,036 [INFO] backtesting.backtester: Loaded OHLCV for DHI: shape=(3566, 9)
+2026-04-03 14:55:43,038 [INFO] backtesting.backtester: Loaded OHLCV for OMC: shape=(3566, 9)
+2026-04-03 14:55:43,040 [INFO] backtesting.backtester: Loaded OHLCV for FSLR: shape=(3566, 9)
+2026-04-03 14:55:43,439 [INFO] backtesting.backtester: Loaded OHLCV for TRGP: shape=(3307, 9)
+2026-04-03 14:55:43,674 [INFO] backtesting.backtester: Loaded OHLCV for CARR: shape=(972, 9)
+2026-04-03 14:55:43,679 [INFO] backtesting.backtester: Loaded OHLCV for NSC: shape=(3566, 9)
+2026-04-03 14:55:43,682 [INFO] backtesting.backtester: Loaded OHLCV for EW: shape=(3566, 9)
+2026-04-03 14:55:43,686 [INFO] backtesting.backtester: Loaded OHLCV for ROK: shape=(3566, 9)
+2026-04-03 14:55:43,689 [INFO] backtesting.backtester: Loaded OHLCV for FISV: shape=(3566, 9)
+2026-04-03 14:55:43,692 [INFO] backtesting.backtester: Loaded OHLCV for FAST: shape=(3566, 9)
+2026-04-03 14:55:43,694 [INFO] backtesting.backtester: Loaded OHLCV for MLM: shape=(3566, 9)
+2026-04-03 14:55:43,697 [INFO] backtesting.backtester: Loaded OHLCV for HSY: shape=(3566, 9)
+2026-04-03 14:55:43,700 [INFO] backtesting.backtester: Loaded OHLCV for ITW: shape=(3566, 9)
+2026-04-03 14:55:43,702 [INFO] backtesting.backtester: Loaded OHLCV for XEL: shape=(3566, 9)
+2026-04-03 14:55:43,705 [INFO] backtesting.backtester: Loaded OHLCV for APA: shape=(3566, 9)
+2026-04-03 14:55:43,706 [INFO] backtesting.backtester: Loaded OHLCV for WAT: shape=(3566, 9)
+2026-04-03 14:55:43,708 [INFO] backtesting.backtester: Loaded OHLCV for JBL: shape=(3566, 9)
+2026-04-03 14:55:43,710 [INFO] backtesting.backtester: Loaded OHLCV for PCAR: shape=(3566, 9)
+2026-04-03 14:55:43,712 [INFO] backtesting.backtester: Loaded OHLCV for ALB: shape=(3566, 9)
+2026-04-03 14:55:43,714 [INFO] backtesting.backtester: Loaded OHLCV for AIG: shape=(3566, 9)
+2026-04-03 14:55:43,716 [INFO] backtesting.backtester: Loaded OHLCV for BBY: shape=(3566, 9)
+2026-04-03 14:55:43,718 [INFO] backtesting.backtester: Loaded OHLCV for HPQ: shape=(3566, 9)
+2026-04-03 14:55:43,720 [INFO] backtesting.backtester: Loaded OHLCV for DLTR: shape=(3566, 9)
+2026-04-03 14:55:43,721 [INFO] backtesting.backtester: Loaded OHLCV for DLR: shape=(3566, 9)
+2026-04-03 14:55:43,723 [INFO] backtesting.backtester: Loaded OHLCV for AME: shape=(3566, 9)
+2026-04-03 14:55:43,725 [INFO] backtesting.backtester: Loaded OHLCV for IBKR: shape=(3566, 9)
+2026-04-03 14:55:43,727 [INFO] backtesting.backtester: Loaded OHLCV for DRI: shape=(3566, 9)
+2026-04-03 14:55:43,728 [INFO] backtesting.backtester: Loaded OHLCV for SPG: shape=(3566, 9)
+2026-04-03 14:55:43,977 [INFO] backtesting.backtester: Loaded OHLCV for OTIS: shape=(972, 9)
+2026-04-03 14:55:43,981 [INFO] backtesting.backtester: Loaded OHLCV for SRE: shape=(3566, 9)
+2026-04-03 14:55:43,985 [INFO] backtesting.backtester: Loaded OHLCV for MOS: shape=(3566, 9)
+2026-04-03 14:55:44,245 [INFO] backtesting.backtester: Loaded OHLCV for CTVA: shape=(1178, 9)
+2026-04-03 14:55:44,250 [INFO] backtesting.backtester: Loaded OHLCV for KEY: shape=(3566, 9)
+2026-04-03 14:55:44,252 [INFO] backtesting.backtester: Loaded OHLCV for CPRT: shape=(3566, 9)
+2026-04-03 14:55:44,536 [INFO] backtesting.backtester: Loaded OHLCV for IQV: shape=(2699, 9)
+
+  [241/300] EBAY… [241/300] EBAY OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [242/300] ODFL… [242/300] ODFL OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [243/300] KVUE… insufficient data
+  [244/300] EXE… [244/300] EXE OHLCV window: first_date=2021-02-10, last_date=2024-01-29, n=746
+  [245/300] TFC… [245/300] TFC OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [246/300] ON… [246/300] ON OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [247/300] PCG… [247/300] PCG OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [248/300] LUV… [248/300] LUV OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [249/300] BDX… [249/300] BDX OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [250/300] O… [250/300] O OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [251/300] PAYX… [251/300] PAYX OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [252/300] CTSH… [252/300] CTSH OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [253/300] CAH… [253/300] CAH OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [254/300] RF… [254/300] RF OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [255/300] APD… [255/300] APD OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [256/300] TTWO… [256/300] TTWO OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [257/300] VMC… [257/300] VMC OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [258/300] BK… [258/300] BK OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [259/300] GIS… [259/300] GIS OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [260/300] EMR… [260/300] EMR OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [261/300] DPZ… [261/300] DPZ OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [262/300] CTRA… [262/300] CTRA OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [263/300] KHC… [263/300] KHC OHLCV window: first_date=2015-07-06, last_date=2024-01-29, n=2157
+  [264/300] VRSK… [264/300] VRSK OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [265/300] PSA… [265/300] PSA OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [266/300] DHI… [266/300] DHI OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [267/300] OMC… [267/300] OMC OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [268/300] FSLR… [268/300] FSLR OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [269/300] TRGP… [269/300] TRGP OHLCV window: first_date=2010-12-07, last_date=2024-01-29, n=3307
+  [270/300] CARR… [270/300] CARR OHLCV window: first_date=2020-03-19, last_date=2024-01-29, n=972
+  [271/300] NSC… [271/300] NSC OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [272/300] EW… [272/300] EW OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [273/300] ROK… [273/300] ROK OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [274/300] FISV… [274/300] FISV OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [275/300] FAST… [275/300] FAST OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [276/300] MLM… [276/300] MLM OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [277/300] HSY… [277/300] HSY OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [278/300] ITW… [278/300] ITW OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [279/300] XEL… [279/300] XEL OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [280/300] APA… [280/300] APA OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [281/300] WAT… [281/300] WAT OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [282/300] JBL… [282/300] JBL OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [283/300] PCAR… [283/300] PCAR OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [284/300] ALB… [284/300] ALB OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [285/300] AIG… [285/300] AIG OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [286/300] BBY… [286/300] BBY OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [287/300] HPQ… [287/300] HPQ OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [288/300] DLTR… [288/300] DLTR OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [289/300] DLR… [289/300] DLR OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [290/300] AME… [290/300] AME OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [291/300] IBKR… [291/300] IBKR OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [292/300] DRI… [292/300] DRI OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [293/300] SPG… [293/300] SPG OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [294/300] OTIS… [294/300] OTIS OHLCV window: first_date=2020-03-19, last_date=2024-01-29, n=972
+  [295/300] SRE… [295/300] SRE OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [296/300] MOS… [296/300] MOS OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [297/300] CTVA… [297/300] CTVA OHLCV window: first_date=2019-05-24, last_date=2024-01-29, n=1178
+  [298/300] KEY… [298/300] KEY OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [299/300] CPRT… [299/300] CPRT OHLCV window: first_date=2009-11-27, last_date=2024-01-30, n=3566
+  [300/300] IQV… [300/300] IQV OHLCV window: first_date=2013-05-09, last_date=2024-01-29, n=2699
+  [signals 1/297] NVDA… 3565 bars, 3237 signals
+  [signals 2/297] TSLA… 3418 bars, 3074 signals
+  [signals 3/297] MU… 3565 bars, 3238 signals
+  [signals 4/297] MSFT… 3565 bars, 3231 signals
+  [signals 5/297] AAPL… 3565 bars, 3244 signals
+  [signals 6/297] AVGO… 3565 bars, 3237 signals
+  [signals 7/297] AMZN… 3565 bars, 3246 signals
+  [signals 8/297] GOOGL… 3565 bars, 3233 signals
+  [signals 9/297] META… 2941 bars, 2624 signals
+  [signals 10/297] PLTR… 836 bars, 547 signals
+  [signals 11/297] AMD… 3565 bars, 3247 signals
+  [signals 12/297] GOOG… 3565 bars, 3229 signals
+  [signals 13/297] LITE… 2143 bars, 1833 signals
+  [signals 14/297] NFLX… 3565 bars, 3241 signals
+  [signals 15/297] ORCL… 3565 bars, 3228 signals
+  [signals 16/297] INTC… 3565 bars, 3244 signals
+  [signals 17/297] XOM… 3565 bars, 3243 signals
+  [signals 18/297] JPM… 3565 bars, 3247 signals
+  [signals 19/297] VRT… 1380 bars, 1091 signals
+  [signals 20/297] CVX… 3565 bars, 3231 signals
+  [signals 21/297] CRM… 3565 bars, 3241 signals
+  [signals 22/297] LLY… 3565 bars, 3232 signals
+  [signals 23/297] COHR… 3565 bars, 3225 signals
+  [signals 24/297] WMT… 3565 bars, 3243 signals
+  [signals 25/297] WDC… 3565 bars, 3233 signals
+  [signals 26/297] COIN… 702 bars, 421 signals
+  [signals 27/297] UNH… 3565 bars, 3227 signals
+  [signals 28/297] LRCX… 3565 bars, 3243 signals
+  [signals 29/297] AMAT… 3565 bars, 3228 signals
+  [signals 30/297] APP… 701 bars, 415 signals
+  [signals 31/297] BAC… 3565 bars, 3221 signals
+  [signals 32/297] V… 3565 bars, 3231 signals
+  [signals 33/297] GS… 3565 bars, 3233 signals
+  [signals 34/297] HOOD… 628 bars, 348 signals
+  [signals 35/297] JNJ… 3565 bars, 3235 signals
+  [signals 36/297] CAT… 3565 bars, 3237 signals
+  [signals 37/297] NOW… 2912 bars, 2585 signals
+  [signals 38/297] GLW… 3565 bars, 3244 signals
+  [signals 39/297] INTU… 3565 bars, 3239 signals
+  [signals 40/297] CSCO… 3565 bars, 3234 signals
+  [signals 41/297] COST… 3565 bars, 3223 signals
+  [signals 42/297] BKNG… 3565 bars, 3241 signals
+  [signals 43/297] CRWD… 1165 bars, 877 signals
+  [signals 44/297] C… 3565 bars, 3235 signals
+  [signals 45/297] PG… 3565 bars, 3235 signals
+  [signals 46/297] MA… 3565 bars, 3227 signals
+  [signals 47/297] ADBE… 3565 bars, 3249 signals
+  [signals 48/297] ACN… 3565 bars, 3230 signals
+  [signals 49/297] QCOM… 3565 bars, 3240 signals
+  [signals 50/297] GE… 3565 bars, 3240 signals
+  [signals 51/297] DELL… 1873 bars, 1584 signals
+  [signals 52/297] ABBV… 2786 bars, 2472 signals
+  [signals 53/297] WFC… 3565 bars, 3238 signals
+  [signals 54/297] BA… 3565 bars, 3231 signals
+  [signals 55/297] KLAC… 3565 bars, 3251 signals
+  [signals 56/297] IBM… 3565 bars, 3245 signals
+  [signals 57/297] HD… 3565 bars, 3225 signals
+  [signals 58/297] COP… 3565 bars, 3231 signals
+  [signals 59/297] STX… 3565 bars, 3240 signals
+  [signals 60/297] UBER… 1187 bars, 893 signals
+  [signals 61/297] LIN… 3565 bars, 3226 signals
+  [signals 62/297] VZ… 3565 bars, 3227 signals
+  [signals 63/297] APH… 3565 bars, 3239 signals
+  [signals 64/297] ABT… 3565 bars, 3226 signals
+  [signals 65/297] NEM… 3565 bars, 3231 signals
+  [signals 66/297] AXP… 3565 bars, 3230 signals
+  [signals 67/297] KO… 3565 bars, 3216 signals
+  [signals 68/297] ADI… 3565 bars, 3237 signals
+  [signals 69/297] PANW… 2898 bars, 2583 signals
+  [signals 70/297] TXN… 3565 bars, 3240 signals
+  [signals 71/297] RTX… 3565 bars, 3237 signals
+  [signals 72/297] BX… 3565 bars, 3235 signals
+  [signals 73/297] T… 3565 bars, 3225 signals
+  [signals 74/297] MRK… 3565 bars, 3235 signals
+  [signals 75/297] MS… 3565 bars, 3242 signals
+  [signals 76/297] CIEN… 3565 bars, 3227 signals
+  [signals 77/297] LMT… 3565 bars, 3228 signals
+  [signals 78/297] OXY… 3565 bars, 3240 signals
+  [signals 79/297] DIS… 3565 bars, 3235 signals
+  [signals 80/297] FCX… 3565 bars, 3252 signals
+  [signals 81/297] TMUS… 3565 bars, 3229 signals
+  [signals 82/297] SMCI… 3565 bars, 3218 signals
+  [signals 83/297] PFE… 3565 bars, 3249 signals
+  [signals 84/297] CMCSA… 3565 bars, 3238 signals
+  [signals 85/297] VLO… 3565 bars, 3232 signals
+  [signals 86/297] TER… 3565 bars, 3240 signals
+  [signals 87/297] COF… 3565 bars, 3231 signals
+  [signals 88/297] TMO… 3565 bars, 3240 signals
+  [signals 89/297] MCD… 3565 bars, 3231 signals
+  [signals 90/297] PEP… 3565 bars, 3224 signals
+  [signals 91/297] SLB… 3565 bars, 3237 signals
+  [signals 92/297] BLK… 3565 bars, 3246 signals
+  [signals 93/297] SNPS… 3565 bars, 3232 signals
+  [signals 94/297] NEE… 3565 bars, 3218 signals
+  [signals 95/297] SPGI… 3565 bars, 3235 signals
+  [signals 96/297] AMGN… 3565 bars, 3234 signals
+  [signals 97/297] ETN… 3565 bars, 3229 signals
+  [signals 98/297] DAL… 3565 bars, 3244 signals
+  [signals 99/297] GILD… 3565 bars, 3228 signals
+  [signals 100/297] HON… 3565 bars, 3242 signals
+  [signals 101/297] CEG… 508 bars, 228 signals
+  [signals 102/297] ADP… 3565 bars, 3240 signals
+  [signals 103/297] BSX… 3565 bars, 3230 signals
+  [signals 104/297] PYPL… 2156 bars, 1846 signals
+  [signals 105/297] PM… 3565 bars, 3239 signals
+  [signals 106/297] CVNA… 1698 bars, 1405 signals
+  [signals 107/297] UAL… 3565 bars, 3229 signals
+  [signals 108/297] NKE… 3565 bars, 3236 signals
+  [signals 109/297] ANET… 2427 bars, 2126 signals
+  [signals 110/297] DVN… 3565 bars, 3233 signals
+  [signals 111/297] BMY… 3565 bars, 3239 signals
+  [signals 112/297] CF… 3565 bars, 3247 signals
+  [signals 113/297] SCHW… 3565 bars, 3238 signals
+  [signals 114/297] SATS… 3565 bars, 3238 signals
+  [signals 115/297] WBD… 3565 bars, 3225 signals
+  [signals 116/297] PH… 3565 bars, 3232 signals
+  [signals 117/297] EOG… 3565 bars, 3223 signals
+  [signals 118/297] KKR… 3407 bars, 3081 signals
+  [signals 119/297] TGT… 3565 bars, 3231 signals
+  [signals 120/297] RCL… 3565 bars, 3235 signals
+  [signals 121/297] SBUX… 3565 bars, 3216 signals
+  [signals 122/297] DE… 3565 bars, 3235 signals
+  [signals 123/297] FDX… 3565 bars, 3233 signals
+  [signals 124/297] F… 3565 bars, 3233 signals
+  [signals 125/297] CCL… 3565 bars, 3243 signals
+  [signals 126/297] ISRG… 3565 bars, 3236 signals
+  [signals 127/297] VST… 1839 bars, 1539 signals
+  [signals 128/297] DHR… 3565 bars, 3239 signals
+  [signals 129/297] UPS… 3565 bars, 3227 signals
+  [signals 130/297] SYK… 3565 bars, 3231 signals
+  [signals 131/297] WDAY… 2839 bars, 2523 signals
+  [signals 132/297] APO… 3228 bars, 2890 signals
+  [signals 133/297] TJX… 3565 bars, 3246 signals
+  [signals 134/297] UNP… 3565 bars, 3238 signals
+  [signals 135/297] ELV… 3565 bars, 3239 signals
+  [signals 136/297] MPC… 3168 bars, 2850 signals
+  [signals 137/297] MDT… 3565 bars, 3222 signals
+  [signals 138/297] CME… 3565 bars, 3245 signals
+  [signals 139/297] CDNS… 3565 bars, 3236 signals
+  [signals 140/297] FANG… 2839 bars, 2517 signals
+  [signals 141/297] MCK… 3565 bars, 3228 signals
+  [signals 142/297] LYB… 3461 bars, 3126 signals
+  [signals 143/297] WELL… 3565 bars, 3238 signals
+  [signals 144/297] BKR… 3565 bars, 3234 signals
+  [signals 145/297] MMM… 3565 bars, 3237 signals
+  [signals 146/297] VRTX… 3565 bars, 3237 signals
+  [signals 147/297] MO… 3565 bars, 3227 signals
+  [signals 148/297] MCO… 3565 bars, 3227 signals
+  [signals 149/297] LOW… 3565 bars, 3243 signals
+  [signals 150/297] PGR… 3565 bars, 3235 signals
+  [signals 151/297] CRH… 3565 bars, 3235 signals
+  [signals 152/297] PWR… 3565 bars, 3243 signals
+  [signals 153/297] XYZ… 2059 bars, 1759 signals
+  [signals 154/297] PSX… 2967 bars, 2650 signals
+  [signals 155/297] ROST… 3565 bars, 3234 signals
+  [signals 156/297] DASH… 787 bars, 507 signals
+  [signals 157/297] EQIX… 3565 bars, 3231 signals
+  [signals 158/297] TTD… 1849 bars, 1542 signals
+  [signals 159/297] HAL… 3565 bars, 3240 signals
+  [signals 160/297] DUK… 3565 bars, 3231 signals
+  [signals 161/297] NOC… 3565 bars, 3236 signals
+  [signals 162/297] GM… 3318 bars, 2994 signals
+  [signals 163/297] CVS… 3565 bars, 3232 signals
+  [signals 164/297] FIX… 3565 bars, 3243 signals
+  [signals 165/297] MDLZ… 3565 bars, 3227 signals
+  [signals 166/297] CB… 3565 bars, 3233 signals
+  [signals 167/297] EXPE… 3565 bars, 3241 signals
+  [signals 168/297] AMT… 3565 bars, 3235 signals
+  [signals 169/297] HCA… 3242 bars, 2924 signals
+  [signals 170/297] CL… 3565 bars, 3239 signals
+  [signals 171/297] HWM… 1820 bars, 1532 signals
+  [signals 172/297] PNC… 3565 bars, 3230 signals
+  [signals 173/297] MPWR… 3565 bars, 3243 signals
+  [signals 174/297] HLT… 2547 bars, 2247 signals
+  [signals 175/297] MCHP… 3565 bars, 3246 signals
+  [signals 176/297] EQT… 3565 bars, 3231 signals
+  [signals 177/297] USB… 3565 bars, 3235 signals
+  [signals 178/297] ADSK… 3565 bars, 3235 signals
+  [signals 179/297] CMG… 3565 bars, 3235 signals
+  [signals 180/297] JCI… 3565 bars, 3222 signals
+  [signals 181/297] TT… 3565 bars, 3246 signals
+  [signals 182/297] ORLY… 3565 bars, 3229 signals
+  [signals 183/297] ICE… 3565 bars, 3228 signals
+  [signals 184/297] SHW… 3565 bars, 3227 signals
+  [signals 185/297] LHX… 3565 bars, 3244 signals
+  [signals 186/297] DDOG… 1096 bars, 811 signals
+  [signals 187/297] KR… 3565 bars, 3228 signals
+  [signals 188/297] AZO… 3565 bars, 3232 signals
+  [signals 189/297] DOW… 1223 bars, 928 signals
+  [signals 190/297] WM… 3565 bars, 3232 signals
+  [signals 191/297] ABNB… 786 bars, 499 signals
+  [signals 192/297] NRG… 3565 bars, 3240 signals
+  [signals 193/297] SO… 3565 bars, 3227 signals
+  [signals 194/297] NXPI… 3391 bars, 3052 signals
+  [signals 195/297] MRSH… 3565 bars, 3238 signals
+  [signals 196/297] ZTS… 2765 bars, 2446 signals
+  [signals 197/297] ULTA… 3565 bars, 3238 signals
+  [signals 198/297] AEP… 3565 bars, 3237 signals
+  [signals 199/297] CSX… 3565 bars, 3242 signals
+  [signals 200/297] MSI… 3565 bars, 3233 signals
+  [signals 201/297] KEYS… 2333 bars, 2020 signals
+  [signals 202/297] KMB… 3565 bars, 3220 signals
+  [signals 203/297] MAR… 3565 bars, 3245 signals
+  [signals 204/297] FITB… 3565 bars, 3231 signals
+  [signals 205/297] LULU… 3565 bars, 3237 signals
+  [signals 206/297] ROP… 3565 bars, 3233 signals
+  [signals 207/297] MNST… 3565 bars, 3234 signals
+  [signals 208/297] URI…2026-04-03 14:57:49,681 [INFO] backtesting.backtester: Loaded SPY for vol scaling: shape=(3566, 9)
+2026-04-03 14:57:57,820 [INFO] backtesting.backtester: Precomputed regime score std: {'Bull': 1.0472387854881589, 'Bear': 1.0214678546049234, 'Sideways': 1.2156969392475316, 'Crisis': 0.9809228055880231}
+2026-04-03 14:58:08,151 [INFO] backtesting.backtester: Signal inclusion summary: days=3270, avg_candidates_per_day=278.31, max_candidates_on_day=297
+2026-04-03 15:01:30,319 [INFO] backtesting.backtester: Precomputed regime score std: {'Bull': 1.0472387854881589, 'Bear': 1.0214678546049234, 'Sideways': 1.2156969392475316, 'Crisis': 0.9809228055880231}
+2026-04-03 15:01:42,888 [INFO] backtesting.backtester: Signal inclusion summary: days=3270, avg_candidates_per_day=278.31, max_candidates_on_day=297
+2026-04-03 15:05:25,430 [INFO] backtesting.backtester: Precomputed regime score std: {'Bull': 1.0472387854881589, 'Bear': 1.0214678546049234, 'Sideways': 1.2156969392475316, 'Crisis': 0.9809228055880231}
+2026-04-03 15:05:45,025 [INFO] backtesting.backtester: Signal inclusion summary: days=3270, avg_candidates_per_day=278.31, max_candidates_on_day=297
+ 3565 bars, 3227 signals
+  [signals 209/297] LYV… 3565 bars, 3246 signals
+  [signals 210/297] DG… 3565 bars, 3235 signals
+  [signals 211/297] CMI… 3565 bars, 3250 signals
+  [signals 212/297] CI… 3565 bars, 3232 signals
+  [signals 213/297] AJG… 3565 bars, 3225 signals
+  [signals 214/297] FTNT… 3565 bars, 3222 signals
+  [signals 215/297] NCLH… 2774 bars, 2447 signals
+  [signals 216/297] EA… 3565 bars, 3236 signals
+  [signals 217/297] ARES… 2451 bars, 2137 signals
+  [signals 218/297] AKAM… 3565 bars, 3235 signals
+  [signals 219/297] WMB… 3565 bars, 3248 signals
+  [signals 220/297] TDG… 3565 bars, 3238 signals
+  [signals 221/297] COR… 3565 bars, 3230 signals
+  [signals 222/297] PLD… 3565 bars, 3241 signals
+  [signals 223/297] TEL… 3565 bars, 3229 signals
+  [signals 224/297] CTAS… 3565 bars, 3238 signals
+  [signals 225/297] AXON… 3565 bars, 3224 signals
+  [signals 226/297] KMI… 3260 bars, 2940 signals
+  [signals 227/297] MRNA… 1292 bars, 1001 signals
+  [signals 228/297] ECL… 3565 bars, 3222 signals
+  [signals 229/297] EL… 3565 bars, 3241 signals
+  [signals 230/297] EXC… 3565 bars, 3237 signals
+  [signals 231/297] FICO… 3565 bars, 3227 signals
+  [signals 232/297] REGN… 3565 bars, 3239 signals
+  [signals 233/297] OKE… 3565 bars, 3248 signals
+  [signals 234/297] HBAN… 3565 bars, 3232 signals
+  [signals 235/297] AON… 3565 bars, 3233 signals
+  [signals 236/297] HPE… 2082 bars, 1769 signals
+  [signals 237/297] GD… 3565 bars, 3239 signals
+  [signals 238/297] TRV… 3565 bars, 3238 signals
+  [signals 239/297] EBAY… 3565 bars, 3242 signals
+  [signals 240/297] ODFL… 3565 bars, 3217 signals
+  [signals 241/297] EXE… 745 bars, 464 signals
+  [signals 242/297] TFC… 3565 bars, 3241 signals
+  [signals 243/297] ON… 3565 bars, 3239 signals
+  [signals 244/297] PCG… 3565 bars, 3228 signals
+  [signals 245/297] LUV… 3565 bars, 3236 signals
+  [signals 246/297] BDX… 3565 bars, 3228 signals
+  [signals 247/297] O… 3565 bars, 3238 signals
+  [signals 248/297] PAYX… 3565 bars, 3235 signals
+  [signals 249/297] CTSH… 3565 bars, 3232 signals
+  [signals 250/297] CAH… 3565 bars, 3237 signals
+  [signals 251/297] RF… 3565 bars, 3231 signals
+  [signals 252/297] APD… 3565 bars, 3245 signals
+  [signals 253/297] TTWO… 3565 bars, 3239 signals
+  [signals 254/297] VMC… 3565 bars, 3243 signals
+  [signals 255/297] BK… 3565 bars, 3234 signals
+  [signals 256/297] GIS… 3565 bars, 3230 signals
+  [signals 257/297] EMR… 3565 bars, 3232 signals
+  [signals 258/297] DPZ… 3565 bars, 3239 signals
+  [signals 259/297] CTRA… 3565 bars, 3237 signals
+  [signals 260/297] KHC… 2156 bars, 1845 signals
+  [signals 261/297] VRSK… 3565 bars, 3229 signals
+  [signals 262/297] PSA… 3565 bars, 3225 signals
+  [signals 263/297] DHI… 3565 bars, 3237 signals
+  [signals 264/297] OMC… 3565 bars, 3247 signals
+  [signals 265/297] FSLR… 3565 bars, 3238 signals
+  [signals 266/297] TRGP… 3306 bars, 2982 signals
+  [signals 267/297] CARR… 971 bars, 687 signals
+  [signals 268/297] NSC… 3565 bars, 3241 signals
+  [signals 269/297] EW… 3565 bars, 3235 signals
+  [signals 270/297] ROK… 3565 bars, 3223 signals
+  [signals 271/297] FISV… 3565 bars, 3227 signals
+  [signals 272/297] FAST… 3565 bars, 3225 signals
+  [signals 273/297] MLM… 3565 bars, 3235 signals
+  [signals 274/297] HSY… 3565 bars, 3235 signals
+  [signals 275/297] ITW… 3565 bars, 3238 signals
+  [signals 276/297] XEL… 3565 bars, 3219 signals
+  [signals 277/297] APA… 3565 bars, 3230 signals
+  [signals 278/297] WAT… 3565 bars, 3237 signals
+  [signals 279/297] JBL… 3565 bars, 3239 signals
+  [signals 280/297] PCAR… 3565 bars, 3235 signals
+  [signals 281/297] ALB… 3565 bars, 3230 signals
+  [signals 282/297] AIG… 3565 bars, 3232 signals
+  [signals 283/297] BBY… 3565 bars, 3238 signals
+  [signals 284/297] HPQ… 3565 bars, 3228 signals
+  [signals 285/297] DLTR… 3565 bars, 3239 signals
+  [signals 286/297] DLR… 3565 bars, 3235 signals
+  [signals 287/297] AME… 3565 bars, 3236 signals
+  [signals 288/297] IBKR… 3565 bars, 3237 signals
+  [signals 289/297] DRI… 3565 bars, 3215 signals
+  [signals 290/297] SPG… 3565 bars, 3233 signals
+  [signals 291/297] OTIS… 971 bars, 684 signals
+  [signals 292/297] SRE… 3565 bars, 3231 signals
+  [signals 293/297] MOS… 3565 bars, 3229 signals
+  [signals 294/297] CTVA… 1177 bars, 886 signals
+  [signals 295/297] KEY… 3565 bars, 3232 signals
+  [signals 296/297] CPRT… 3565 bars, 3225 signals
+  [signals 297/297] IQV… 2698 bars, 2382 signals
+Phase 1: Reusing pre-loaded data & signals…
+
+Phase 2: Detecting market regimes (SPY + VIX)…
+  Regimes: {'Bull': 2545, 'Sideways': 239, 'Crisis': 218, 'Bear': 287}
+
+Phase 3: Running day-by-day portfolio simulation…
+Phase 4: Computing metrics…
+
+
+Trade-level diagnostics:
+  Avg P&L per long trade    :  20.82
+  Avg P&L per short trade   :  nan
+  Avg transaction cost / |P&L|:  10.22%
+  Fraction of trades that are shorts:  0.00%
+  P&L contribution:
+    Longs  :  56600.39
+    Shorts :  0.00
+    Costs  : -18511.73  (negative = drag)
+
+Sharpe by regime (daily equity):
+  Bull    :  0.66
+  Bear    : -0.35
+  Sideways:  0.35
+  Crisis  : -3.36
+  Overall:  0.44
+  CAPM (vs SPY):
+    Portfolio Beta     : 0.266
+    Portfolio Alpha    : 1.31% (ann.)
+    Treynor Ratio      : 0.018
+    Information Ratio : 0.084
+
+  Position Sizing Comparison:
+    Equal-weight Sharpe  : 0.624
+    Kelly (half) Sharpe  : 0.624
+    Kelly win_rate used  : —
+    Kelly fraction       : 0.5
+    Kelly avg position   : 11.2% of equity
+
+
+=================================================================
+  Backtest Results
+=================================================================
+
+  Total Trades            : 2,718
+    Bullish                : 2,718
+    Bearish                : 0
+
+  Win Rate                : 52.8%
+  Average Return          : 0.30%
+  Profit Factor           : 1.12
+  Sharpe Ratio            : 0.62
+  Net Sharpe Ratio        : 0.44
+    95% CI                : [-0.10, 0.98]
+  Sortino Ratio           : 0.40
+    95% CI                : [-0.09, 0.93]
+  Calmar Ratio            : 0.19
+    95% CI                : [-0.04, 0.60]
+  Max Drawdown            : -21.10%
+  Max DD Duration (days)  : 1359
+  Avg Drawdown            : -2.71%
+  Avg DD Duration (days)  : 82.5
+
+  Annual Turnover (old)  : 240.46
+  Avg Daily Turnover      : 0.08
+  Annual Turnover         : 19.78
+  Turnover Cost Drag (bps): 120.7
+  Turnover (shares-based): 67.74
+  Position changes / avg positions held: 1328.81
+  Turnover (trades_per_year*avg_position_size): 19.80
+  Signal Accuracy         : 52.8%
+  Information Coefficient : -0.0070
+  Rank IC (Spearman)      : -0.0070
+
+  Avg Holding (days)      : 7.2
+  Med Holding (days)      : 7.0
+  Min / Max Holding       : 1 / 11
+
+  Starting Capital        : $    100,000.00
+  Final Capital           : $    167,337.96
+  Total PnL               : $     56,600.39
+  Total Return            : 67.34%
+  Gross Return (pre-cost)  : 75.11%
+  Net Return (after cost)  : 67.34%
+  Total Transaction Costs  : $     18,511.73
+  Average Cost per Trade   : $          6.81
+
+  Bullish Win Rate        : 52.8%
+  Bullish Avg Return      : 0.30%
+
+
+============================================================
+  BACKTEST RESULTS SUMMARY
+============================================================
+  Sharpe Ratio         : 0.624
+  Net Sharpe Ratio     : 0.438
+  Sortino Ratio        : 0.400
+  CAGR                 : 4.04%
+  Max Drawdown         : -21.10%
+  Win Rate             : 52.8%
+  Trades per Year      : 209
+  Annual Turnover      : 1978%
+  Est. Cost Drag (ann) : 1.21%
+  Long P&L contrib     : 56.60%
+  Short P&L contrib    : 0.00%
+============================================================
+
+============================================================
+  INSTITUTIONAL ALPHA ANALYSIS (HELD-TO-EXPIRY)
+============================================================
+  Expiry Win Rate:  53.9%  (exit_reason == 'expiry' only)
+  Avg Expiry Return: +0.415%
+  Sample Size: 2,662 expiry trades (of 2,718 total)
+
+  EXIT REASON BREAKDOWN
+  expiry               : 2662
+  crisis_transition_loser : 56
+
+  STOP LOSS / EXPIRY REALIZED STATS
+  Stop loss pct        : 0.0%
+  Stopped avg return   : +0.000%
+  Expiry avg return    : +0.415%
+  Expiry win rate      : 53.9%
+
+  CLEAN PRE-2024 ANALYSIS (REALIZED EXPIRY)
+  Sample Size (n)      : 2662
+  Win Rate             : 53.9%
+  95% Conf. Interval   : [52.0%, 55.8%]
+  p-value vs 50% null  : 2.99e-05
+  p-value vs 70% null  : 1.00e+00
+  p-value vs 80% null  : 1.00e+00
+
+  ALL TRADES (ILLUSTRATIVE)
+  p-value vs 50% null  : 1.88e-03
+  p-value vs 60% null  : 1.00e+00
+  p-value vs 70% null  : 1.00e+00
+  95% Conf. Interval   : [50.9%, 54.7%]
+
+  REGIME ROBUSTNESS (EXPIRY WIN RATE)
+  Bull                 : 53.1% (n=2262)
+  Bear                 : 60.2% (n=191)
+  Sideways             : 55.1% (n=187)
+  Crisis               : 68.2% (n=22)
+
+  YEAR-BY-YEAR PERSISTENCE
+  2011: 46.2% | 2012: 50.0% | 2013: 60.3% | 2014: 52.3% | 2015: 47.4% | 2016: 48.6% | 2017: 56.8% | 2018: 53.8% | 2019: 55.7% | 2020: 63.4% | 2021: 51.9% | 2022: 55.6% | 2023: 58.8% | 2024: 75.0%
+============================================================
+
+============================================================
+  ADVANCED STATISTICAL AUDIT & RIGOR DIAGNOSTICS
+============================================================
+  INFORMATION RATIO DECOMPOSITION (Grinold)
+  IC (Daily mean)      : -0.0070
+  Effective Breadth    : 56.2 independent bets/yr
+  Predicted IR         : -0.053
+  Realized IR (t-stat) : -0.309
+
+  SHARPE SIGNIFICANCE (Lo 2002 Correction)
+  T-statistic          : 23.074
+  Significant (>1.96)  : YES
+  Probabilistic Sharpe : 0.1%
+
+  WIN RATE MLE (BETA-BINOMIAL POSTERIOR)
+  MAP Estimate         : 53.9%
+  95% Credible Int.    : [52.0%, 55.8%]
+  P(True WR > 70%)     : 0.0%
+
+  AUTOCORRELATION ADJUSTMENT (Newey-West)
+  Standard Sharpe      : 0.438
+  HAC-Adjusted Sharpe  : 0.438
+  Inflation Factor     : 1.00x
+
+  CONSERVATIVE KELLY (Bootstrap)
+  Kelly Mean           : 8.7%
+  Kelly 25th Ptile     : 7.1% (Recommended)
+  Kelly 5th Ptile      : 4.5%
+
+  FAMA-FRENCH ATTRIBUTION : [Skipped/No Internet]
+============================================================
+
+  Trades CSV  → output/backtests/trades.csv
+  Equity CSV  → output/backtests/daily_equity.csv
+  Equity plot → output/backtests/equity_curve.png
+  Regime plot → output/backtests/regime_returns.png
+  Pos. count  → output/backtests/position_count.png
+  Experiment snapshot → output/experiments/20260403_191024
+
+=================================================================
+  OUTPUTS PRODUCED
+=================================================================
+  Result    : 2718 trades  |  Sharpe 0.624  |  Return 67.34%
+
+  → output/backtests/latest_summary.txt
+  → output/experiments/20260403_191024
+  → output/backtests/trades.csv
+  → output/backtests/daily_equity.csv
+  → output/backtests/equity_curve.png
+  → output/backtests/regime_returns.png
+  → output/backtests/position_count.png
+=================================================================
+  Backtest complete.
+=================================================================

@@ -496,6 +496,7 @@ def main() -> int:
                 matrix_start,
                 "--matrix-end-date",
                 train_end,
+                "--save-all-models",
             ]
             if args.verbose:
                 pass  # run_model_selection has no verbose flag

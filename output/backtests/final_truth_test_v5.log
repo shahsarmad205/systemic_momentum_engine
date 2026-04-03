@@ -1,0 +1,14 @@
+Traceback (most recent call last):
+  File "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_backtest.py", line 29, in <module>
+    from backtest.engine import BacktestEngine
+  File "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtest/__init__.py", line 5, in <module>
+    from .engine import BacktestEngine
+  File "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtest/engine.py", line 13, in <module>
+    from backtesting.backtester import Backtester, BacktestResult
+  File "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/__init__.py", line 9, in <module>
+    from .backtester import Backtester, BacktestResult
+  File "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/backtester.py", line 43, in <module>
+    from .metrics import compute_all_metrics, compute_capm_metrics
+  File "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/metrics.py", line 17, in <module>
+    import statsmodels.api as sm
+ModuleNotFoundError: No module named 'statsmodels'

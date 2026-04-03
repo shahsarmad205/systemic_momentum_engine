@@ -1,0 +1,105 @@
+2026-04-03 14:05:32,989 [WARNING] backtesting.regime_multipliers: Sideways multiplier 0.0000 is outside (0, 3.0]. Using 1.0 fallback.
+2026-04-03 14:05:32,989 [WARNING] backtesting.regime_multipliers: Crisis multiplier 0.3000 is outside recommended 0.5-2.0 range.
+2026-04-03 14:05:32,989 [INFO] backtesting.backtester: Regime multipliers loaded: {'Bull': 1.0, 'Bear': 0.8, 'Sideways': 1.0, 'Crisis': 0.3}
+2026-04-03 14:05:33,300 [ERROR] utils.market_data: [_download_tiingo] Request failed for ^VIX: 404 Client Error: Not Found for url: https://api.tiingo.com/tiingo/daily/%5Evix/prices?startDate=2009-11-27&endDate=2024-01-30&token=d421c9893c8bea038597e0e5cfbdc1de6c02f4f1
+2026-04-03 14:05:33,541 [ERROR] utils.market_data: [_download_tiingo] Request failed for ^VIX3M: 404 Client Error: Not Found for url: https://api.tiingo.com/tiingo/daily/%5Evix3m/prices?startDate=2009-11-27&endDate=2024-01-30&token=d421c9893c8bea038597e0e5cfbdc1de6c02f4f1
+2026-04-03 14:05:34,968 [ERROR] yfinance: $SQ: possibly delisted; no timezone found
+2026-04-03 14:05:35,835 [ERROR] yfinance: 
+1 Failed download:
+2026-04-03 14:05:35,835 [ERROR] yfinance: ['SQ']: possibly delisted; no timezone found
+2026-04-03 14:05:35,930 [ERROR] backtesting.backtester: Error preparing data for AAPL,NVDA,TSLA,META,AMZN,MSFT,GOOG,AVGO,ADBE,CRM,AMD,INTC,ORCL,CSCO,IBM,SPY,QQQ,IWM,ARKK,DIA,V,MA,PYPL,SQ,SHOP,MSTR,COIN,HOOD,NET,CRWD,SNOW,PLTR,AI,DDOG,OKTA,ZS,TEAM,MDB,U,PATH,AFRM,UPST,RBLX,DOCU,TWLO,MQ,NU,SOFI,WMT,MCD,NKE,SBUX,XOM,CVX,CAT,GE: Cannot set a DataFrame with multiple columns to the single column AdjClose
+Traceback (most recent call last):
+  File "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/backtester.py", line 654, in prepare_data
+    raw = get_ohlcv(
+        ticker,
+    ...<5 lines>...
+        cache_ttl_days=cache_ttl,
+    )
+  File "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/market_data.py", line 512, in get_ohlcv
+    df = _download_yahoo(ticker, start, end)
+  File "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/market_data.py", line 124, in _download_yahoo
+    df = _fetch(start_=start, end_=end)
+  File "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/market_data.py", line 116, in _fetch
+    df["AdjClose"] = raw["Adj Close"].reindex(df.index)
+    ~~^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/site-packages/pandas/core/frame.py", line 4312, in __setitem__
+    self._set_item_frame_value(key, value)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/site-packages/pandas/core/frame.py", line 4470, in _set_item_frame_value
+    raise ValueError(
+    ...<2 lines>...
+    )
+ValueError: Cannot set a DataFrame with multiple columns to the single column AdjClose
+2026-04-03 14:05:35,936 [INFO] backtesting.backtester: Loaded SPY for vol scaling: shape=(3566, 9)
+2026-04-03 14:05:36,686 [INFO] backtesting.backtester: Precomputed regime score std: {'Bull': 0.1, 'Bear': 0.1, 'Sideways': 0.1, 'Crisis': 0.1}
+2026-04-03 14:05:36,690 [INFO] backtesting.backtester: Signal inclusion summary: days=0, avg_candidates_per_day=0.00, max_candidates_on_day=0
+2026-04-03 14:05:36,690 [INFO] backtesting.backtester: DEBUG: Date 2011-01-03 00:00:00 | Pending 0 | Slots 10 | Equity 100000
+2026-04-03 14:05:36,693 [INFO] backtesting.backtester: DEBUG: Date 2012-01-03 00:00:00 | Pending 0 | Slots 10 | Equity 100000
+2026-04-03 14:05:36,695 [INFO] backtesting.backtester: DEBUG: Date 2013-01-04 00:00:00 | Pending 0 | Slots 10 | Equity 100000
+2026-04-03 14:05:36,698 [INFO] backtesting.backtester: DEBUG: Date 2014-01-06 00:00:00 | Pending 0 | Slots 10 | Equity 100000
+2026-04-03 14:05:36,700 [INFO] backtesting.backtester: DEBUG: Date 2015-01-06 00:00:00 | Pending 0 | Slots 10 | Equity 100000
+2026-04-03 14:05:36,703 [INFO] backtesting.backtester: DEBUG: Date 2016-01-06 00:00:00 | Pending 0 | Slots 10 | Equity 100000
+2026-04-03 14:05:36,705 [INFO] backtesting.backtester: DEBUG: Date 2017-01-05 00:00:00 | Pending 0 | Slots 10 | Equity 100000
+2026-04-03 14:05:36,708 [INFO] backtesting.backtester: DEBUG: Date 2018-01-05 00:00:00 | Pending 0 | Slots 10 | Equity 100000
+2026-04-03 14:05:36,710 [INFO] backtesting.backtester: DEBUG: Date 2019-01-08 00:00:00 | Pending 0 | Slots 10 | Equity 100000
+2026-04-03 14:05:36,713 [INFO] backtesting.backtester: DEBUG: Date 2020-01-08 00:00:00 | Pending 0 | Slots 10 | Equity 100000
+2026-04-03 14:05:36,715 [INFO] backtesting.backtester: DEBUG: Date 2021-01-07 00:00:00 | Pending 0 | Slots 10 | Equity 100000
+2026-04-03 14:05:36,717 [INFO] backtesting.backtester: DEBUG: Date 2022-01-06 00:00:00 | Pending 0 | Slots 10 | Equity 100000
+2026-04-03 14:05:36,720 [INFO] backtesting.backtester: DEBUG: Date 2023-01-09 00:00:00 | Pending 0 | Slots 10 | Equity 100000
+2026-04-03 14:05:36,722 [INFO] backtesting.backtester: DEBUG: Date 2024-01-10 00:00:00 | Pending 0 | Slots 10 | Equity 100000
+/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/metrics.py:1167: RuntimeWarning: invalid value encountered in scalar divide
+  sr_ann = (rets.mean() / rets.std()) * np.sqrt(252)
+
+=================================================================
+  ML ENSEMBLE CONFIGURATION (2 models)
+=================================================================
+  - ridge.pkl                      | Weight: 0.50 | Type: regressor
+  - xgbregressor.pkl               | Weight: 0.50 | Type: regressor
+=================================================================
+
+
+=================================================================
+  Trend Signal Engine — Quant Research Backtester
+=================================================================
+  Period        : 2011-01-01  →  2023-12-31
+  Tickers       : 1
+  Capital       : $100,000
+  Max Positions : 10
+  Holding       : 5 days
+  Slippage      : 1.0 bps
+  Commission    : $1.00 / trade
+  Min |Signal|  : 0.01
+  Signal Mode   : Single ML model
+  Shorts        : ON
+  Regime        : ON
+  Sector Cap    : OFF
+  Cross-section : TOP_LONGS=5  TOP_SHORTS=5  market_neutral=True
+  Risk          : sizing=equal, max_pos=12%
+=================================================================
+
+
+Pre-loading benchmarks (SPY, ^VIX, ^VIX3M) using Tiingo…
+  [1/1] AAPL,NVDA,TSLA,META,AMZN,MSFT,GOOG,AVGO,ADBE,CRM,AMD,INTC,ORCL,CSCO,IBM,SPY,QQQ,IWM,ARKK,DIA,V,MA,PYPL,SQ,SHOP,MSTR,COIN,HOOD,NET,CRWD,SNOW,PLTR,AI,DDOG,OKTA,ZS,TEAM,MDB,U,PATH,AFRM,UPST,RBLX,DOCU,TWLO,MQ,NU,SOFI,WMT,MCD,NKE,SBUX,XOM,CVX,CAT,GE… ERROR: Cannot set a DataFrame with multiple columns to the single column AdjClose
+Phase 1: Reusing pre-loaded data & signals…
+
+Phase 2: Detecting market regimes (SPY + VIX)…
+  Regimes: {'Bull': 2545, 'Sideways': 239, 'Crisis': 218, 'Bear': 287}
+
+Phase 3: Running day-by-day portfolio simulation…
+Phase 4: Computing metrics…
+
+Traceback (most recent call last):
+  File "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_backtest.py", line 906, in <module>
+    main()
+    ~~~~^^
+  File "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_backtest.py", line 639, in main
+    result = engine.run_backtest(tickers, price_data=price_data, signal_data=signal_data)
+  File "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtest/engine.py", line 34, in run_backtest
+    return self._backtester.run(tickers, price_data=price_data, signal_data=signal_data)
+           ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/backtester.py", line 299, in run
+    metrics = compute_all_metrics(trades, daily_equity, self.config)
+  File "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/metrics.py", line 872, in compute_all_metrics
+    return BacktestResult(
+           ^^^^^^^^^^^^^^
+NameError: name 'BacktestResult' is not defined

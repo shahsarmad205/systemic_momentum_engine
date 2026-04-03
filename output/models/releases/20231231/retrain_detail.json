@@ -1,39 +1,11 @@
 {
-  "timestamp": "2026-04-02T17:57:52.250868",
-  "model_type": "learned_weights",
+  "timestamp": "2026-04-02T23:22:22.895858",
+  "model_type": "ml",
   "train_end": "2023-12-31",
   "matrix_start": "2013-12-31",
   "train_window_years": 10.0,
   "validation_holdout_calendar_days": 252,
   "validation_walk_forward_windows": 3,
   "status": "ok",
-  "validation_mode": "oos_holdout",
-  "validation_windows": [
-    [
-      "2023-04-23",
-      "2023-07-15"
-    ],
-    [
-      "2023-07-16",
-      "2023-10-07"
-    ],
-    [
-      "2023-10-08",
-      "2023-12-31"
-    ]
-  ],
-  "validation_new_sharpe_per_window": [
-    0.6376250947956211,
-    -0.9253767738032511,
-    0.46904110887810174
-  ],
-  "validation_previous_sharpe_per_window": [
-    0.6376250947956211,
-    -0.9253767738032511,
-    0.46904110887810174
-  ],
-  "validation_mean_new_sharpe": 0.06042980995682392,
-  "validation_mean_previous_sharpe": 0.06042980995682392,
-  "validation_better_windows_count": 0,
   "release_dir": "output/models/releases/20231231"
 }

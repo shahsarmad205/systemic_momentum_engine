@@ -1,0 +1,9 @@
+usage: run_backtest.py [-h] [--config CONFIG] [--learned-weights PATH]
+                       [--signal-confidence-mult X]
+                       [--tickers TICKERS [TICKERS ...]]
+                       [--mode {price,full,learned,ml,ensemble}]
+                       [--holding-period HOLDING_PERIOD] [--long-only]
+                       [--walk-forward] [--ic-decay] [--cost-sensitivity]
+                       [--verbose] [--scan-signal-thresholds]
+                       [--scan-signal-confidence]
+run_backtest.py: error: unrecognized arguments: --start 2011-01-01 --end 2023-12-31 --min-signal-strength 0.01

@@ -1096,9 +1096,16 @@ def main() -> None:
         print(f"  {i:02d} train=[{tr_span}]  test=[{te_span}]  {sequential}")
         prev_test_end = te_e
 
+    signals_cfg = cfg.get("signals", {}) or {}
+    target_type = str(signals_cfg.get("ml_model_type", "") or "").strip().lower()
+
     models = _build_models()
+    if target_type in ("regressor", "classifier", "short_classifier"):
+        models = [m for m in models if m[3] == target_type]
+        print(f"Pruning ensemble: kept only models in {target_type!r} family ({len(models)} models).")
+
     if not models:
-        raise SystemExit("No models available (check sklearn / optional xgboost install).")
+        raise SystemExit(f"No models available for type {target_type!r} (check signals:ml_model_type in config).")
 
     out_dir = Path("output/models")
     out_dir.mkdir(parents=True, exist_ok=True)
