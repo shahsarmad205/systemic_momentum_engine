@@ -1321,6 +1321,21 @@ class Backtester:
                     if min_hold_eff > 0 and held_days < min_hold_eff:
                         continue
                     self._close_position(pos, date, price_data, exit_price_override=take_price, reason="take_profit")
+                    continue
+
+                # Pillar 6: Short Snap Profit (Tactical Mean Reversion Fast Exit)
+                snap_pct = float(getattr(self.config, "ml_short_snap_profit_pct", 0.0) or 0.0)
+                if snap_pct > 0 and pos.direction < 0 and float(pos.entry_price or 0.0) > 0:
+                    snap_thr = float(pos.entry_price) * (1.0 - snap_pct)
+                    if np.isfinite(low) and low <= snap_thr:
+                        self._close_position(
+                            pos,
+                            date,
+                            price_data,
+                            exit_price_override=snap_thr,
+                            reason="short_snap_profit",
+                        )
+                        continue
 
             # --- 2. Execute pending entries at today's open ---
             existing_tickers = {p.ticker for p in self.portfolio.positions}

@@ -330,6 +330,17 @@ feature_selection:
     - ret_1d
     - vol_ratio_5_20
     - capm_residual_vol
+  short_feature_subset:
+    - dist_from_52w_high
+    - rsi_overbought
+    - vol_expansion
+    - momentum_acceleration
+    - down_up_vol_ratio
+    - rsi_14
+    - rolling_vol_20
+    - ret_5d
+    - ret_1d
+    - earnings_surprise
 
 # Model selection runner settings (trend_signal_engine/run_model_selection.py)
 model_selection:
@@ -339,7 +350,7 @@ model_selection:
 
 backtest:
   start_date: "2013-01-01"
-  end_date: "2026-03-31"
+  end_date: "2023-12-31"
   max_trades_per_ticker: 20
   initial_capital: 100000
   max_positions: 10
@@ -356,10 +367,10 @@ backtest:
   # Cross-sectional ranking (top/bottom portfolio). When enabled, execution.enable_shorts is forced on if market_neutral.
   cross_sectional:
     enabled: true
-    market_neutral: true    # [PHASE 8] Dollar-neutral for institutional IR test
+    market_neutral: false    # Long-only for QuantConnect production
     target_long_positions: 10
-    top_longs: 5
-    top_shorts: 5
+    top_longs: 10
+    top_shorts: 0
     rebalance_daily: false  # if true, close positions not in today's target before opens
   #   daily_positions_csv_path: "output/portfolio/daily_positions.csv"
   # Optional: hold longer for stronger signals or by signal type (Bullish/Bearish)
@@ -375,11 +386,11 @@ backtest:
 execution:
   slippage_bps: 1.0            # basis points per trade side (used when execution_costs disabled)
   commission_per_trade: 1.00   # USD flat fee per trade (used when execution_costs disabled)
-  enable_shorts: false         # [PHASE 8] Re-enabled with hardened logic
-  long_only: true            # [PHASE 8] Back to Long/Short
-  regime_suppress_shorts:
-    - Bull
-    - Crisis
+  enable_shorts: false         # Strictly Long-Only for QC
+  long_only: true            # Strictly Long-Only for QC
+  #regime_suppress_shorts:
+   # - Bull
+    #- Crisis
 
 # Transaction costs (realistic execution: when enabled, used for entry/exit cost and slippage)
 execution_costs:
@@ -497,9 +508,18 @@ signals:
   base_signal_threshold: 0.01
   mode: "ml"             # "price" | "full" | "learned" | "ml" | "ensemble"
   learned_weights_path: "output/learned_weights.json"   # used when mode=learned
-  ml_model_path: "output/models/best_model.pkl"
-  ml_model_type: "regressor"
-  ml_standardize: true
+  ml_long_model_path: "output/models/best_long_model.pkl"
+  ml_short_model_path: "output/models/best_short_model.pkl"
+  ml_long_weight: 1.0
+  ml_short_weight: 0.0
+  ml_short_allowed_regimes: []
+  ml_short_holding_period_days: 2
+  ml_short_min_signal_strength: 0.7
+  ml_short_overextension_threshold: 0.05
+  ml_short_snap_profit_pct: 0.02
+  ml_short_min_liquidity_usd: 20000000.0
+  ml_short_max_squeeze_vol_ratio: 2.2
+  ml_standardize: false
   ml_clip: false
   ensemble:
     models:

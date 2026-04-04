@@ -461,6 +461,25 @@ def _build_features_for_ticker(
             [np.inf, -np.inf], np.nan
         ).shift(1)
 
+        # AR-1.5: dist_from_52w_high (252-day range)
+        max_52w = close.rolling(252, min_periods=100).max()
+        dist_from_52w_high = (close - max_52w) / max_52w.replace(0, np.nan)
+
+        # AR-1.5: rsi_overbought (using 14d RSI)
+        rsi_overbought = (mr_rsi_raw > 70).astype(float)
+
+        # AR-1.5: vol_expansion (vol_5 / vol_20)
+        vol_expansion = (vol_5_raw / vol_20_raw.replace(0, np.nan)).replace([np.inf, -np.inf], np.nan)
+
+        # AR-1.5: momentum_acceleration (ret_5d - ret_10d)
+        momentum_acceleration = ret_5d - ret_10d
+
+        # AR-1.5: down_up_vol_ratio (lagged by 1d to avoid lookahead at market open)
+        d_ret_lag = daily_ret.shift(1)
+        down_v = volume.where(d_ret_lag < 0, 0).rolling(20).sum()
+        up_v = volume.where(d_ret_lag > 0, 0).rolling(20).sum()
+        down_up_vol_ratio = (down_v / up_v.replace(0, np.nan)).fillna(1.0)
+
         chunk = pd.DataFrame(
             {
                 "ticker": ticker,
@@ -506,6 +525,13 @@ def _build_features_for_ticker(
                 "rsi_14": rsi_14,
                 "ret_1d": ret_1d,
                 "vol_ratio_5_20": vol_ratio_5_20,
+                # New short features
+                "dist_from_52w_high": dist_from_52w_high,
+                "rsi_overbought": rsi_overbought,
+                "vol_expansion": vol_expansion,
+                "momentum_acceleration": momentum_acceleration,
+                "down_up_vol_ratio": down_up_vol_ratio,
+                "earnings_surprise": np.nan,
                 "forward_return": forward_ret,
             },
             index=features.index,

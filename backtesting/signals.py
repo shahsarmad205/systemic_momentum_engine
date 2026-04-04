@@ -518,12 +518,18 @@ class SignalEngine:
                     "clip": bool(getattr(self.config, "ensemble_clip", False)),
                 }
             else:
+                # ML Mode: Dual Ensemble (Long + Short specialised models)
                 ens_cfg = {
                     "models": [
                         {
-                            "path": str(getattr(self.config, "ml_model_path", "") or "").strip(),
-                            "weight": 1.0,
-                            "type": str(getattr(self.config, "ml_model_type", "classifier")).strip().lower(),
+                            "path": str(getattr(self.config, "ml_long_model_path", "") or "").strip(),
+                            "weight": float(getattr(self.config, "ml_long_weight", 0.5)),
+                            "type": "classifier",
+                        },
+                        {
+                            "path": str(getattr(self.config, "ml_short_model_path", "") or "").strip(),
+                            "weight": float(getattr(self.config, "ml_short_weight", 0.5)),
+                            "type": "short_classifier",
                         }
                     ],
                     "normalize": False,
@@ -572,6 +578,35 @@ class SignalEngine:
                         pd.to_numeric(vol_struct["vol_5d"], errors="coerce")
                         / pd.to_numeric(vol_struct["vol_20d"], errors="coerce").replace(0, np.nan)
                     ).replace([np.inf, -np.inf], np.nan).shift(1).fillna(1.0),
+                    # NEW SHORT SYNC FEATURES (RAW SCALE)
+                    "dist_from_52w_high": (
+                        (close / close.rolling(252).max() - 1.0)
+                    ).fillna(0.0),
+                    "rsi_overbought": (
+                        mr_feat["rsi_14_raw"].shift(1) > 70.0
+                    ).astype(float).fillna(0.0),
+                    "vol_expansion": (
+                        pd.to_numeric(vol_struct["vol_5d"], errors="coerce") 
+                        / pd.to_numeric(vol_struct["vol_20d"], errors="coerce").replace(0, np.nan)
+                    ).fillna(1.0).shift(1).fillna(1.0),
+                    "momentum_acceleration": (
+                        ret_5d - ret_10d
+                    ).fillna(0.0),
+                    "down_up_vol_ratio": (
+                        (stock_data["Volume"].where(daily_ret.shift(1) < 0, 0).rolling(20).sum() 
+                         / stock_data["Volume"].where(daily_ret.shift(1) > 0, 0).rolling(20).sum().replace(0, np.nan))
+                        .fillna(1.0)
+                    ).fillna(1.0),
+                    "rel_ret_5d": (
+                        ret_5d - (
+                            spy_df["Close"].pct_change(5).shift(1).reindex(features.index).fillna(0.0)
+                            if spy_df is not None and not spy_df.empty and "Close" in spy_df.columns
+                            else 0.0
+                        )
+                    ).fillna(0.0),
+                    "dollar_volume_20d": (
+                        (stock_data["Close"] * stock_data["Volume"]).rolling(20).mean().shift(1)
+                    ).fillna(0.0),
                 },
                 index=features.index,
             )
@@ -579,20 +614,39 @@ class SignalEngine:
                 logger.warning("SignalEngine: no %s models loaded; falling back to learned/price mode.", mode)
                 adjusted = f_trend * self.weights.get("trend", 1.0)
             else:
-                if bool(ens_cfg.get("normalize", True)) and not self._warned_ensemble_norm_ignored:
-                    logger.warning(
-                        "SignalEngine: ensemble normalize=true ignored in backtest to avoid lookahead bias."
-                    )
-                    self._warned_ensemble_norm_ignored = True
-                adjusted = compute_ensemble_score(
-                    model_features,
-                    self._ensemble_models_cache,
-                    normalize=False,
-                    standardize=bool(ens_cfg.get("standardize", False)),
-                    clip=bool(ens_cfg.get("clip", False)),
-                ).reindex(features.index)
+                # 1) Calculate Long Score and Short Score independently to prevent dilution
+                long_model = next((m for m in self._ensemble_models_cache if m.model_type == "classifier"), None)
+                short_model = next((m for m in self._ensemble_models_cache if m.model_type == "short_classifier"), None)
+                
+                long_score = pd.Series(0.0, index=features.index)
+                short_score = pd.Series(0.0, index=features.index)
+                
+                from utils.ensemble_scoring import _predict_model
+                if long_model:
+                    long_score = _predict_model(long_model, model_features, clip=bool(ens_cfg.get("clip", False)))
+                    
+                if short_model:
+                    raw_short = _predict_model(short_model, model_features, clip=bool(ens_cfg.get("clip", False)))
+                    
+                    # Regime Gating: only allow short model to contribute in certain regimes
+                    if self.regime_series is not None:
+                        panel_regimes = self.regime_series.reindex(features.index).astype(str).map(_normalise_regime_label).fillna("Sideways")
+                    elif "trend_regime" in features.columns:
+                        panel_regimes = features["trend_regime"].astype(str).map(_normalise_regime_label).fillna("Sideways")
+                    else:
+                        panel_regimes = pd.Series("Sideways", index=features.index)
+                        
+                    allowed = getattr(self.config, "ml_short_allowed_regimes", ["Bear", "Crisis", "Sideways"])
+                    gate_mask = panel_regimes.isin(allowed)
+                    short_score = raw_short.where(gate_mask, 0.0)
+                
+                # Composite: Additive with multipliers to preserve signal strength
+                w_long = float(getattr(self.config, "ml_long_weight", 1.0))
+                w_short = float(getattr(self.config, "ml_short_weight", 1.0))
+                adjusted = (w_long * long_score) + (w_short * short_score)
+                
                 if adjusted.empty or adjusted.isna().all():
-                    logger.warning("SignalEngine: %s predictions empty; falling back to price trend score.", mode)
+                    logger.warning("SignalEngine: %s combined predictions empty; falling back to price trend.", mode)
                     adjusted = f_trend * self.weights.get("trend", 1.0)
         elif self.learned_weights is not None:
             lw = self.learned_weights
@@ -671,6 +725,8 @@ class SignalEngine:
                 "adjusted_score": adjusted,
                 "sector_relative_20d": sr20,
                 "sector_relative_60d": sr60,
+                "rel_ret_5d": model_features["rel_ret_5d"] if "rel_ret_5d" in model_features.columns else 0.0,
+                "avg_dollar_volume_20d": model_features["dollar_volume_20d"] if "dollar_volume_20d" in model_features.columns else 0.0,
             },
             index=features.index,
         )

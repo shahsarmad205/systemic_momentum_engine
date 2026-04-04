@@ -824,7 +824,7 @@ def _build_models() -> list[tuple[str, Any, bool, str]]:
             Pipeline(
                 [
                     ("scaler", RobustScaler()),
-                    ("model", LogisticRegression(C=0.01, max_iter=1000)),
+                    ("model", LogisticRegression(C=0.01, max_iter=1000, class_weight="balanced")),
                 ]
             ),
             True,
@@ -966,6 +966,8 @@ def main() -> None:
     ms_cfg = cfg.get("model_selection", {}) or {}
     feature_subset = feature_sel.get("feature_subset", []) or []
     feature_subset = [str(c).strip() for c in feature_subset if str(c).strip()]
+    short_feature_subset = feature_sel.get("short_feature_subset", []) or []
+    short_feature_subset = [str(c).strip() for c in short_feature_subset if str(c).strip()]
 
     # Model-selection / evaluation settings (CLI overrides config).
     horizon = int(args.horizon) if args.horizon is not None else int(ms_cfg.get("lookahead_horizon_days", 5) or 5)
@@ -1010,18 +1012,21 @@ def main() -> None:
     print(f"Horizon: {horizon} trading days")
     embargo_days = int(args.embargo_days) if args.embargo_days is not None else int(max(5, 2 * int(horizon)))
     print(f"Embargo: {embargo_days} calendar days")
-    if feature_subset:
-        print(f"Feature subset: {len(feature_subset)} columns")
+    if feature_subset or short_feature_subset:
+        num_feat = len(set(feature_subset + short_feature_subset))
+        print(f"Feature union: {num_feat} unique columns")
 
     from agents.weight_learning_agent.feature_builder import build_feature_matrix
 
     # Build enough history for rolling features (feature_builder applies its own buffers).
+    # Pass the union of all candidate subsets to build_feature_matrix.
+    matrix_subset = list(set(feature_subset + short_feature_subset)) if (feature_subset or short_feature_subset) else None
     df = build_feature_matrix(
         tickers,
         start_date=start_date,
         end_date=end_date,
         holding_period=int(horizon),
-        feature_subset=feature_subset if feature_subset else None,
+        feature_subset=matrix_subset,
     )
     if df is None or df.empty:
         raise SystemExit("Feature matrix is empty; cannot run model selection.")
@@ -1143,7 +1148,10 @@ def main() -> None:
                 continue
 
             try:
-                X_tr = tr[feat_cols].replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(-10.0, 10.0).values
+                # Contextual feature selection for short-specific models
+                active_feats = short_feature_subset if (is_short_classifier and short_feature_subset) else feat_cols
+                
+                X_tr = tr[active_feats].replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(-10.0, 10.0).values
                 if is_regressor:
                     # Clip regression target to prevent exploding coefficients/gradients
                     # A 30% return move in 1 trading day is a reasonable bound for stability.
@@ -1152,20 +1160,21 @@ def main() -> None:
                     y_tr = (tr["forward_return"].replace([np.inf, -np.inf], np.nan).fillna(0.0) < 0).astype(int)
                 else:
                     y_tr = tr["y_bin"].fillna(0).astype(int)
-                X_te = te[feat_cols].replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(-10.0, 10.0).values
+                
+                X_te = te[active_feats].replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(-10.0, 10.0).values
                 y_te_ret = te["forward_return"].replace([np.inf, -np.inf], np.nan).fillna(0.0).values.astype(float)
                 y_te_bin = te["y_bin"].fillna(0).astype(int)
 
                 # Defensive: Drop singular or constant features to prevent StandardScaler zero-division.
                 # Standard deviation below 1e-6 causes numerical instability in linear solvers.
-                X_tr_df = pd.DataFrame(X_tr, columns=feat_cols)
+                X_tr_df = pd.DataFrame(X_tr, columns=active_feats)
                 stds = X_tr_df.std()
                 singular_cols = stds[stds < 1e-6].index.tolist()
                 
                 if singular_cols:
                     # Sync X_tr and X_te by removing the problematic columns
                     X_tr = X_tr_df.drop(columns=singular_cols).values
-                    X_te = pd.DataFrame(X_te, columns=feat_cols).drop(columns=singular_cols).values
+                    X_te = pd.DataFrame(X_te, columns=active_feats).drop(columns=singular_cols).values
 
                 # Final NumPy safety net for any values that bypassed pandas-level logic
                 # Using .copy() to ensure contiguous memory, which helps avoid some BLAS bugs on Mac
@@ -1173,12 +1182,28 @@ def main() -> None:
                 y_tr = np.nan_to_num(y_tr, nan=0.0, posinf=0.0, neginf=0.0).copy()
                 X_te = np.nan_to_num(X_te, nan=0.0, posinf=0.0, neginf=0.0).copy()
 
+                # --- Short Model Specific Guard & Balancing ---
+                if is_short_classifier:
+                    pos = int((y_tr == 1).sum())
+                    if pos < 50:
+                        print(
+                            f"  [window {win_idx}/{len(windows)}] skip short model: only {pos} positive labels "
+                            f"(min 50) | test={te_label}"
+                        )
+                        continue
+                        
                 try:
                     from sklearn.base import clone
                     import warnings
                     
                     # Isolate this training window with a fresh model instance
                     win_model = clone(model)
+                    
+                    if name == "ShortXGB" and is_short_classifier:
+                        pos = int((y_tr == 1).sum())
+                        neg = int((y_tr == 0).sum())
+                        spw = float(neg / pos) if pos > 0 else 1.0
+                        win_model.set_params(scale_pos_weight=spw)
                     
                     t0 = time.perf_counter()
                     # Silence known spurious BLAS matmul warnings on Apple Silicon
@@ -1480,160 +1505,118 @@ def main() -> None:
     report_path = out_dir / "model_comparison.csv"
     report.to_csv(report_path, index=False)
 
-    best_name = str(report.loc[0, "model_name"])
     print()
     print(f"Saved report: {report_path}")
-    print(f"Selected best model by {args.select_metric}: {best_name}")
 
-    # Recreate and train best model on full dataset
-    best_spec = {n: (m, p, k) for (n, m, p, k) in models}.get(best_name)
-    if best_spec is None:
-        # Allow selecting the baseline as "best" when --compare_baseline is enabled.
-        if best_name == "LearnedWeightsBaseline" and args.compare_baseline:
-            artifact = {
-                "model_name": best_name,
-                "model_type": "learned_weights_baseline",
-                "horizon_days": int(horizon),
-                "target": "forward_return",
-                "trained_at": pd.Timestamp.utcnow().isoformat(),
-                "weights_path": "output/learned_weights.json",
-                "scaler_path": "output/learned_weights_scaler.json",
-                "estimator": None,
-            }
-            best_path = out_dir / "best_model.pkl"
-            with open(best_path, "wb") as fh:
-                pickle.dump(artifact, fh)
-            print(f"Saved best model (baseline artifact): {best_path}")
+    # --- DUAL WINNER SELECTION ---
+    long_kinds = ["classifier", "regressor"]
+    short_kinds = ["short_classifier"]
 
-            meta_path = out_dir / "best_model.meta.json"
-            meta = {
-                "model_name": best_name,
-                "model_type": "learned_weights_baseline",
-                "horizon_days": int(horizon),
-                "target": "forward_return",
-                "n_rows": int(len(df)),
-                "n_tickers": int(df["ticker"].nunique()) if "ticker" in df.columns else None,
-                "feature_columns": _read_json(Path("output/learned_weights_scaler.json")).get("active_features", []),
-                "selected_by": args.select_metric,
-                "windows": [],
-            }
-            meta_path.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
-            print(f"Saved metadata: {meta_path}")
+    long_pool = report[report["model_kind"].isin(long_kinds)].reset_index(drop=True)
+    short_pool = report[report["model_kind"].isin(short_kinds)].reset_index(drop=True)
 
-            print()
-            print("Config note:")
-            print("- Selected baseline artifact (no sklearn estimator).")
-            print("- If you want to wire this baseline into inference, reuse your existing learned-weights scorer.")
-            return
+    best_long_name = str(long_pool.loc[0, "model_name"]) if not long_pool.empty else None
+    best_short_name = str(short_pool.loc[0, "model_name"]) if not short_pool.empty else None
 
-        raise SystemExit(f"Best model {best_name} not found in model list (was it skipped due to missing deps?).")
-    best_model, _best_uses_proba, best_kind = best_spec
+    if best_long_name:
+        print(f"Selected best LONG model by {args.select_metric}: {best_long_name}")
+    if best_short_name:
+        print(f"Selected best SHORT model by {args.select_metric}: {best_short_name}")
 
-    t0 = time.perf_counter()
     # Final full-dataset training: replicate the robust sanitization logic
+    # (Shared X/y matrices for all winning fits)
     X_all_raw = df[feat_cols].replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(-10.0, 10.0).values
     y_all_cls = df["y_bin"].fillna(0).astype(int)
     y_all_reg = df["forward_return"].replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(-0.5, 0.5).values.astype(float)
     y_all_down = (df["forward_return"].replace([np.inf, -np.inf], np.nan).fillna(0.0) < 0).astype(int)
 
-    # Singular column purge 
     X_all_df = pd.DataFrame(X_all_raw, columns=feat_cols)
     all_stds = X_all_df.std()
     all_singular = all_stds[all_stds < 1e-6].index.tolist()
-    if all_singular:
-        X_all = X_all_df.drop(columns=all_singular).values
-    else:
-        X_all = X_all_raw
+    X_all = X_all_df.drop(columns=all_singular).values if all_singular else X_all_raw.copy()
     
-    # Enforce copy for stability
-    X_all = X_all.copy()
     y_all_cls = y_all_cls.copy()
     y_all_reg = y_all_reg.copy()
     y_all_down = y_all_down.copy()
 
-    if args.save_all_models:
-        from sklearn.base import clone
-        import warnings
-        for model_name, model_obj, _uses_proba, mkind in models:
-            try:
-                if mkind == "regressor":
-                    y_fit = y_all_reg
-                elif mkind == "short_classifier":
-                    y_fit = y_all_down
-                else:
-                    y_fit = y_all_cls
-                
-                final_model = clone(model_obj)
-                with np.errstate(all="ignore"):
-                    final_model.fit(X_all, y_fit)
-                
-                model_artifact = {
-                    "model_name": model_name,
-                    "model_type": mkind,
+    # Shared fit/save helper to avoid duplication
+    def _train_and_save(b_name, b_label):
+        if not b_name:
+            return
+        
+        spec = {n: (m, p, k) for (n, m, p, k) in models}.get(b_name)
+        if spec is None:
+            if b_name == "LearnedWeightsBaseline" and args.compare_baseline:
+                path = out_dir / f"best_{b_label}_model.pkl"
+                artifact = {
+                    "model_name": b_name,
+                    "model_type": f"learned_weights_{b_label}",
                     "horizon_days": int(horizon),
                     "target": "forward_return",
-                    "feature_columns": [c for c in feat_cols if c not in all_singular],
                     "trained_at": pd.Timestamp.utcnow().isoformat(),
-                    "estimator": final_model,
+                    "weights_path": "output/learned_weights.json",
+                    "scaler_path": "output/learned_weights_scaler.json",
+                    "estimator": None,
                 }
-                model_path = out_dir / _model_filename(model_name)
-                with open(model_path, "wb") as fh:
-                    pickle.dump(model_artifact, fh)
-                print(f"Saved model copy: {model_path}")
-            except Exception as exc:
-                print(f"WARNING: failed to save model copy for {model_name}: {exc}")
-                traceback.print_exc()
+                with open(path, "wb") as fh:
+                    pickle.dump(artifact, fh)
+                print(f"Saved best {b_label} model (baseline): {path}")
+                return
+            else:
+                print(f"WARNING: winner {b_name} not found in model list.")
+                return
 
-    if best_kind == "regressor":
-        y_best = y_all_reg
-    elif best_kind == "short_classifier":
-        y_best = y_all_down
-    else:
-        y_best = y_all_cls
-    
-    # Final 'best' model training (fresh instance)
-    from sklearn.base import clone
-    best_model_fit = clone(best_model)
-    with np.errstate(all="ignore"):
-        best_model_fit.fit(X_all, y_best)
-    t1 = time.perf_counter()
-    print(f"Trained best model on full dataset in {t1 - t0:.2f}s")
+        b_model, _b_uses_proba, b_kind = spec
+        if b_kind == "regressor":
+            y_fit = y_all_reg
+        elif b_kind == "short_classifier":
+            y_fit = y_all_down
+        else:
+            y_fit = y_all_cls
 
-    artifact = {
-        "model_name": best_name,
-        "model_type": best_kind,
-        "horizon_days": int(horizon),
-        "target": "forward_return",
-        "feature_columns": [c for c in feat_cols if c not in all_singular],
-        "trained_at": pd.Timestamp.utcnow().isoformat(),
-        "estimator": best_model_fit,
-    }
-    best_path = out_dir / "best_model.pkl"
-    with open(best_path, "wb") as fh:
-        pickle.dump(artifact, fh)
-    print(f"Saved best model: {best_path}")
+        print(f"Training best {b_label} model ({b_name}) on full dataset...")
+        from sklearn.base import clone
+        final_fit = clone(b_model)
+        with np.errstate(all="ignore"):
+            final_fit.fit(X_all, y_fit)
+        
+        path = out_dir / f"best_{b_label}_model.pkl"
+        artifact = {
+            "model_name": b_name,
+            "model_type": b_kind,
+            "horizon_days": int(horizon),
+            "target": "forward_return",
+            "feature_columns": [c for c in feat_cols if c not in all_singular],
+            "trained_at": pd.Timestamp.utcnow().isoformat(),
+            "estimator": final_fit,
+        }
+        with open(path, "wb") as fh:
+            pickle.dump(artifact, fh)
+        print(f"Saved best {b_label} model: {path}")
 
-    meta_path = out_dir / "best_model.meta.json"
-    meta = {
-        "model_name": best_name,
-        "horizon_days": int(horizon),
-        "target": "forward_return",
-        "n_rows": int(len(df)),
-        "n_tickers": int(df["ticker"].nunique()) if "ticker" in df.columns else None,
-        "feature_columns": feat_cols,
-        "selected_by": args.select_metric,
-        "windows": [
-            {
-                "train_start": w.train_start,
-                "train_end": w.train_end,
-                "test_start": w.test_start,
-                "test_end": w.test_end,
-            }
-            for w in all_window_details.get(best_name, [])
-        ],
-    }
-    meta_path.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
-    print(f"Saved metadata: {meta_path}")
+        meta_path = out_dir / f"best_{b_label}_model.meta.json"
+        meta = {
+            "model_name": b_name,
+            "horizon_days": int(horizon),
+            "target": "forward_return",
+            "n_rows": int(len(df)),
+            "n_tickers": int(df["ticker"].nunique()),
+            "feature_columns": feat_cols,
+            "selected_by": args.select_metric,
+            "windows": [
+                {"train_start": w.train_start, "train_end": w.train_end, "test_start": w.test_start, "test_end": w.test_end}
+                for w in all_window_details.get(b_name, [])
+            ],
+        }
+        meta_path.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
+        print(f"Saved metadata: {meta_path}")
+
+    # Execute training for both pillars
+    t_start = time.perf_counter()
+    _train_and_save(best_long_name, "long")
+    _train_and_save(best_short_name, "short")
+    t_end = time.perf_counter()
+    print(f"Total winning model training time: {t_end - t_start:.2f}s")
 
     print()
     print("Config note:")
@@ -1642,9 +1625,8 @@ def main() -> None:
     print("Suggested YAML fields to add (manual):")
     print("signals:")
     print('  mode: "ml"')
-    print(f'  ml_model_path: "{best_path.as_posix()}"')
+    print(f'  ml_model_path: "{out_dir.as_posix()}/best_long_model.pkl"')
 
 
 if __name__ == "__main__":
     main()
-

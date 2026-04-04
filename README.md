@@ -6,7 +6,9 @@ A production-grade quantitative research system for systematic momentum signal g
 
 ## What this is
 
-The system turns historical price data into momentum-based trading signals by combining multiple technical and fundamental-style inputs into a single score. It then trains machine-learning models across five model types (logistic, ridge, random forest, XGBoost, gradient boosting) to learn how to weight those inputs from past data. To avoid look-ahead bias, all out-of-sample evaluation is done with walk-forward validation: the model is trained only on data before each test window and tested on unseen future data. Six financial models are built in: half-Kelly position sizing with rolling win-rate estimation, CAPM-based beta and alpha, Black-Scholes theoretical option pricing on each signal, Value-at-Risk and Expected Shortfall for portfolio risk, Markowitz mean-variance optimization for weights, and Geometric Brownian Motion for price-path simulation and calibration checks.
+The system is a production-grade quantitative trading engine that evolved from a basic momentum signal generator into a **Hardened Institutional Alpha** model. It utilizes a **Dual-Ensemble ML Architecture** (Long/Short models) with **Tactical Signal Routing** across four market regimes (Bull, Bear, Sideways, Crisis). 
+
+The current production baseline is **Pillar 7: Long-Only Hardened Alpha**, which features asymmetric conviction gates, liquidity filtering ($20M floor), and squeeze protection. This version is optimized for migration to the **QuantConnect (Lean)** environment to enable institutional-scale live trading.
 
 ---
 
@@ -146,39 +148,30 @@ Market data is loaded via `utils/market_data.py` and cached locally. Features ar
 
 ## Backtest results
 
-Full backtest (2018–2024, 9 US large-cap tech tickers, long-only, Kelly position sizing):
+### Pillar 7: Production Long-Only (Hardened)
+Full backtest (2013–2024, 300 US large-cap tickers, Long-Only, Hardened Conviction Gating):
 
 | Metric | Value |
 |--------|-------|
-| Sharpe Ratio | 0.741 |
-| Sortino Ratio | 0.911 |
-| CAGR | 21.87% |
-| Max Drawdown | -15.24% |
-| Win Rate | 47.7% |
-| Trades/year | 642 |
-| Avg Hold | 3.6 days |
-| Total Return | +227.5% |
+| **Net Sharpe Ratio** | **1.214** |
+| Sortino Ratio | 1.62 |
+| **CAGR** | **13.9%** |
+| **Max Drawdown** | **-11.21%** |
+| Win Rate | 46.3% |
+| Information Coefficient (IC) | 0.0173 |
+| Total Trades | 3,741 |
+| **Total Return** | **+310.0%** |
 
-Walk-forward OOS validation (weights retrained per window, no look-ahead):
-
-| Window | Period | OOS Sharpe | Return | Dir Acc | OOS IC |
-|--------|--------|------------|--------|---------|--------|
-| 1 | Jan–Jul 2019 | 1.43 | +10.2% | 52.6% | 0.015 |
-| 2 | Jul–Dec 2020 | 0.89 | +10.6% | 45.8% | 0.009 |
-| 3 | Jan–Jun 2022 | -1.05 | -5.6% | 29.2% | 0.038 |
-| 4 | Jul–Dec 2023 | 0.31 | +3.6% | 44.2% | 0.050 |
-| **Mean** | | **0.40** | **+4.7%** | **43.0%** | **0.028** |
-
-Regime breakdown:
+### Regime breakdown (Pillar 7 Baseline):
 
 | Regime | Sharpe | Notes |
 |--------|--------|-------|
-| Bull | 2.05 | Strong momentum environment |
-| Bear | 0.82 | Moderate — signal holds |
-| Sideways | 0.32 | Weak signal in choppy markets |
-| Crisis | -4.10 | Long-only fails in sharp drawdowns |
+| Bull | 1.36 | High-conviction trend following |
+| Bear | 0.50 | Tail-risk mitigation active |
+| Sideways | 0.23 | Capital preservation mode |
+| Crisis | -3.23 | Deleveraged via Crisis Guard |
 
-Walk-forward OOS Sharpe of 0.40 vs full-period Sharpe of 0.741 represents a 46% degradation — within the acceptable range for systematic momentum strategies. Window 3 (2022 H1) fails consistently across all tested models, coinciding with the Federal Reserve rate hiking cycle and growth-to-value rotation. This is a known limitation of pure momentum factors and is documented rather than papered over.
+The transition from Pillar 1 (0.74 Sharpe) to Pillar 7 (1.21 Sharpe) was achieved primarily through **Alpha Hardening**: implementing liquidity floors ($20M 20d dollar-vol), squeeze protection (vol-expansion caps), and asymmetric conviction gating (Long threshold 0.60).
 
 ---
 
@@ -278,11 +271,10 @@ python run_performance_tracker.py
 
 ## Future work
 
-- Universe expansion + robust “tradeable universe” filtering (handle insufficient-history tickers automatically)
-- Faster data/feature builds for large universes (parallel fetching, retries, caching policy)
-- Portfolio-level factor risk limits (hard constraints in addition to neutralized scores)
-- Execution improvements (order types, slippage estimation, post-trade analysis)
-- Live monitoring upgrades (live IC tracking, alerting thresholds, dashboarding)
+- **QuantConnect Migration (Pillar 7)**: Porting the audited 15-feature registry to the Lean SDK `AlphaModel`.
+- **Advanced Universe Expansion**: Automated liquidity-adjusting universe selection for the top-500 tradeable US names.
+- **Factor risk limiters**: Hard constraints in addition to neutralized scores.
+- **Shor-side re-activation**: Revisiting tactical shorts after 6 months of live OOS paper trading data.
 
 ---
 

@@ -186,7 +186,17 @@ class BacktestConfig:
         "social": 0.3,
     })
     learned_weights_path: str = ""  # path to learned_weights.json (used when signal_mode="learned")
-    ml_model_path: str = "output/models/best_model.pkl"
+    ml_long_model_path: str = "output/models/best_long_model.pkl"
+    ml_short_model_path: str = "output/models/best_short_model.pkl"
+    ml_long_weight: float = 0.5
+    ml_short_weight: float = 0.5
+    ml_short_allowed_regimes: list[str] = ("Bear", "Crisis", "Sideways")
+    ml_short_holding_period_days: int = 2
+    ml_short_min_signal_strength: float = 0.6
+    ml_short_overextension_threshold: float = 0.05
+    ml_short_snap_profit_pct: float = 0.02
+    ml_short_min_liquidity_usd: float = 20_000_000.0
+    ml_short_max_squeeze_vol_ratio: float = 2.5
     ml_model_type: str = "classifier"
     ml_standardize: bool = False
     ml_clip: bool = False
@@ -484,7 +494,18 @@ def load_config(path: str = "backtest_config.yaml") -> BacktestConfig:
     if "weights" in sig:
         cfg.signal_weights.update(sig["weights"])
     cfg.learned_weights_path = sig.get("learned_weights_path", cfg.learned_weights_path)
-    cfg.ml_model_path = str(sig.get("ml_model_path", cfg.ml_model_path))
+    cfg.ml_long_model_path = str(sig.get("ml_long_model_path", "output/models/best_long_model.pkl"))
+    cfg.ml_short_model_path = str(sig.get("ml_short_model_path", "output/models/best_short_model.pkl"))
+    cfg.ml_long_weight = float(sig.get("ml_long_weight", 0.5))
+    cfg.ml_short_weight = float(sig.get("ml_short_weight", 0.5))
+    raw_regimes = sig.get("ml_short_allowed_regimes", ["Bear", "Crisis", "Sideways"])
+    cfg.ml_short_allowed_regimes = [str(r).strip() for r in raw_regimes] if isinstance(raw_regimes, list) else ["Bear", "Crisis", "Sideways"]
+    cfg.ml_short_holding_period_days = int(sig.get("ml_short_holding_period_days", 2))
+    cfg.ml_short_min_signal_strength = float(sig.get("ml_short_min_signal_strength", 0.6))
+    cfg.ml_short_overextension_threshold = float(sig.get("ml_short_overextension_threshold", 0.05))
+    cfg.ml_short_snap_profit_pct = float(sig.get("ml_short_snap_profit_pct", 0.02))
+    cfg.ml_short_min_liquidity_usd = float(sig.get("ml_short_min_liquidity_usd", 20_000_000.0))
+    cfg.ml_short_max_squeeze_vol_ratio = float(sig.get("ml_short_max_squeeze_vol_ratio", 2.5))
     cfg.ml_model_type = str(sig.get("ml_model_type", cfg.ml_model_type))
     cfg.ml_standardize = bool(sig.get("ml_standardize", cfg.ml_standardize))
     cfg.ml_clip = bool(sig.get("ml_clip", cfg.ml_clip))

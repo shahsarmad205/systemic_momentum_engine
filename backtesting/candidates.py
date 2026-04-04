@@ -86,8 +86,35 @@ def build_ranked_candidates(
         if next_idx >= len(trading_days):
             continue
 
-        # Dynamic holding — mirror Backtester._get_holding_days
-        if not config.dynamic_holding_enabled:
+        # Tactical Short Efficiency: Asymmetric Thresholds, Liquidity & Squeeze Protection
+        if signal_str == "Bearish":
+            # 1) Higher Conviction for Shorts
+            ms_short = float(getattr(config, "ml_short_min_signal_strength", 0.6))
+            if abs(adj_score) < ms_short:
+                continue
+                
+            # 2) Relative Overextension Gate (Must be UP more than SPY)
+            oe_threshold = float(getattr(config, "ml_short_overextension_threshold", 0.05))
+            rel_ret = sig_row.get("rel_ret_5d", 0.0)
+            if rel_ret < oe_threshold:
+                continue
+
+            # 3) Liquidity Floor (Avoid low-float traps)
+            min_liq = float(getattr(config, "ml_short_min_liquidity_usd", 20_000_000.0))
+            avg_liq = float(sig_row.get("avg_dollar_volume_20d", 0.0))
+            if avg_liq < min_liq:
+                continue
+
+            # 4) Squeeze Protection (Avoid entering already-squeezing names)
+            max_squeeze = float(getattr(config, "ml_short_max_squeeze_vol_ratio", 2.5))
+            vol_exp = float(sig_row.get("vol_expansion", 1.0))
+            if vol_exp > max_squeeze:
+                continue
+
+        # Dynamic holding / Asymmetric Holding Period
+        if signal_str == "Bearish":
+            holding_days = int(getattr(config, "ml_short_holding_period_days", 2))
+        elif not config.dynamic_holding_enabled:
             holding_days = config.holding_period_days
         else:
             abs_s = abs(adj_score)
@@ -101,10 +128,9 @@ def build_ranked_candidates(
                 holding_days = config.holding_period_by_signal.get(signal_str, config.holding_period_days)
 
         # Crisis regime: shorten max holding window.
-        # (Positions still can close earlier via stop-loss/take-profit.)
         if regime == "Crisis":
             holding_days = min(int(holding_days), 3)
-        # Bear regime: cap max holding (weak edge / faster turnover).
+        # Bear regime: cap max holding.
         if regime == "Bear":
             bear_cap = int(getattr(config, "bear_max_holding_days", 3) or 3)
             holding_days = min(int(holding_days), max(1, bear_cap))
