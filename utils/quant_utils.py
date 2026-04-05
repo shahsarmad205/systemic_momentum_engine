@@ -1,9 +1,15 @@
+# region imports
+from __future__ import annotations
+try:
+    from AlgorithmImports import *
+except ImportError:
+    pass
+# endregion
 """
 Consolidated Quantitative and Risk Utilities.
 Combines returns loading, volatility scaling, risk loading, and sector aggregates.
 """
 
-from __future__ import annotations
 from pathlib import Path
 from typing import Any
 import numpy as np

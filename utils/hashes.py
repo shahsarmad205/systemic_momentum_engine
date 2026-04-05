@@ -1,4 +1,10 @@
+# region imports
 from __future__ import annotations
+try:
+    from AlgorithmImports import *
+except ImportError:
+    pass
+# endregion
 
 import hashlib
 from pathlib import Path

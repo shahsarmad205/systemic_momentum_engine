@@ -15,13 +15,7 @@ import numpy as np
 import pandas as pd
 
 
-# Avoid importing main; replicate signal classification
-def _classify_signal(adjusted_score: float) -> str:
-    if adjusted_score > 0:
-        return "Bullish"
-    if adjusted_score < 0:
-        return "Bearish"
-    return "Neutral"
+# Avoid importing main; replication at top of class FactorNeutralizer
 
 
 def _row_to_dict(row: Any) -> dict:
@@ -49,6 +43,8 @@ class FactorNeutralizer:
         rolling_window: int = 60,
         min_observations: int = 10,
         dev_mode_limit: int | None = None,
+        score_direction: float = 1.0,
+        min_signal_strength: float = 0.001,
     ):
         self.neutralize_market_beta = neutralize_market_beta
         self.neutralize_sector = neutralize_sector
@@ -59,7 +55,17 @@ class FactorNeutralizer:
         self.rolling_window = int(rolling_window)
         self.min_observations = int(min_observations)
         self.dev_mode_limit = dev_mode_limit
+        self.score_direction = score_direction
+        self.min_signal_strength = min_signal_strength
         self._ff_cache: pd.DataFrame | None = None
+
+    def _classify_signal(self, adjusted_score: float) -> str:
+        """Sign-aware classification using min_signal_strength."""
+        if adjusted_score > self.min_signal_strength:
+            return "Bullish"
+        if adjusted_score < -self.min_signal_strength:
+            return "Bearish"
+        return "Neutral"
 
     def _compute_market_beta(
         self,
@@ -295,7 +301,7 @@ class FactorNeutralizer:
             else:
                 res = float(row_dict.get("adjusted_score", 0.0))
             row_dict["adjusted_score"] = round(res, 6)
-            row_dict["signal"] = _classify_signal(res)
+            row_dict["signal"] = self._classify_signal(res)
             out.append((ticker, row_dict))
         return out, diagnostics
 

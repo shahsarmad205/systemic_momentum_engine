@@ -1,3 +1,10 @@
+# region imports
+from __future__ import annotations
+try:
+    from AlgorithmImports import *
+except ImportError:
+    pass
+# endregion
 """
 FeatureEngine facade for single-name OHLCV features.
 
@@ -6,7 +13,6 @@ continue to use ``FeatureEngine.build_features`` while benefiting
 from the richer feature set.
 """
 
-from __future__ import annotations
 
 import pandas as pd
 

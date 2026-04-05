@@ -198,6 +198,7 @@ class SignalEngine:
         spy_df: pd.DataFrame | None = None,
         vix_df: pd.DataFrame | None = None,
         vix3m_df: pd.DataFrame | None = None,
+        panel_features: pd.DataFrame | None = None, # Pillar 29: Joint-Panel Feature Injection
     ) -> pd.DataFrame:
         """
         Compute trend_score, confidence, adjusted_score, signal for every bar.
@@ -213,6 +214,9 @@ class SignalEngine:
         if features.empty:
             logger.warning("SignalEngine: build_features returned empty frame; no signals.")
             return pd.DataFrame()
+
+        # Diagnostic features for ML/Ensemble analysis (defined later if in ML mode)
+        model_features = pd.DataFrame(index=features.index)
 
         ix = features.index
         if sector_relative_20d is not None:
@@ -287,6 +291,7 @@ class SignalEngine:
         rolling_vol_5 = pd.to_numeric(vol_struct["vol_5d"], errors="coerce").fillna(0.0)
         rolling_vol_10 = daily_ret.rolling(10).std()
         rolling_vol_20 = daily_ret.rolling(20).std()
+        rolling_vol_60 = daily_ret.rolling(60).std()
         vol_of_vol_20 = pd.to_numeric(vol_struct["vol_of_vol_20"], errors="coerce").fillna(0.0)
         jump_indicator = pd.to_numeric(vol_struct["jump_indicator"], errors="coerce").fillna(0.0)
         vol_ma20 = volume.rolling(20).mean()
@@ -538,6 +543,35 @@ class SignalEngine:
                 }
             if self._ensemble_models_cache is None:
                 self._ensemble_models_cache = load_ensemble_models(ens_cfg)
+
+            # Pillar 29: Institutional Re-sequencing — Compute CAPM before ML model call
+            signal_df_tmp = pd.DataFrame(index=features.index)
+            try:
+                from features.capm_features import compute_capm_features
+                if spy_df is not None and not spy_df.empty and "Close" in spy_df.columns:
+                    spy_ret = spy_df["Close"].reindex(stock_data.index).ffill().pct_change()
+                    stock_ret = stock_data["Close"].pct_change()
+                    capm_df = compute_capm_features(stock_ret, spy_ret)
+                    for col in ("capm_alpha", "capm_beta", "capm_residual_vol"):
+                        if col in capm_df.columns:
+                            signal_df_tmp[col] = capm_df[col].reindex(features.index).ffill().bfill()
+                else:
+                    for col in ("capm_alpha", "capm_beta", "capm_residual_vol"):
+                        signal_df_tmp[col] = 0.0 if col != "capm_beta" else 1.0
+            except Exception:
+                for col in ("capm_alpha", "capm_beta", "capm_residual_vol"):
+                    signal_df_tmp[col] = 0.0 if col != "capm_beta" else 1.0
+            if panel_features is not None:
+                # Pillar 29: Override isolation features with Joint-Panel Normalised features
+                pf = panel_features.reindex(features.index).ffill().fillna(0.0)
+                ret_5d = pf.get("ret_5d", ret_5d)
+                ret_10d = pf.get("ret_10d", ret_10d)
+                rolling_vol_20 = pf.get("rolling_vol_20", rolling_vol_20)
+                rolling_vol_60 = pf.get("rolling_vol_60", daily_ret.rolling(60).std().fillna(0.0))
+                volume_zscore = pf.get("volume_zscore", volume_zscore)
+                vix_zscore_series = pf.get("vix_zscore", vix_zscore_series)
+                vol_spike_series = pf.get("vol_spike", vol_spike_series)
+
             ret_20d = close.pct_change(20)
             ret_60d = close.pct_change(60)
             model_features = pd.DataFrame(
@@ -554,13 +588,14 @@ class SignalEngine:
                     "rolling_vol_5": rolling_vol_5.fillna(0.0),
                     "rolling_vol_10": rolling_vol_10.fillna(0.0),
                     "rolling_vol_20": rolling_vol_20.fillna(0.0),
+                    "rolling_vol_60": rolling_vol_60.fillna(0.0),
                     "vol_of_vol_20": vol_of_vol_20.fillna(0.0),
                     "jump_indicator": jump_indicator.fillna(0.0),
                     "vol_rank": vr_series.fillna(0.5),
                     "relative_volume": relative_volume.fillna(1.0),
                     "volume_zscore": volume_zscore.fillna(0.0),
                     "rolling_corr_market_20": rolling_corr_market_20.fillna(0.0),
-                    "capm_beta": capm_beta_series.fillna(0.0),
+                    "capm_beta": signal_df_tmp["capm_beta"].fillna(0.0),
                     "vix_zscore": vix_zscore_series.fillna(0.0),
                     "vol_spike": vol_spike_series.fillna(0.0),
                     "vix_term_zscore": vix_term_zscore_series.fillna(0.0),
@@ -597,6 +632,7 @@ class SignalEngine:
                          / stock_data["Volume"].where(daily_ret.shift(1) > 0, 0).rolling(20).sum().replace(0, np.nan))
                         .fillna(1.0)
                     ).fillna(1.0),
+                    "capm_residual_vol": signal_df_tmp["capm_residual_vol"].fillna(0.0),
                     "rel_ret_5d": (
                         ret_5d - (
                             spy_df["Close"].pct_change(5).shift(1).reindex(features.index).fillna(0.0)
@@ -680,8 +716,8 @@ class SignalEngine:
                 + getattr(lw, "w_capm_beta", 0) * capm_beta_series.fillna(0.0)
             )
             scale = getattr(lw, "score_scale", 1.0)
-            direction = getattr(lw, "score_direction", 1)
-            adjusted = (raw * scale) * direction
+            # score_direction is handled globally at the end of the function to avoid double-inversion
+            adjusted = (raw * scale)
             if adjusted.isna().all():
                 logger.warning("SignalEngine: adjusted_score (learned) is all NaN.")
             else:
@@ -765,48 +801,57 @@ class SignalEngine:
         else:
             bull_thresh, bear_thresh = base, -base
 
-        # Convention: high score → Bullish (long); low score → Bearish (short).
-        signal_df["signal"] = "Neutral"
-        signal_df.loc[signal_df[score_col] > bull_thresh, "signal"] = "Bullish"
-        signal_df.loc[signal_df[score_col] < bear_thresh, "signal"] = "Bearish"
+        # Pillar 28: Institutional Hysteresis (High-Bar for Entry, Low-Bar for Exit)
+        # Require 'bull_thresh' to enter, but only exit if we drop below 'exit_thresh'.
+        exit_mult = 0.6
+        if hasattr(self, "config") and self.config:
+            exit_mult = float(getattr(self.config, "hysteresis_exit_multiplier", 0.6))
+        bull_exit = bull_thresh * exit_mult
+        bear_exit = bear_thresh * exit_mult if bear_thresh < 0 else bear_thresh * (1.0 + (1.0 - exit_mult))
+
+        signals = []
+        last_sig = "Neutral"
+        scores = signal_df[score_col].values
+        
+        for val in scores:
+            new_sig = "Neutral"
+            if last_sig == "Bullish":
+                if val > bull_exit: new_sig = "Bullish"
+                elif val < bear_thresh: new_sig = "Bearish"
+            elif last_sig == "Bearish":
+                if val < bear_exit: new_sig = "Bearish"
+                elif val > bull_thresh: new_sig = "Bullish"
+            else: # Neutral
+                if val > bull_thresh: new_sig = "Bullish"
+                elif val < bear_thresh: new_sig = "Bearish"
+            
+            signals.append(new_sig)
+            last_sig = new_sig
+
+        signal_df["signal"] = signals
+        if len(scores) > 0:
+            logger.info("DIAGNOSTIC: %s raw scores: max=%.5f, mean=%.5f, [threshold=%.4f]", signal_df.index[0], float(np.max(scores)), float(np.mean(scores)), float(bull_thresh))
         signal_df["bull_threshold"] = bull_thresh
         signal_df["bear_threshold"] = bear_thresh
+        signal_df["bull_exit_threshold"] = bull_exit
+        signal_df["bear_exit_threshold"] = bear_exit
 
         counts = signal_df["signal"].value_counts(dropna=False).to_dict()
         logger.debug(
-            "SignalEngine: classification using score_col=%s, bull_thresh=%.4f, bear_thresh=%.4f, counts=%s",
-            score_col,
-            float(bull_thresh),
-            float(bear_thresh),
-            counts,
+            "SignalEngine: hysteresis classification using score_col=%s, bull_thresh=%.4f (exit=%.4f), bear_thresh=%.4f (exit=%.4f), counts=%s",
+            score_col, float(bull_thresh), float(bull_exit), float(bear_thresh), float(bear_exit), counts,
         )
 
         abs_adj = adjusted.clip(-1.0, 1.0).abs()
         confidence_numeric = abs_adj.clip(lower=0.3, upper=0.95)
         signal_df["confidence_numeric"] = confidence_numeric
 
-        # CAPM: Jensen's alpha (z-scored), beta, residual vol (rolling 60d vs SPY)
-        try:
-            from features.capm_features import compute_capm_features
-            from utils.market_data import get_ohlcv as _get_ohlcv
-            stock_ret = daily_ret
-            ix = features.index
-            start = ix.min().strftime("%Y-%m-%d") if hasattr(ix.min(), "strftime") else str(ix.min())[:10]
-            end = ix.max().strftime("%Y-%m-%d") if hasattr(ix.max(), "strftime") else str(ix.max())[:10]
-            if spy_df is not None and not spy_df.empty and "Close" in spy_df.columns:
-                spy_ret = spy_df["Close"].pct_change()
-                capm_df = compute_capm_features(stock_ret, spy_ret)
-                for col in ("capm_alpha", "capm_beta", "capm_residual_vol"):
-                    if col in capm_df.columns:
-                        signal_df[col] = capm_df[col].reindex(signal_df.index)
+        # Pillar 29: Assign CAPM features to signal_df after model call
+        for col in ("capm_alpha", "capm_beta", "capm_residual_vol"):
+            if col in signal_df_tmp.columns:
+                signal_df[col] = signal_df_tmp[col]
             else:
-                signal_df["capm_alpha"] = np.nan
-                signal_df["capm_beta"] = 1.0
-                signal_df["capm_residual_vol"] = np.nan
-        except Exception:
-            signal_df["capm_alpha"] = np.nan
-            signal_df["capm_beta"] = 1.0
-            signal_df["capm_residual_vol"] = np.nan
+                signal_df[col] = 0.0 if col != "capm_beta" else 1.0
 
         # IPO Warm-up Mask: do not trade during the first HISTORY_BUFFER_DAYS of data.
         # This ensures that lagging indicators (like 200-day MAs) have stabilized.

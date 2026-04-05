@@ -216,6 +216,7 @@ def main() -> int:
 
     cfg = _read_config(cfg_path)
     rt = _load_retraining(cfg)
+    bt = cfg.get("backtest", {}) or {}
     log_path = Path(str(rt.get("log_path", "output/live/retrain.log")))
     if not log_path.is_absolute():
         log_path = _ROOT / log_path
@@ -230,7 +231,15 @@ def main() -> int:
     model_type = (args.model_type or rt.get("model_type", "learned_weights") or "learned_weights").strip().lower()
     train_end = str(args.as_of).strip()
     if not train_end:
-        train_end = (datetime.now().date() - timedelta(days=1)).isoformat()
+        # Pillar 28: Prioritize retraining end-date then backtest end-date
+        rt_end = rt.get("train_end_date")
+        cfg_end = bt.get("end_date")
+        if rt_end:
+            train_end = str(rt_end)
+        elif cfg_end:
+            train_end = str(cfg_end)
+        else:
+            train_end = (datetime.now().date() - timedelta(days=1)).isoformat()
 
     train_start_floor = str(rt.get("train_start_date", "2018-01-01") or "2018-01-01").strip()
     window_years = float(rt.get("train_window_years", 5) or 5)

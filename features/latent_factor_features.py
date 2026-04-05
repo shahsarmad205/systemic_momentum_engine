@@ -1,3 +1,10 @@
+# region imports
+from __future__ import annotations
+try:
+    from AlgorithmImports import *
+except ImportError:
+    pass
+# endregion
 """
 Latent factor extraction from a numeric feature matrix.
 
@@ -6,7 +13,6 @@ features into a small number of latent factors, which can be used
 as higher-level risk or style dimensions.
 """
 
-from __future__ import annotations
 
 import warnings
 

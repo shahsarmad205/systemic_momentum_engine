@@ -1,3 +1,10 @@
+# region imports
+from __future__ import annotations
+try:
+    from AlgorithmImports import *
+except ImportError:
+    pass
+# endregion
 """
 CAPM features: Jensen's alpha, market beta, and residual volatility.
 
@@ -8,7 +15,6 @@ Rolling 60-day regression of stock returns on SPY returns:
 Alpha is then z-scored over trailing 252 days.
 """
 
-from __future__ import annotations
 
 import numpy as np
 import pandas as pd

@@ -1,15 +1,62 @@
+# region imports
+from __future__ import annotations
+try:
+    from AlgorithmImports import *
+except ImportError:
+    pass
+# endregion
 """
 Consolidated Data Governance Utilities.
 Combines data contracts, quality checks, and lineage tracking.
 """
 
-from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 import numpy as np
 import pandas as pd
 from pandas.api import types as pdt
+
+# --- Data Quality Validations (Pillar 29) ---
+def is_cache_fresh(path: str | Path, required_end_date: str | pd.Timestamp) -> bool:
+    """Check if cached data covers required date range. Pillar 29."""
+    try:
+        df = pd.read_parquet(path)
+        cached_end = pd.to_datetime(df.index).max()
+        required = pd.to_datetime(required_end_date)
+        return cached_end >= required - pd.Timedelta(days=5)
+    except Exception:
+        return False
+
+def validate_ticker_history(df: pd.DataFrame, ticker: str, required_years: int = 10) -> bool:
+    """Flag tickers with insufficient history. Pillar 29."""
+    if df is None or df.empty:
+        return False
+    years = (df.index.max() - df.index.min()).days / 365.25
+    if years < required_years:
+        print(f"WARNING: {ticker} only has {years:.1f} years of history (required={required_years})")
+        return False
+    return True
+
+def validate_ohlcv(df: pd.DataFrame, ticker: str) -> bool:
+    """Check for data quality issues (nulls, extreme moves). Pillar 29."""
+    if df is None or df.empty: return False
+    issues = []
+    null_pct = df.isnull().mean()
+    for col in ['open','high','low','close','volume']:
+        if col in df.columns and null_pct[col] > 0.01:
+            issues.append(f"{col}: {null_pct[col]*100:.1f}% nulls")
+    
+    # Check for price anomalies (>50% move)
+    if 'close' in df.columns:
+        ret = df['close'].pct_change().abs()
+        extreme = (ret > 0.5).sum()
+        if extreme > 0:
+            issues.append(f"{extreme} days with >50% price move")
+    
+    if issues:
+        print(f"WARNING {ticker} Data Quality: {', '.join(issues)}")
+    return len(issues) == 0
 
 # --- Data Contracts ---
 def max_ohlcv_cache_bar_date(cache_dir: Path) -> pd.Timestamp | None:

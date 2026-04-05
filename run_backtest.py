@@ -41,6 +41,7 @@ from backtesting import (
     run_walk_forward,
 )
 from config import DEV_MODE, apply_dev_mode, get_effective_tickers, setup_logging
+from utils.universe import load_universe
 
 # ------------------------------------------------------------------
 # CLI
@@ -414,20 +415,8 @@ def _run_walk_forward(config, tickers):
 # ------------------------------------------------------------------
 
 def _resolve_tickers(config):
-    """Return tickers from config or CLI; fallback to main.TICKERS. In DEV_MODE, capped to 10."""
-    try:
-        from main import TICKERS
-        fallback = list(TICKERS)
-    except Exception:
-        fallback = [
-            "AAPL", "MSFT", "NVDA", "AMZN", "GOOG", "META", "TSLA",
-            "JPM", "V", "JNJ", "WMT", "PG", "XOM", "UNH", "HD",
-            "BAC", "MA", "ABBV", "PFE", "KO", "PEP", "MRK", "AVGO",
-            "COST", "TMO", "CSCO", "ACN", "MCD", "NKE", "ADBE",
-            "CRM", "AMD", "INTC", "ORCL", "IBM", "GS", "CAT", "BA",
-            "SPY", "QQQ", "IWM", "DIA", "XLK", "XLF", "VTI",
-        ]
-    return get_effective_tickers(config.tickers or [], fallback)
+    """Return tickers resolved dynamically from the universe config or CLI. Pillar 29."""
+    return load_universe(config)
 
 
 def _print_outputs_produced(config, result, outputs_written: list) -> None:

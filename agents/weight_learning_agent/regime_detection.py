@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Regime Detection for Weight Learning
 ======================================
@@ -13,7 +14,6 @@ Regimes:
 When multiple conditions could apply, HighVol takes precedence, then Bull/Bear.
 """
 
-from __future__ import annotations
 
 import pandas as pd
 

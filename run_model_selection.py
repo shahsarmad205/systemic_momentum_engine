@@ -40,6 +40,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import yaml
+from utils.universe import load_universe
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -500,8 +501,7 @@ def check_feature_leakage(
 
     as_of = pd.Timestamp(as_of_date)
     cfg = _read_config()
-    cfg_tickers = cfg.get("tickers", []) if isinstance(cfg, dict) else []
-    chosen = list(tickers or cfg_tickers[:3])
+    chosen = load_universe(cfg)
     if not chosen:
         print("FAIL: no tickers provided and config has no tickers.")
         return 1
@@ -721,11 +721,11 @@ def _build_models() -> list[tuple[str, Any, bool, str]]:
     )
     models.append(
         (
-            "RidgeClassifier",
+            "RidgeLogistic",
             Pipeline(
                 [
                     ("scaler", RobustScaler()),
-                    ("model", RidgeClassifier(alpha=10.0)),
+                    ("model", LogisticRegression(C=0.1, penalty="l2", max_iter=1000)),
                 ]
             ),
             False,
@@ -858,6 +858,24 @@ def _build_models() -> list[tuple[str, Any, bool, str]]:
     return models
 
 
+def _weighted_recency_mean(vals: np.ndarray, decay_base: float = 0.95) -> float:
+    """
+    Calculates a weighted mean favoring the most recent walk-forward windows.
+    Windows are sorted chronologically in the 'wm' list, so earlier windows
+    get exponentially lower weights.
+    """
+    mask = np.isfinite(vals)
+    if not np.any(mask):
+        return float("nan")
+    n = len(vals)
+    # Power weights: recent = 1, prev = 0.95, etc. (Indices 0..n-1)
+    # Note: 'wm' is appended in order, so index n-1 is the most recent.
+    weights = np.array([decay_base ** (n - 1 - i) for i in range(n)], dtype=float)
+    m_vals = vals[mask]
+    m_weights = weights[mask]
+    return float(np.sum(m_vals * m_weights) / np.sum(m_weights))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default="backtest_config.yaml")
@@ -957,7 +975,7 @@ def main() -> None:
         )
 
     cfg = _read_config(args.config)
-    tickers = list(cfg.get("tickers", []) or [])
+    tickers = load_universe(cfg)
     if int(args.limit_tickers or 0) > 0:
         tickers = tickers[: int(args.limit_tickers)]
     bt = cfg.get("backtest", {}) or {}
@@ -968,6 +986,11 @@ def main() -> None:
     feature_subset = [str(c).strip() for c in feature_subset if str(c).strip()]
     short_feature_subset = feature_sel.get("short_feature_subset", []) or []
     short_feature_subset = [str(c).strip() for c in short_feature_subset if str(c).strip()]
+
+    exe_cfg = cfg.get("execution", {}) or {}
+    long_only = exe_cfg.get("long_only", False)
+    enable_shorts = exe_cfg.get("enable_shorts", True)
+    do_shorts = enable_shorts and not long_only
 
     # Model-selection / evaluation settings (CLI overrides config).
     horizon = int(args.horizon) if args.horizon is not None else int(ms_cfg.get("lookahead_horizon_days", 5) or 5)
@@ -1315,14 +1338,15 @@ def main() -> None:
             oos_df, max_positions=int(max_positions)
         )
 
+        decay_val = float(getattr(cfg.model_selection, "selection_weight_decay", 0.95)) if hasattr(cfg, "model_selection") else 0.95
         row = {
             "model_name": name,
             "model_kind": model_kind,
-            "oos_sharpe_mean": float(np.nanmean(sharpe_vals)),
+            "oos_sharpe_mean": _weighted_recency_mean(sharpe_vals, decay_base=decay_val),
             "oos_sharpe_std": float(np.nanstd(sharpe_vals, ddof=1)) if len(wm) > 1 else 0.0,
-            "oos_ic_mean": float(np.nanmean(ic_vals)),
+            "oos_ic_mean": _weighted_recency_mean(ic_vals, decay_base=decay_val),
             "oos_ic_std": float(np.nanstd(ic_vals, ddof=1)) if len(wm) > 1 else 0.0,
-            "oos_dir_acc_mean": float(np.nanmean(acc_vals)),
+            "oos_dir_acc_mean": _weighted_recency_mean(acc_vals, decay_base=decay_val),
             "oos_dir_acc_std": float(np.nanstd(acc_vals, ddof=1)) if len(wm) > 1 else 0.0,
             "oos_sharpe_chained": float(oos_sharpe_chained),
             "oos_cagr_chained": float(oos_cagr_chained),
@@ -1508,20 +1532,37 @@ def main() -> None:
     print()
     print(f"Saved report: {report_path}")
 
-    # --- DUAL WINNER SELECTION ---
+    # --- ENSEMBLE WINNER SELECTION (Pillar 24) ---
+    top_n = int(args.get("ensemble_size", 5)) if isinstance(args, dict) else 5
+    
     long_kinds = ["classifier", "regressor"]
     short_kinds = ["short_classifier"]
 
-    long_pool = report[report["model_kind"].isin(long_kinds)].reset_index(drop=True)
-    short_pool = report[report["model_kind"].isin(short_kinds)].reset_index(drop=True)
+    def _get_consistent_pool(full_pool, kinds, size):
+        if full_pool.empty: return full_pool
+        # Type-Consistency Lockdown: Anchor to the #1 winner's type
+        anchor_kind = full_pool.iloc[0]["model_kind"]
+        consistent = full_pool[full_pool["model_kind"] == anchor_kind].head(size)
+        return consistent.reset_index(drop=True)
 
-    best_long_name = str(long_pool.loc[0, "model_name"]) if not long_pool.empty else None
-    best_short_name = str(short_pool.loc[0, "model_name"]) if not short_pool.empty else None
+    long_pool = _get_consistent_pool(report[report["model_kind"].isin(long_kinds)], long_kinds, top_n)
+    short_pool = _get_consistent_pool(report[report["model_kind"].isin(short_kinds)], short_kinds, top_n) if do_shorts else pd.DataFrame()
 
-    if best_long_name:
-        print(f"Selected best LONG model by {args.select_metric}: {best_long_name}")
-    if best_short_name:
-        print(f"Selected best SHORT model by {args.select_metric}: {best_short_name}")
+    def _get_ensemble_specs(pool):
+        if pool.empty: return [], []
+        names = pool["model_name"].tolist()
+        # Weights normalized by the selection metric (Sharpe)
+        metrics = pd.to_numeric(pool["_selection_metric"], errors="coerce").fillna(0.01).values
+        weights = metrics / metrics.sum() if metrics.sum() > 0 else np.ones(len(metrics))/len(metrics)
+        return names, weights.tolist()
+
+    best_long_names, long_weights = _get_ensemble_specs(long_pool)
+    best_short_names, short_weights = _get_ensemble_specs(short_pool)
+
+    if best_long_names:
+        print(f"Selected Top-{len(best_long_names)} LONG Ensemble: {', '.join(best_long_names)}")
+    if best_short_names:
+        print(f"Selected Top-{len(best_short_names)} SHORT Ensemble: {', '.join(best_short_names)}")
 
     # Final full-dataset training: replicate the robust sanitization logic
     # (Shared X/y matrices for all winning fits)
@@ -1539,82 +1580,63 @@ def main() -> None:
     y_all_reg = y_all_reg.copy()
     y_all_down = y_all_down.copy()
 
-    # Shared fit/save helper to avoid duplication
-    def _train_and_save(b_name, b_label):
-        if not b_name:
+    # Ensemble training helper (Pillar 24)
+    def _train_and_save_ensemble(names, weights, b_label):
+        if not names:
             return
         
-        spec = {n: (m, p, k) for (n, m, p, k) in models}.get(b_name)
-        if spec is None:
-            if b_name == "LearnedWeightsBaseline" and args.compare_baseline:
-                path = out_dir / f"best_{b_label}_model.pkl"
-                artifact = {
-                    "model_name": b_name,
-                    "model_type": f"learned_weights_{b_label}",
-                    "horizon_days": int(horizon),
-                    "target": "forward_return",
-                    "trained_at": pd.Timestamp.utcnow().isoformat(),
-                    "weights_path": "output/learned_weights.json",
-                    "scaler_path": "output/learned_weights_scaler.json",
-                    "estimator": None,
-                }
-                with open(path, "wb") as fh:
-                    pickle.dump(artifact, fh)
-                print(f"Saved best {b_label} model (baseline): {path}")
-                return
-            else:
-                print(f"WARNING: winner {b_name} not found in model list.")
-                return
+        from sklearn.ensemble import VotingClassifier, VotingRegressor
+        from sklearn.base import clone
+        
+        estimators = []
+        for name in names:
+            spec = {n: (m, p, k) for (n, m, p, k) in models}.get(name)
+            if spec:
+                estimators.append((name, clone(spec[0])))
+        
+        if not estimators:
+            print(f"WARNING: No valid estimators found for {b_label} ensemble.")
+            return
 
-        b_model, _b_uses_proba, b_kind = spec
-        if b_kind == "regressor":
+        # Determine ensemble kind from the leader
+        leader_name = names[0]
+        leader_kind = {n: k for (n, m, p, k) in models}.get(leader_name, "classifier")
+        
+        if leader_kind == "regressor":
+            ensemble = VotingRegressor(estimators=estimators, weights=weights[:len(estimators)])
             y_fit = y_all_reg
-        elif b_kind == "short_classifier":
+        elif leader_kind == "short_classifier":
+            ensemble = VotingClassifier(estimators=estimators, voting="soft", weights=weights[:len(estimators)])
             y_fit = y_all_down
         else:
+            ensemble = VotingClassifier(estimators=estimators, voting="soft", weights=weights[:len(estimators)])
             y_fit = y_all_cls
 
-        print(f"Training best {b_label} model ({b_name}) on full dataset...")
-        from sklearn.base import clone
-        final_fit = clone(b_model)
+        print(f"Training best {b_label} ENSEMBLE ({len(estimators)} models) on full dataset...")
         with np.errstate(all="ignore"):
-            final_fit.fit(X_all, y_fit)
+            ensemble.fit(X_all, y_fit)
         
         path = out_dir / f"best_{b_label}_model.pkl"
         artifact = {
-            "model_name": b_name,
-            "model_type": b_kind,
+            "model_name": f"Top{len(estimators)}_Ensemble",
+            "model_type": leader_kind,
+            "ensemble_members": names,
+            "ensemble_weights": weights,
             "horizon_days": int(horizon),
             "target": "forward_return",
             "feature_columns": [c for c in feat_cols if c not in all_singular],
             "trained_at": pd.Timestamp.utcnow().isoformat(),
-            "estimator": final_fit,
+            "estimator": ensemble,
         }
         with open(path, "wb") as fh:
             pickle.dump(artifact, fh)
-        print(f"Saved best {b_label} model: {path}")
+        print(f"Saved best {b_label} ensemble: {path}")
 
-        meta_path = out_dir / f"best_{b_label}_model.meta.json"
-        meta = {
-            "model_name": b_name,
-            "horizon_days": int(horizon),
-            "target": "forward_return",
-            "n_rows": int(len(df)),
-            "n_tickers": int(df["ticker"].nunique()),
-            "feature_columns": feat_cols,
-            "selected_by": args.select_metric,
-            "windows": [
-                {"train_start": w.train_start, "train_end": w.train_end, "test_start": w.test_start, "test_end": w.test_end}
-                for w in all_window_details.get(b_name, [])
-            ],
-        }
-        meta_path.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
-        print(f"Saved metadata: {meta_path}")
-
-    # Execute training for both pillars
+    # Execute training for both pillars (Ensemble mode)
     t_start = time.perf_counter()
-    _train_and_save(best_long_name, "long")
-    _train_and_save(best_short_name, "short")
+    _train_and_save_ensemble(best_long_names, long_weights, "long")
+    if do_shorts:
+        _train_and_save_ensemble(best_short_names, short_weights, "short")
     t_end = time.perf_counter()
     print(f"Total winning model training time: {t_end - t_start:.2f}s")
 

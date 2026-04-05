@@ -43,7 +43,7 @@ def download_stock_data(
     period: str = "2y",
     start: str | None = None,
     end: str | None = None,
-    provider: str = "yahoo",
+    provider: str = "lean",
     use_cache: bool = True,
 ):
     end_dt = pd.Timestamp(end) if end is not None else pd.Timestamp.today().normalize()

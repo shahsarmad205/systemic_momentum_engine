@@ -1,3 +1,10 @@
+# region imports
+from __future__ import annotations
+try:
+    from AlgorithmImports import *
+except ImportError:
+    pass
+# endregion
 """
 Global live trading gates (kill switch) for execution.
 
@@ -5,7 +12,6 @@ Global live trading gates (kill switch) for execution.
 - Environment variable (default ``TRADING_HALTED``): if set to 1/true/yes/on, live broker orders are blocked.
 """
 
-from __future__ import annotations
 
 import json
 import os

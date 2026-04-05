@@ -1,0 +1,214 @@
+{
+  "model_name": "GradientBoostingClassifier",
+  "horizon_days": 1,
+  "target": "forward_return",
+  "n_rows": 24911,
+  "n_tickers": 9,
+  "feature_columns": [
+    "cs_momentum_percentile",
+    "ret_5d",
+    "dist_from_52w_high",
+    "ret_10d",
+    "capm_residual_vol",
+    "ret_20d",
+    "vol_expansion",
+    "rsi_overbought",
+    "f_trend",
+    "rolling_vol_20",
+    "rsi_14",
+    "ret_1d",
+    "vol_ratio_5_20",
+    "down_up_vol_ratio",
+    "earnings_surprise",
+    "momentum_acceleration"
+  ],
+  "selected_by": "oos_sharpe_chained",
+  "windows": [
+    {
+      "train_start": "2013-01-01",
+      "train_end": "2015-12-31",
+      "test_start": "2016-01-01",
+      "test_end": "2016-03-31"
+    },
+    {
+      "train_start": "2013-04-01",
+      "train_end": "2016-03-31",
+      "test_start": "2016-04-01",
+      "test_end": "2016-06-30"
+    },
+    {
+      "train_start": "2013-07-01",
+      "train_end": "2016-06-30",
+      "test_start": "2016-07-01",
+      "test_end": "2016-09-30"
+    },
+    {
+      "train_start": "2013-10-01",
+      "train_end": "2016-09-30",
+      "test_start": "2016-10-01",
+      "test_end": "2016-12-31"
+    },
+    {
+      "train_start": "2014-01-01",
+      "train_end": "2016-12-31",
+      "test_start": "2017-01-01",
+      "test_end": "2017-03-31"
+    },
+    {
+      "train_start": "2014-04-01",
+      "train_end": "2017-03-31",
+      "test_start": "2017-04-01",
+      "test_end": "2017-06-30"
+    },
+    {
+      "train_start": "2014-07-01",
+      "train_end": "2017-06-30",
+      "test_start": "2017-07-01",
+      "test_end": "2017-09-30"
+    },
+    {
+      "train_start": "2014-10-01",
+      "train_end": "2017-09-30",
+      "test_start": "2017-10-01",
+      "test_end": "2017-12-31"
+    },
+    {
+      "train_start": "2015-01-01",
+      "train_end": "2017-12-31",
+      "test_start": "2018-01-01",
+      "test_end": "2018-03-31"
+    },
+    {
+      "train_start": "2015-04-01",
+      "train_end": "2018-03-31",
+      "test_start": "2018-04-01",
+      "test_end": "2018-06-30"
+    },
+    {
+      "train_start": "2015-07-01",
+      "train_end": "2018-06-30",
+      "test_start": "2018-07-01",
+      "test_end": "2018-09-30"
+    },
+    {
+      "train_start": "2015-10-01",
+      "train_end": "2018-09-30",
+      "test_start": "2018-10-01",
+      "test_end": "2018-12-31"
+    },
+    {
+      "train_start": "2016-01-01",
+      "train_end": "2018-12-31",
+      "test_start": "2019-01-01",
+      "test_end": "2019-03-31"
+    },
+    {
+      "train_start": "2016-04-01",
+      "train_end": "2019-03-31",
+      "test_start": "2019-04-01",
+      "test_end": "2019-06-30"
+    },
+    {
+      "train_start": "2016-07-01",
+      "train_end": "2019-06-30",
+      "test_start": "2019-07-01",
+      "test_end": "2019-09-30"
+    },
+    {
+      "train_start": "2016-10-01",
+      "train_end": "2019-09-30",
+      "test_start": "2019-10-01",
+      "test_end": "2019-12-31"
+    },
+    {
+      "train_start": "2017-01-01",
+      "train_end": "2019-12-31",
+      "test_start": "2020-01-01",
+      "test_end": "2020-03-31"
+    },
+    {
+      "train_start": "2017-04-01",
+      "train_end": "2020-03-31",
+      "test_start": "2020-04-01",
+      "test_end": "2020-06-30"
+    },
+    {
+      "train_start": "2017-07-01",
+      "train_end": "2020-06-30",
+      "test_start": "2020-07-01",
+      "test_end": "2020-09-30"
+    },
+    {
+      "train_start": "2017-10-01",
+      "train_end": "2020-09-30",
+      "test_start": "2020-10-01",
+      "test_end": "2020-12-31"
+    },
+    {
+      "train_start": "2018-01-01",
+      "train_end": "2020-12-31",
+      "test_start": "2021-01-01",
+      "test_end": "2021-03-31"
+    },
+    {
+      "train_start": "2018-04-01",
+      "train_end": "2021-03-31",
+      "test_start": "2021-04-01",
+      "test_end": "2021-06-30"
+    },
+    {
+      "train_start": "2018-07-01",
+      "train_end": "2021-06-30",
+      "test_start": "2021-07-01",
+      "test_end": "2021-09-30"
+    },
+    {
+      "train_start": "2018-10-01",
+      "train_end": "2021-09-30",
+      "test_start": "2021-10-01",
+      "test_end": "2021-12-31"
+    },
+    {
+      "train_start": "2019-01-01",
+      "train_end": "2021-12-31",
+      "test_start": "2022-01-01",
+      "test_end": "2022-03-31"
+    },
+    {
+      "train_start": "2019-04-01",
+      "train_end": "2022-03-31",
+      "test_start": "2022-04-01",
+      "test_end": "2022-06-30"
+    },
+    {
+      "train_start": "2019-07-01",
+      "train_end": "2022-06-30",
+      "test_start": "2022-07-01",
+      "test_end": "2022-09-30"
+    },
+    {
+      "train_start": "2019-10-01",
+      "train_end": "2022-09-30",
+      "test_start": "2022-10-01",
+      "test_end": "2022-12-31"
+    },
+    {
+      "train_start": "2020-01-01",
+      "train_end": "2022-12-31",
+      "test_start": "2023-01-01",
+      "test_end": "2023-03-31"
+    },
+    {
+      "train_start": "2020-04-01",
+      "train_end": "2023-03-31",
+      "test_start": "2023-04-01",
+      "test_end": "2023-06-30"
+    },
+    {
+      "train_start": "2020-07-01",
+      "train_end": "2023-06-30",
+      "test_start": "2023-07-01",
+      "test_end": "2023-09-30"
+    }
+  ]
+}

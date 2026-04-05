@@ -1,3 +1,10 @@
+# region imports
+from __future__ import annotations
+try:
+    from AlgorithmImports import *
+except ImportError:
+    pass
+# endregion
 """
 Feature correlation auditing and redundancy reduction utilities.
 
@@ -6,7 +13,6 @@ suggest which features to drop (while always preserving protected
 columns), and optionally render a correlation heatmap for inspection.
 """
 
-from __future__ import annotations
 
 import logging
 from pathlib import Path

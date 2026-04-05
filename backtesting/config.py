@@ -22,7 +22,10 @@ _DEFAULT_REGIME_ADJ = {
 class BacktestConfig:
     # Tickers: any list of symbols (config, CLI, or fallback). No fixed embedded list required.
     tickers: list[str] = field(default_factory=list)
-
+    
+    # Dynamic Universe: configuration for Wikipedia-based or file-based resolution. Pillar 29.
+    universe: dict = field(default_factory=dict)
+    
     # Market data: provider and cache
     data_provider: str = "yahoo"       # "yahoo" | "alpaca" | "finnhub"
     cache_ohlcv: bool = True          # cache downloaded OHLCV to avoid repeated API calls
@@ -208,6 +211,7 @@ class BacktestConfig:
     signal_flip_threshold: float = 0.15
     dynamic_thresholds_enabled: bool = True
     base_signal_threshold: float = 0.5
+    score_direction: float = 1.0  # Applied to final adjusted_score (e.g. -1.0 to invert)
 
     # Market regime
     regime_enabled: bool = True
@@ -293,6 +297,7 @@ def load_config(path: str = "backtest_config.yaml") -> BacktestConfig:
     cfg = BacktestConfig()
 
     cfg.tickers = raw.get("tickers", cfg.tickers) or []
+    cfg.universe = raw.get("universe", cfg.universe) or {}
 
     data = raw.get("data", {})
     cfg.data_provider = data.get("provider", cfg.data_provider)
@@ -525,6 +530,7 @@ def load_config(path: str = "backtest_config.yaml") -> BacktestConfig:
             sig.get("base_threshold", cfg.base_signal_threshold),
         )
     )
+    cfg.score_direction = float(sig.get("score_direction", cfg.score_direction))
 
     reg = raw.get("regime", {})
     cfg.regime_enabled = reg.get("enabled", cfg.regime_enabled)

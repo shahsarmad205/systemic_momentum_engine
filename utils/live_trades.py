@@ -1,8 +1,14 @@
+# region imports
+from __future__ import annotations
+try:
+    from AlgorithmImports import *
+except ImportError:
+    pass
+# endregion
 """
 Append-only live trade rows for slippage / cost calibration (CSV).
 """
 
-from __future__ import annotations
 
 from pathlib import Path
 from typing import Any

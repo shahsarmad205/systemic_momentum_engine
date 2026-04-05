@@ -731,6 +731,44 @@ class Backtester:
                 )
                 vr_map = {}
 
+        # Pillar 29: Institutional Joint-Panel Feature Parity
+        # Pre-generate cross-sectional z-scores for all core ML features to ensure alignment with training.
+        from agents.weight_learning_agent.feature_builder import (
+            _CS_Z_PANEL_INPLACE_COLS,
+            _apply_cross_sectional_zscore_columns,
+        )
+        panel_map: dict[str, pd.DataFrame] = {}
+        if pending_prices and (getattr(self.config, "signal_mode", "price") in ("ml", "ensemble")):
+            try:
+                print(f"\nPhase 1b: Vectorizing {len(_CS_Z_PANEL_INPLACE_COLS)} joint-panel features across {len(pending_prices)} tickers…")
+                ticker_dfs = []
+                for tk, df in pending_prices.items():
+                    if "Close" not in df.columns: continue
+                    # Optimized vectorized feature builder
+                    t_df = df[["Close", "Volume"]].copy()
+                    t_df["ticker"] = tk
+                    t_df["ret_5d"] = t_df["Close"].pct_change(5)
+                    t_df["ret_10d"] = t_df["Close"].pct_change(10)
+                    t_df["rolling_vol_20"] = t_df["Close"].pct_change().rolling(20).std()
+                    t_df["rolling_vol_60"] = t_df["Close"].pct_change().rolling(60).std()
+                    t_df["volume_zscore"] = (t_df["Volume"] - t_df["Volume"].rolling(20).mean()) / t_df["Volume"].rolling(20).std().replace(0, np.nan)
+                    t_df["vix_zscore"] = 0.0
+                    t_df["vol_spike"] = 0.0
+                    # Pillar 29: Force lowercase 'date' identifier
+                    t_df.index.name = "date"
+                    ticker_dfs.append(t_df.reset_index())
+                
+                if ticker_dfs:
+                    panel_df = pd.concat(ticker_dfs, ignore_index=True)
+                    # Apply cross-sectional z-score per date slice
+                    panel_df = _apply_cross_sectional_zscore_columns(panel_df, list(_CS_Z_PANEL_INPLACE_COLS))
+                    for tk in pending_prices.keys():
+                        panel_map[tk] = panel_df[panel_df["ticker"] == tk].set_index("date").drop(columns=["ticker"])
+                    print(f"  Vectorized synchronization complete.")
+            except Exception as e:
+                logger.error("Pillar 29: Joint-Panel synchronization failed: %s", e)
+                panel_map = {}
+
         n_pending = len(pending_prices)
         for j, (ticker, data) in enumerate(pending_prices.items(), 1):
             print(f"  [signals {j}/{n_pending}] {ticker}…", end=" ")
@@ -750,6 +788,7 @@ class Backtester:
                     sector_relative_20d=sr20_s,
                     sector_relative_60d=sr60_s,
                     vol_rank=vr_s,
+                    panel_features=panel_map.get(ticker),  # Pillar 29 Injection
                     spy_df=spy_df_global,
                     vix_df=vix_df_global,
                     vix3m_df=vix3m_df_global,
@@ -1004,6 +1043,8 @@ class Backtester:
                 rolling_window=int(getattr(self.config, "factor_rolling_window", 60)),
                 min_observations=10,
                 dev_mode_limit=dev_limit,
+                score_direction=float(getattr(self.config, "score_direction", 1.0)),
+                min_signal_strength=float(getattr(self.config, "min_signal_strength", 0.001)),
             )
         factor_diagnostics: list[dict] = []
         execution_delay_days = int(getattr(self.config, "execution_delay_days", 0) or 0)

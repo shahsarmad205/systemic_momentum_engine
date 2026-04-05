@@ -1,3 +1,4 @@
+from __future__ import annotations
 from .feature_builder import build_feature_matrix
 from .regime_detection import detect_regimes
 from .weight_model import (

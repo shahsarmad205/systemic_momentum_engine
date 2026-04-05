@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Feature Matrix Builder
 ========================
@@ -33,7 +34,6 @@ weights.  All features use only past data (no look-ahead bias).
     Target: forward_return, direction
 """
 
-from __future__ import annotations
 
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import timedelta
@@ -689,6 +689,10 @@ def build_feature_matrix(
         return pd.DataFrame()
 
     result = pd.concat(chunks, ignore_index=True)
+    # Pillar 26: Duplicate Firewall (Sanitization)
+    # Expanded universes often contain data-overlaps in the cache; we must ensure
+    # uniqueness before cross-sectional pivoting (Pillar 24 Ensemble stability).
+    result.drop_duplicates(subset=["date", "ticker"], keep="last", inplace=True)
     result.sort_values(["date", "ticker"], inplace=True)
     result.reset_index(drop=True, inplace=True)
 

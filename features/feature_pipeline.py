@@ -1,3 +1,10 @@
+# region imports
+from __future__ import annotations
+try:
+    from AlgorithmImports import *
+except ImportError:
+    pass
+# endregion
 """
 Feature pipeline for single-name OHLCV time series.
 
@@ -6,7 +13,6 @@ additional momentum, volatility, liquidity, and regime features into
 one enriched per-ticker feature matrix.
 """
 
-from __future__ import annotations
 
 import logging
 import warnings

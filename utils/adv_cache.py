@@ -1,3 +1,10 @@
+# region imports
+from __future__ import annotations
+try:
+    from AlgorithmImports import *
+except ImportError:
+    pass
+# endregion
 """
 Average daily volume (ADV) in **shares** for liquidity checks.
 
@@ -5,7 +12,6 @@ Reads/writes ``output/adv_cache.csv`` and falls back to OHLCV parquet under
 ``backtest.cache_dir``.
 """
 
-from __future__ import annotations
 
 import logging
 from pathlib import Path

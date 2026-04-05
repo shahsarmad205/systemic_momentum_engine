@@ -373,8 +373,16 @@ def compute_information_coefficient(trades: pd.DataFrame) -> float:
     
     # Daily cross-sectional IC
     try:
+        def _get_asset_return(df: pd.DataFrame) -> pd.Series:
+            # Correlate score with raw asset change (exit - entry) / entry
+            # regardless of trade direction (Long/Short).
+            if "entry_price" in df.columns and "exit_price" in df.columns:
+                return (df["exit_price"] - df["entry_price"]) / (df["entry_price"] + 1e-12)
+            # Fallback to direction-adjusted return (incorrect sign for IC if Shorts are present)
+            return df["return"]
+
         daily_ic = trades.groupby("signal_date").apply(
-            lambda x: x["adjusted_score"].corr(x["return"], method="spearman") 
+            lambda x: x["adjusted_score"].corr(_get_asset_return(x), method="spearman") 
             if len(x) > 1 and x["adjusted_score"].nunique() > 1 and x["return"].nunique() > 1 else np.nan,
             include_groups=False
         )
@@ -382,8 +390,9 @@ def compute_information_coefficient(trades: pd.DataFrame) -> float:
         valid_ic = daily_ic.dropna()
         return float(valid_ic.mean()) if not valid_ic.empty else 0.0
     except Exception:
-        # Fallback to simple correlation
-        ic = trades["adjusted_score"].corr(trades["return"], method="spearman")
+        # Fallback to simple correlation (using corrected return logic)
+        asset_ret = (trades["exit_price"] - trades["entry_price"]) / (trades["entry_price"] + 1e-12)
+        ic = trades["adjusted_score"].corr(asset_ret, method="spearman")
         return 0.0 if pd.isna(ic) else float(ic)
 
 
@@ -843,12 +852,15 @@ def compute_all_metrics(
     m["turnover_cost_drag_bps"] = float(tc.get("turnover_cost_drag_bps_corrected", 0.0) or 0.0)
 
     # Bootstrap confidence intervals for performance metrics (daily returns).
-    if not daily_equity.empty and "equity" in daily_equity.columns:
+    # Standard Pillar 29 Acceleration: only run if enabled and horizon is reasonable.
+    if getattr(config, "bootstrap", False) and not daily_equity.empty and "equity" in daily_equity.columns:
         eq_sorted = daily_equity.sort_values("date") if "date" in daily_equity.columns else daily_equity
         equity_series = eq_sorted["equity"]
         daily_ret = equity_series.pct_change().dropna()
         ci = bootstrap_performance_cis(daily_ret)
         m.update(ci)
+    else:
+        m.update({"sharpe_low": float('nan'), "sharpe_high": float('nan'), "ic_low": float('nan'), "ic_high": float('nan')})
 
     # --- [NEW] ADVANCED STATISTICAL AUDIT ---
     # Calculate years for annualization (institutional breadth)
@@ -868,11 +880,14 @@ def compute_all_metrics(
     m["sharpe_significance"] = compute_sharpe_significance(daily_equity)
     
     # 3. Win Rate MLE (EXPIRY TRADES ONLY)
-    expiry_trades = trades[trades["exit_reason"] == "expiry"]
-    m["win_rate_mle"] = (
-        win_rate_mle(float((expiry_trades["return"] > 0).sum()), len(expiry_trades))
-        if not expiry_trades.empty else None
-    )
+    if not trades.empty and "exit_reason" in trades.columns:
+        expiry_trades = trades[trades["exit_reason"] == "expiry"]
+        m["win_rate_mle"] = (
+            win_rate_mle(float((expiry_trades["return"] > 0).sum()), len(expiry_trades))
+            if not expiry_trades.empty else None
+        )
+    else:
+        m["win_rate_mle"] = None
     
     # 4. Kelly with Uncertainty
     m["kelly_uncertainty"] = compute_kelly_with_uncertainty(trades)

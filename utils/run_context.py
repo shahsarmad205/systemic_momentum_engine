@@ -1,10 +1,16 @@
+# region imports
+from __future__ import annotations
+try:
+    from AlgorithmImports import *
+except ImportError:
+    pass
+# endregion
 """
 Run context for production observability: correlation IDs, git SHA, dry-run flags.
 
 Set env ``RUN_ID`` for cron; otherwise a short UUID is generated per process.
 """
 
-from __future__ import annotations
 
 import os
 import subprocess

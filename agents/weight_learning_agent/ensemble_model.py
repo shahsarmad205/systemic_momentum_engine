@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Stacked ensemble of Ridge (RidgeCV), GBR, and XGBoost regressors.
 
@@ -5,7 +6,6 @@ Blend weights are chosen to maximize Spearman IC on a held-out validation slice.
 Base models are refit on train+validation before deployment predictions.
 """
 
-from __future__ import annotations
 
 from itertools import product
 

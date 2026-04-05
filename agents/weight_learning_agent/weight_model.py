@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Weight Learning Model
 =======================
@@ -13,7 +14,6 @@ Walk-forward validation prevents lookahead bias.
 Time-decay weighting gives more importance to recent observations.
 """
 
-from __future__ import annotations
 
 import json
 import logging

@@ -1,0 +1,26 @@
+# QuantConnect Lean CLI Ignore File
+# Prevents large research scripts from exceeding cloud file size limits
+
+# Research-heavy agents (training logic)
+agents/weight_learning_agent/feature_builder.py
+agents/weight_learning_agent/
+
+# Large Batch Runners & Analysts
+run_model_selection.py
+run_performance_tracker.py
+run_backtest.py
+run_daily_pipeline.py
+run_weight_learning.py
+
+# Pycache and metadata
+__pycache__/
+*.pyc
+
+# Local diagnostic files
+verify_qc_parity.py
+verify_lean_parity.py
+
+# Large datasets not intended for cloud sync
+data/
+output/
+archive/

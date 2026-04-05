@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Feature ablation flags for weight learning (Phase 1 baseline vs Phase 2 groups).
 
@@ -14,7 +15,6 @@ Set environment variable before training/backtests:
 Unset TSE_ABLATION_STEP → full feature matrix (no zeroing).
 """
 
-from __future__ import annotations
 
 import os
 

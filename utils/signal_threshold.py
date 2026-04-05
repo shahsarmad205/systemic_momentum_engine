@@ -1,3 +1,10 @@
+# region imports
+from __future__ import annotations
+try:
+    from AlgorithmImports import *
+except ImportError:
+    pass
+# endregion
 """
 Signal threshold utilities.
 
@@ -5,7 +12,6 @@ These helpers adjust signal classification thresholds based on
 transaction costs, expected holding period and volatility regime.
 """
 
-from __future__ import annotations
 
 
 def compute_cost_adjusted_threshold(

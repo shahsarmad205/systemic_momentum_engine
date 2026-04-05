@@ -1,3 +1,10 @@
+# region imports
+from __future__ import annotations
+try:
+    from AlgorithmImports import *
+except ImportError:
+    pass
+# endregion
 """
 Market Data Layer
 ==================
@@ -13,15 +20,17 @@ Per-ticker cache/download traces use ``logging`` at DEBUG for ``utils.market_dat
 (e.g. ``logging.getLogger("utils.market_data").setLevel(logging.DEBUG)``).
 """
 
-from __future__ import annotations
 
 import logging
 import os
 import re
+import zipfile
+import io
 from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -245,43 +254,49 @@ def _download_finnhub(ticker: str, start: pd.Timestamp, end: pd.Timestamp) -> pd
     return df.sort_index()
 
 
-def _download_tiingo(ticker: str, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
-    """Fetch daily adjusted candles from Tiingo."""
-    import requests
-
-    api_key = os.environ.get("TIINGO_API_KEY", "d421c9893c8bea038597e0e5cfbdc1de6c02f4f1")
-    url = f"https://api.tiingo.com/tiingo/daily/{ticker.lower()}/prices"
-    params = {
-        "startDate": start.strftime("%Y-%m-%d"),
-        "endDate": end.strftime("%Y-%m-%d"),
-        "token": api_key,
-    }
-    
-    try:
-        resp = requests.get(url, params=params, timeout=10)
-        resp.raise_for_status()
-    except Exception as e:
-        logger.error("[_download_tiingo] Request failed for %s: %s", ticker, e)
-        return pd.DataFrame(columns=OHLCV_COLUMNS)
-
-    data = resp.json()
-    if not data:
-        return pd.DataFrame(columns=OHLCV_COLUMNS)
-
-    df = pd.DataFrame(data)
-    df["Date"] = pd.to_datetime(df["date"]).dt.tz_localize(None)
-    df.set_index("Date", inplace=True)
-
-    # Use natively split/dividend adjusted prices for institutional equivalence
-    res = pd.DataFrame({
-        "Open": df["adjOpen"],
-        "High": df["adjHigh"],
-        "Low": df["adjLow"],
-        "Close": df["adjClose"],
-        "Volume": df["adjVolume"],
-    })
-    
     return res.sort_index()
+
+
+def _download_lean(ticker: str, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
+    """
+    Fetch daily OHLCV from local Lean data storage.
+    Lean daily equities are scaled by 10,000.
+    """
+    ticker = ticker.lower()
+    # Typical Lean directory structure in your workspace
+    lean_data_path = Path("LeanCloud/data/equity/usa/daily") / f"{ticker}.zip"
+    
+    if not lean_data_path.exists():
+        logger.debug("[_download_lean] %s: No Lean zip found at %s", ticker, lean_data_path)
+        return pd.DataFrame(columns=OHLCV_COLUMNS)
+
+    try:
+        with zipfile.ZipFile(lean_data_path, 'r') as z:
+            # Lean daily files usually have the same name as the zip inside
+            csv_name = f"{ticker}.csv"
+            if csv_name not in z.namelist():
+                # fallback to first file in zip
+                csv_name = z.namelist()[0]
+                
+            with z.open(csv_name) as f:
+                # Format: YYYYMMDD HH:mm,Open,High,Low,Close,Volume
+                df = pd.read_csv(f, header=None, names=["DateTime", "Open", "High", "Low", "Close", "Volume"])
+                
+        # Parse Dates: 19980102 00:00 -> 1998-01-02
+        df["Date"] = pd.to_datetime(df["DateTime"].str.split(" ").str[0], format="%Y%m%d")
+        df.set_index("Date", inplace=True)
+        
+        # Rescale Prices: Lean scales by 10,000
+        for col in ["Open", "High", "Low", "Close"]:
+            df[col] = df[col] / 10000.0
+            
+        # Filter by requested window
+        df = df.loc[(df.index >= start) & (df.index <= end)]
+        
+        return df[OHLCV_COLUMNS].sort_index()
+    except Exception as e:
+        logger.error("[_download_lean] %s: Failed to parse zip: %s", ticker, e)
+        return pd.DataFrame(columns=OHLCV_COLUMNS)
 
 
 def _download_crypto_ccxt(
@@ -508,7 +523,12 @@ def get_ohlcv(
         df = _build_continuous_futures(contract_data)
     else:
         # Default: equities / ETFs
-        if provider == "yahoo":
+        if provider == "lean":
+            df = _download_lean(ticker, start, end)
+            if df.empty:
+                logger.info("[get_ohlcv] %s: Lean data missing, falling back to yahoo", ticker)
+                df = _download_yahoo(ticker, start, end)
+        elif provider == "yahoo":
             df = _download_yahoo(ticker, start, end)
         elif provider == "alpaca":
             df = _download_alpaca(ticker, start, end)

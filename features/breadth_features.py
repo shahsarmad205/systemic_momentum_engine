@@ -1,3 +1,10 @@
+# region imports
+from __future__ import annotations
+try:
+    from AlgorithmImports import *
+except ImportError:
+    pass
+# endregion
 """
 Market breadth indicators across a universe of tickers.
 
@@ -6,7 +13,6 @@ This module aggregates per-name prices into simple breadth measures:
     - an advance/decline ratio based on daily price moves.
 """
 
-from __future__ import annotations
 
 import numpy as np
 import pandas as pd

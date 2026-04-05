@@ -1,3 +1,10 @@
+# region imports
+from __future__ import annotations
+try:
+    from AlgorithmImports import *
+except ImportError:
+    pass
+# endregion
 """
 Public feature API for the trend_signal_engine project.
 
@@ -5,7 +12,6 @@ This package aggregates single-name and cross-sectional feature
 builders so that other modules can import them from one place.
 """
 
-from __future__ import annotations
 
 from .breadth_features import calculate_market_breadth
 from .engine import FeatureEngine

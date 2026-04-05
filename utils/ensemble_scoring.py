@@ -1,4 +1,10 @@
+# region imports
 from __future__ import annotations
+try:
+    from AlgorithmImports import *
+except ImportError:
+    pass
+# endregion
 
 import pickle
 import warnings
@@ -54,14 +60,20 @@ def _zscore_standardize(s: pd.Series) -> pd.Series:
 
 
 def _load_pickle(path: Path) -> Any:
+    """Load a pickled model or joblib artifact with warnings suppressed."""
+    import joblib
+    import warnings
     with warnings.catch_warnings():
         warnings.filterwarnings(
             "ignore",
             message=r"Trying to unpickle estimator .*",
             category=UserWarning,
         )
-        with open(path, "rb") as fh:
-            return pickle.load(fh)
+        try:
+            return joblib.load(path)
+        except Exception:
+            with open(path, "rb") as fh:
+                return pickle.load(fh)
 
 
 def load_ensemble_models(ensemble_cfg: dict[str, Any]) -> list[LoadedEnsembleModel]:
