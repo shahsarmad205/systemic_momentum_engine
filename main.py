@@ -609,8 +609,6 @@ def generate_all_plots(results_df: pd.DataFrame):
             if features.empty:
                 print(f"    [SKIP] Not enough data for {ticker}")
                 continue
-            # Conviction Gate: Lowered to 0.51 for cloud verification
-            self.threshold = self.GetParameter("conviction_threshold", 0.51)
             plot_path = plot_combined_chart(
                 ticker=ticker,
                 features=features,

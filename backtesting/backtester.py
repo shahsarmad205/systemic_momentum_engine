@@ -31,15 +31,23 @@ from .config import BacktestConfig
 from .execution import ExecutionEngine
 from .portfolio import Portfolio, Position
 from .regime import MarketRegimeAgent
+from .result import BacktestResult
 
 try:
     from execution.cost_model import TransactionCostModel
 except ImportError:
     TransactionCostModel = None
+
+try:
+    from execution.market_impact import MarketImpactModel, MarketImpactParams
+except ImportError:
+    MarketImpactModel = None  # type: ignore[misc,assignment]
+    MarketImpactParams = None  # type: ignore[misc,assignment]
 from utils.market_data import get_ohlcv
 from utils.quant_utils import apply_sector_adjustment, compute_sector_aggregates
 from utils.quant_utils import SECTOR_MAP
 
+from .analytics import annualized_vol as _annualized_vol_fn, build_returns_matrix as _build_returns_matrix_fn
 from .metrics import compute_all_metrics, compute_capm_metrics
 from .signals import EXIT_BUFFER_DAYS, HISTORY_BUFFER_DAYS, SignalEngine
 
@@ -55,10 +63,17 @@ from backtesting.candidates import build_ranked_candidates
 from backtesting.cross_sectional import build_cross_sectional_candidates
 
 try:
-    from backtesting.regime_multipliers import get_multiplier, load_regime_multipliers
+    from backtesting.regime_multipliers import (
+        get_multiplier,
+        load_regime_multipliers,
+        signal_confidence_multiplier_for_regime as _scm_for_regime,
+        threshold_aggressiveness_for_regime as _thresh_agg_for_regime,
+    )
 except ImportError:  # pragma: no cover
     load_regime_multipliers = None  # type: ignore[misc,assignment]
     get_multiplier = None  # type: ignore[misc,assignment]
+    _scm_for_regime = None  # type: ignore[misc,assignment]
+    _thresh_agg_for_regime = None  # type: ignore[misc,assignment]
 from . import position_sizing
 
 try:
@@ -84,31 +99,9 @@ except ImportError:
     write_neutralization_report = None
 
 
-# ------------------------------------------------------------------
-# Result container
-# ------------------------------------------------------------------
-
-class BacktestResult:
-    """Holds everything produced by a single backtest run."""
-
-    __slots__ = ("trades", "daily_equity", "metrics", "config",
-                 "price_data", "signal_data", "regime_data", "position_sizing_comparison")
-
-    def __init__(
-        self,
-        trades: pd.DataFrame,
-        daily_equity: pd.DataFrame,
-        metrics: dict,
-        config: BacktestConfig,
-    ):
-        self.trades = trades
-        self.daily_equity = daily_equity
-        self.metrics = metrics
-        self.config = config
-        self.price_data: dict[str, pd.DataFrame] = {}
-        self.signal_data: dict[str, pd.DataFrame] = {}
-        self.regime_data: dict[pd.Timestamp, str] = {}
-        self.position_sizing_comparison: dict | None = None
+# BacktestResult is defined in result.py and imported above.
+# Kept as a module-level name for backward compatibility with any code
+# that does: from backtesting.backtester import BacktestResult
 
 
 # ------------------------------------------------------------------
@@ -158,6 +151,24 @@ class Backtester:
             self.cost_model = None
             self.execution = ExecutionEngine(config.slippage_bps, config.commission_per_trade)
         self.regime_agent = MarketRegimeAgent()
+
+        # Almgren-Chriss market impact model (replaces ad-hoc k_bps * sqrt formula)
+        self._market_impact_model: object = None
+        if getattr(config, "market_impact_enabled", True) and MarketImpactModel is not None:
+            _mi_params = MarketImpactParams(
+                eta=float(getattr(config, "mi_eta", 0.142)),
+                alpha=float(getattr(config, "mi_alpha", 0.314)),
+                gamma=float(getattr(config, "mi_gamma", 0.6)),
+                # Spread is per-leg; spread_bps from config is the full spread → halve it
+                spread_half_bps=float(getattr(config, "execution_costs_spread_bps", 5.0)) / 2.0,
+                commission_bps=float(getattr(config, "execution_costs_commission_bps", 2.0)),
+            )
+            _mi_adv = float(getattr(config, "mi_adv_usd_default", 50_000_000.0))
+            self._market_impact_model = MarketImpactModel(adv_usd=_mi_adv, params=_mi_params)
+            logger.info(
+                "Almgren-Chriss market impact enabled  eta=%.3f  alpha=%.3f  gamma=%.2f",
+                _mi_params.eta, _mi_params.alpha, _mi_params.gamma,
+            )
 
         # Circuit breaker state
         self._equity_peak: float = config.initial_capital
@@ -274,8 +285,10 @@ class Backtester:
         regime_data: dict[pd.Timestamp, str] = {}
         if self.config.regime_enabled:
             print("\nPhase 2: Detecting market regimes (SPY + VIX)…")
+            confirmation_days = int(getattr(self.config, "regime_confirmation_days", 3))
             regime_data = self.regime_agent.detect_regimes(
                 self.config.start_date, self.config.end_date,
+                confirmation_days=confirmation_days,
             )
             regime_counts = defaultdict(int)
             for r in regime_data.values():
@@ -427,7 +440,93 @@ class Backtester:
                 report_path,
                 ic_after=metrics.get("information_coefficient"),
             )
+
+        # IC (Information Coefficient) diagnostics
+        # Grinold & Kahn: IR ≈ IC × sqrt(Breadth).  We print IC per signal
+        # computed from completed trades (signal at entry vs realized return).
+        self._print_ic_diagnostics(result.trades)
+
         return result
+
+    # ==============================================================
+    # IC (Information Coefficient) diagnostics
+    # ==============================================================
+
+    def _print_ic_diagnostics(self, trades: pd.DataFrame) -> None:
+        """
+        Compute and print IC (Information Coefficient) from completed trades.
+
+        Pooled Spearman rank IC between adjusted_score at entry and realized
+        holding-period return.  This is the simplest IC estimator and requires
+        no minimum cross-section size per date.
+
+        Interpretation (Grinold & Kahn 2000 benchmarks):
+            IC  > 0.05  — usable signal (exploitable edge)
+            IC  > 0.10  — good signal (institutional grade)
+            IC  > 0.15  — exceptional (AQR-grade)
+            |t| > 1.96  — statistically significant at 5% level
+        """
+        try:
+            from scipy.stats import spearmanr
+        except ImportError:
+            return
+
+        if trades is None or trades.empty:
+            return
+        if not {"adjusted_score", "pnl", "position_size"}.issubset(trades.columns):
+            return
+
+        df = trades.dropna(subset=["adjusted_score", "pnl", "position_size"]).copy()
+        if len(df) < 10:
+            return
+
+        # Realized return per trade (direction-signed pnl / position size)
+        pos_size = df["position_size"].astype(float).clip(lower=1.0)
+        realized_ret = df["pnl"].astype(float) / pos_size
+        signal_score = df["adjusted_score"].astype(float)
+
+        valid = realized_ret.notna() & signal_score.notna() & np.isfinite(realized_ret) & np.isfinite(signal_score)
+        n = int(valid.sum())
+        if n < 10:
+            return
+
+        try:
+            import warnings as _warnings
+            with _warnings.catch_warnings():
+                _warnings.simplefilter("ignore")
+                ic, p_value = spearmanr(signal_score[valid].values, realized_ret[valid].values)
+            if not np.isfinite(ic):
+                return
+
+            ic_std = float(np.std(
+                [spearmanr(signal_score[valid].sample(max(n // 2, 5), replace=True, random_state=i).values,
+                           realized_ret[valid].sample(max(n // 2, 5), replace=True, random_state=i).values)[0]
+                 for i in range(50) if np.isfinite(
+                     spearmanr(signal_score[valid].sample(max(n // 2, 5), replace=True, random_state=i).values,
+                               realized_ret[valid].sample(max(n // 2, 5), replace=True, random_state=i).values)[0]
+                 )],
+                ddof=1,
+            ))
+            icir = ic / ic_std if ic_std > 0 else 0.0
+            t_stat = ic / (1.0 / np.sqrt(n - 2 + 1e-9)) if n > 2 else 0.0
+            sig = "*" if abs(t_stat) > 1.96 else " "
+
+            _bench = ""
+            if abs(ic) > 0.15:
+                _bench = "(exceptional — AQR grade)"
+            elif abs(ic) > 0.10:
+                _bench = "(good — institutional grade)"
+            elif abs(ic) > 0.05:
+                _bench = "(usable signal)"
+            else:
+                _bench = "(weak — near noise)"
+
+            print("  IC Diagnostics (Grinold & Kahn):")
+            print(f"    Signal: adjusted_score  IC={ic:+.4f}  ICIR={icir:+.3f}  "
+                  f"t={t_stat:+.2f}{sig}  n={n}  {_bench}")
+            print()
+        except Exception as exc:
+            logger.debug("IC diagnostics failed: %s", exc)
 
     # ==============================================================
     # Diagnostics — trade-level P&L decomposition
@@ -965,6 +1064,36 @@ class Backtester:
         except Exception:
             logger.exception("SPY vol scaling failed; using scalar=1.0")
 
+        # ==============================================================
+        # VIX-threshold deleveraging (stacked on top of SPY vol scalar)
+        # When VIX >= high_vix_threshold, multiply position sizes by
+        # vix_deleverage_scaling_factor — reduces drawdown in risk-off spikes
+        # before the full Crisis regime takes effect at VIX=30.
+        # ==============================================================
+        if bool(getattr(self.config, "vix_deleverage_enabled", False)):
+            try:
+                _vix_thresh = float(getattr(self.config, "vix_deleverage_high_threshold", 28.0))
+                _vix_scale = float(getattr(self.config, "vix_deleverage_scaling_factor", 0.5))
+                # Download VIX using the same helper from RegimeAgent to avoid code duplication.
+                _vix_start = pd.Timestamp(self.config.start_date) - pd.Timedelta(days=600)
+                _vix_end = pd.Timestamp(self.config.end_date) + pd.Timedelta(days=30)
+                _vix_dict = MarketRegimeAgent._download_vix(_vix_start, _vix_end, price_data.get("SPY", pd.DataFrame()))
+                if _vix_dict:
+                    _vix_s = pd.Series(_vix_dict)
+                    _vix_s.index = pd.to_datetime(_vix_s.index)
+                    _vix_aligned = _vix_s.reindex(trading_days).ffill().bfill().fillna(15.0)
+                    # Where VIX is elevated, replace vol_scalar with min of current and vix_scale
+                    _elevated = _vix_aligned >= _vix_thresh
+                    vol_scalar_series = vol_scalar_series.copy()
+                    vol_scalar_series.loc[_elevated] = vol_scalar_series.loc[_elevated].clip(upper=_vix_scale)
+                    n_elevated = int(_elevated.sum())
+                    logger.info(
+                        "VIX deleveraging active: %d/%d days VIX >= %.1f → scaling capped at %.2f",
+                        n_elevated, len(trading_days), _vix_thresh, _vix_scale,
+                    )
+            except Exception:
+                logger.exception("VIX deleveraging failed; vol_scalar unchanged")
+
         # Pre-index: calendar date → [(ticker, signal_row)] (string key so lookup matches regardless of type/tz)
         def _to_calendar_key(ts) -> str:
             if isinstance(ts, datetime.date) and not isinstance(ts, datetime.datetime):
@@ -1075,10 +1204,10 @@ class Backtester:
             regime_today = regime_data.get(date, "Sideways")
             prev_reg_before = prev_regime
 
-            # Long-only: first day of a Bear spell — exit inherited longs (holdthrough drag on Bear days).
+            # First day of Bear spell: exit inherited longs (holdthrough drag on Bear days).
+            # Applies regardless of long_only — in L/S mode we still want to unwind longs on Bear entry.
             if (
                 bool(getattr(self.config, "bear_liquidate_longs_on_regime_entry", False))
-                and getattr(self.config, "long_only", False)
                 and regime_today == "Bear"
                 and prev_reg_before is not None
                 and prev_reg_before != "Bear"
@@ -1091,6 +1220,24 @@ class Backtester:
                             price_data,
                             reason="bear_regime_entry_liquidate",
                         )
+
+            # Bear entry: shorten remaining hold for ANY surviving long that wasn't liquidated above.
+            # Positions opened before the regime switch survive the one-time liquidation check
+            # (e.g. already in the portfolio on a non-entry Bear day, or entered during hysteresis window).
+            # Cap their planned_exit to at most bear_max_carry_days ahead so they don't drag for 10 days.
+            _bear_carry_cap = int(getattr(self.config, "bear_max_carry_days", 2) or 2)
+            if (
+                regime_today == "Bear"
+                and prev_reg_before is not None
+                and prev_reg_before != "Bear"
+            ):
+                for pos in list(self.portfolio.positions):
+                    if pos.direction > 0 and hasattr(pos, "planned_exit_date"):
+                        cap_idx = min(i + _bear_carry_cap, len(trading_days) - 1)
+                        forced_cap = pd.Timestamp(trading_days[cap_idx])
+                        pe = pd.Timestamp(pos.planned_exit_date)
+                        if pe > forced_cap:
+                            pos.planned_exit_date = forced_cap
 
             if regime_today == "Crisis":
                 crisis_consecutive_days = (crisis_consecutive_days + 1) if prev_regime == "Crisis" else 1
@@ -1378,6 +1525,22 @@ class Backtester:
                         )
                         continue
 
+                # Short stop loss: cap adverse moves on shorts (price rising against us).
+                # Uses ml_short_stop_loss_pct — separate from the long stop_loss_pct so
+                # we can tune independently without touching long exits.
+                short_sl_pct = float(getattr(self.config, "ml_short_stop_loss_pct", 0.0) or 0.0)
+                if short_sl_pct > 0 and pos.direction < 0 and float(pos.entry_price or 0.0) > 0:
+                    short_sl_price = float(pos.entry_price) * (1.0 + short_sl_pct)
+                    if np.isfinite(high) and high >= short_sl_price:
+                        self._close_position(
+                            pos,
+                            date,
+                            price_data,
+                            exit_price_override=short_sl_price,
+                            reason="short_stop_loss",
+                        )
+                        continue
+
             # --- 2. Execute pending entries at today's open ---
             existing_tickers = {p.ticker for p in self.portfolio.positions}
 
@@ -1472,6 +1635,23 @@ class Backtester:
                     # Cap position size at 5% of portfolio per ticker in Sideways regime.
                     equal_size = min(equal_size, self.portfolio.equity * 0.05)
 
+            # Signal-strength sizing: precompute per-ticker sizes proportional to |adjusted_score|.
+            _cs_sizing_method = getattr(self.config, "position_sizing", "equal")
+            cs_signal_sizes: dict[str, float] | None = None
+            if _cs_sizing_method == "signal_strength" and cs_entries:
+                scores_abs = {
+                    e["ticker"]: abs(float(e.get("adjusted_score", 0.0) or 0.0))
+                    for e in cs_entries
+                }
+                total_abs = sum(scores_abs.values())
+                _eq_cs = self.portfolio.equity
+                _mxp_cs = float(getattr(self.config, "max_position_pct_of_equity", 0.12))
+                if total_abs > 1e-12:
+                    cs_signal_sizes = {
+                        t: min(_eq_cs * (s / total_abs), _eq_cs * _mxp_cs)
+                        for t, s in scores_abs.items()
+                    }
+
             # If circuit breaker is active, do not open new positions today
             if self._trading_halted and pending_entries:
                 logger.info(
@@ -1541,11 +1721,13 @@ class Backtester:
             vol_scalar_today = float(vol_scalar_series.loc[date]) if date in vol_scalar_series.index else 1.0
             # Gross exposure caps:
             # - Normal  : 100% gross (no extra cap)
-            # - Crisis  : 40% gross
+            # - Crisis  : configurable (default 0.6, was 0.4 — raised to allow more alpha in Crisis)
             # - Bear    : 70% gross
             gross_cap_fraction_today = 1.0
             if regime_today == "Crisis":
-                gross_cap_fraction_today = 0.4
+                gross_cap_fraction_today = float(
+                    getattr(self.config, "crisis_gross_cap_fraction", 0.6) or 0.6
+                )
             elif regime_today == "Bear":
                 gross_cap_fraction_today = float(
                     getattr(self.config, "bear_gross_cap_fraction", 0.7) or 0.7
@@ -1682,10 +1864,12 @@ class Backtester:
                 if regime_today in _suppress and entry.get("signal") == "Bearish":
                     continue
 
-                # Bear + long-only: optional hard block — no new entries (weak / no edge).
+                # Bear regime: optional hard block on NEW LONG entries (no edge in Bear for longs).
+                # Applies regardless of long_only flag — in L/S mode, Bear is where shorts generate
+                # alpha; opening new longs into a Bear trend bleeds P&L.
                 if (
                     regime_today == "Bear"
-                    and getattr(self.config, "long_only", False)
+                    and entry.get("signal") != "Bearish"
                     and bool(getattr(self.config, "bear_skip_new_entries", False))
                 ):
                     continue
@@ -1727,8 +1911,9 @@ class Backtester:
                     if np.isfinite(rolling_beta_60d) and rolling_beta_60d > crisis_beta_cutoff:
                         continue
 
-                # Bear (long-only): only enter longs above rolling-window score quantile — weak edge in Bear.
-                if regime_today == "Bear" and getattr(self.config, "long_only", False):
+                # Bear regime: only enter longs above rolling-window score quantile — longs have weak edge in Bear.
+                # Apply regardless of long_only setting — shorts are handled separately by cross-sectional ranking.
+                if regime_today == "Bear":
                     if entry.get("signal") == "Bullish":
                         reg_entry = str(entry.get("regime") or regime_today)
                         smult = float(
@@ -1843,9 +2028,12 @@ class Backtester:
                 entry_price = self.execution.apply_entry_slippage(open_price, entry["signal"])
 
                 if entry.get("_cross_sectional"):
-                    # Cross-sectional portfolios keep their existing equal-weight sizing.
                     _mxp_cs = float(getattr(self.config, "max_position_pct_of_equity", 0.12))
-                    size_dollars = min(equal_size or 0, self.portfolio.equity * 0.99)
+                    if cs_signal_sizes is not None and tk in cs_signal_sizes:
+                        # Signal-strength sizing: larger allocation for higher-conviction entries
+                        size_dollars = cs_signal_sizes[tk]
+                    else:
+                        size_dollars = min(equal_size or 0, self.portfolio.equity * 0.99)
                     size_dollars = min(size_dollars, self.portfolio.equity * _mxp_cs)
                     # Enforce regime gross cap (including already-open positions).
                     if gross_cap_fraction_today < 0.999:
@@ -2038,20 +2226,31 @@ class Backtester:
                 # Base transaction cost
                 base_cost = self.cost_model.cost_dollars(size_for_cost) if self.cost_model else self.execution.commission
 
-                # Market impact component: k * sqrt(relative_size) bps
+                # Almgren-Chriss market impact (entry leg)
+                # Replaces ad-hoc k_bps * sqrt(shares/adv) with calibrated A-C model.
                 impact_cost = 0.0
-                try:
-                    adv_window = price_data[tk]["Volume"].loc[price_data[tk].index <= date].tail(20)
-                    adv = float(adv_window.mean())
-                    if adv > 0 and size_dollars and size_dollars > 0 and entry_price > 0:
-                        shares = size_dollars / entry_price
-                        rel_size = max(shares / adv, 0.0)
-                        if rel_size > 0:
-                            k_bps = float(getattr(self.config, "market_impact_k_bps", 10.0))
-                            impact_bps = k_bps * (rel_size ** 0.5)
-                            impact_cost = size_for_cost * (impact_bps / 10_000.0)
-                except Exception:
-                    impact_cost = 0.0
+                if self._market_impact_model is not None and size_for_cost > 0:
+                    try:
+                        _adv = self._compute_adv_usd(tk, price_data, date)
+                        _vol = self._compute_vol_daily(tk, price_data, date)
+                        _mi = MarketImpactModel(adv_usd=_adv, params=self._market_impact_model.params)
+                        impact_cost = _mi.cost_dollars(size_for_cost, _vol, is_exit=False)
+                    except Exception:
+                        impact_cost = 0.0
+                elif self._market_impact_model is None:
+                    # Legacy fallback: ad-hoc shares-based square-root model
+                    try:
+                        adv_window = price_data[tk]["Volume"].loc[price_data[tk].index <= date].tail(20)
+                        adv = float(adv_window.mean())
+                        if adv > 0 and size_dollars and size_dollars > 0 and entry_price > 0:
+                            shares = size_dollars / entry_price
+                            rel_size = max(shares / adv, 0.0)
+                            if rel_size > 0:
+                                k_bps = float(getattr(self.config, "market_impact_k_bps", 10.0))
+                                impact_bps = k_bps * (rel_size ** 0.5)
+                                impact_cost = size_for_cost * (impact_bps / 10_000.0)
+                    except Exception:
+                        impact_cost = 0.0
 
                 entry_cost = base_cost + impact_cost
 
@@ -2313,32 +2512,8 @@ class Backtester:
         as_of_date: pd.Timestamp,
         lookback_days: int,
     ) -> pd.DataFrame | None:
-        """
-        Build DataFrame of daily returns for all tickers, last lookback_days up to as_of_date.
-        Uses only past data (no lookahead). Returns None if insufficient data.
-        """
-        series_list = []
-        for ticker, df in price_data.items():
-            if df is None or df.empty or "Close" not in df.columns:
-                continue
-            price_col = "AdjClose" if "AdjClose" in df.columns else "Close"
-            past = df[price_col].loc[df.index <= as_of_date].tail(lookback_days + 1)
-            if len(past) < 2:
-                continue
-            rets = past.pct_change().dropna()
-            if len(rets) < 2:
-                continue
-            rets.name = ticker
-            series_list.append(rets)
-        if not series_list:
-            return None
-        out = pd.concat(series_list, axis=1, join="inner")
-        if out.empty or out.shape[0] < 2 or out.shape[1] < 1:
-            return None
-        out = out.tail(lookback_days)
-        if len(out) < 2:
-            return None
-        return out
+        """Thin wrapper — logic lives in analytics.build_returns_matrix."""
+        return _build_returns_matrix_fn(price_data, as_of_date, lookback_days)
 
     def _annualized_vol(
         self,
@@ -2347,20 +2522,8 @@ class Backtester:
         as_of_date: pd.Timestamp,
         lookback_days: int = 20,
     ) -> float | None:
-        """Return annualized volatility (std of daily returns) for ticker as of date, or None."""
-        if ticker not in price_data:
-            return None
-        df = price_data[ticker]
-        if "Close" not in df.columns or df.empty:
-            return None
-        price_col = "AdjClose" if "AdjClose" in df.columns else "Close"
-        series = df[price_col].loc[df.index <= as_of_date].tail(lookback_days + 1)
-        if len(series) < 2:
-            return None
-        rets = series.pct_change().dropna()
-        if len(rets) < 2:
-            return None
-        return float(rets.std() * (252 ** 0.5))
+        """Thin wrapper — logic lives in analytics.annualized_vol."""
+        return _annualized_vol_fn(price_data, ticker, as_of_date, lookback_days)
 
     def _get_rolling_kelly_params(self) -> tuple[float, float, float] | None:
         """
@@ -2515,55 +2678,18 @@ class Backtester:
         logger.info("Precomputed regime score std: %s", self._regime_score_std)
 
     def _signal_confidence_multiplier_for_regime(self, regime_today: str) -> float | None:
-        """Rolling-std confidence gate: regime-specific σ multiplier, else global signal_confidence_multiplier."""
-        regime_key = str(regime_today or "Sideways")
-        cfg_attrs = {
-            "Bull": "signal_confidence_multiplier_bull",
-            "Bear": "signal_confidence_multiplier_bear",
-            "Sideways": "signal_confidence_multiplier_sideways",
-            "Crisis": "signal_confidence_multiplier_crisis",
-        }
-        attr = cfg_attrs.get(regime_key)
-        multiplier: float | None = None
-        # Source of truth: BacktestConfig (load_config + CLI overrides). Applies to all regimes equally.
-        if attr:
-            raw = getattr(self.config, attr, None)
-            if raw is not None:
-                try:
-                    fv = float(raw)
-                    if math.isfinite(fv) and fv > 0:
-                        multiplier = fv
-                except (TypeError, ValueError):
-                    pass
-
-        if multiplier is None and get_multiplier is not None:
-            try:
-                multiplier = float(get_multiplier(regime_key, self.regime_multipliers, default=1.0))
-            except Exception as exc:
-                logger.warning(
-                    "Regime multiplier helper failed for regime=%s (%s). Falling back to config attrs.",
-                    regime_key,
-                    exc,
-                )
-                multiplier = None
-
-        if multiplier is None:
-            fallback = {
-                "Bull": getattr(self.config, "signal_confidence_multiplier_bull", None),
-                "Sideways": getattr(self.config, "signal_confidence_multiplier_sideways", None),
-                "Bear": getattr(self.config, "signal_confidence_multiplier_bear", None),
-                "Crisis": getattr(self.config, "signal_confidence_multiplier_crisis", None),
-            }.get(regime_key)
-            if fallback is not None:
-                try:
-                    multiplier = float(fallback)
-                except (TypeError, ValueError):
-                    multiplier = None
-
-        if multiplier is None:
+        """Thin wrapper — logic lives in regime_multipliers.signal_confidence_multiplier_for_regime."""
+        if _scm_for_regime is not None:
+            multiplier = _scm_for_regime(
+                regime_today,
+                self.config,
+                loaded_multipliers=getattr(self, "regime_multipliers", None),
+            )
+        else:
             base = getattr(self.config, "signal_confidence_multiplier", None)
             multiplier = float(base) if base is not None else 1.0
 
+        regime_key = str(regime_today or "Sideways")
         if regime_key != "Sideways" and abs(multiplier - 1.0) > 1e-12:
             logger.debug(
                 "Regime %s: applying multiplier %.2f to confidence threshold",
@@ -2573,22 +2699,39 @@ class Backtester:
         return multiplier
 
     def _threshold_aggressiveness_for_regime(self, regime_today: str) -> float:
-        """Scale rolling-std gate threshold (scm × σ); values > 1.0 require stronger |score| to enter."""
-        regime_key = str(regime_today or "Sideways")
-        raw_map = getattr(self.config, "regime_threshold_aggressiveness", None)
-        if not isinstance(raw_map, dict):
-            return 1.0
-        v = raw_map.get(regime_key)
-        if v is None:
-            return 1.0
+        """Thin wrapper — logic lives in regime_multipliers.threshold_aggressiveness_for_regime."""
+        if _thresh_agg_for_regime is not None:
+            return _thresh_agg_for_regime(regime_today, self.config)
+        return 1.0
+
+    def _compute_adv_usd(self, ticker: str, price_data: dict, date) -> float:
+        """20-day average daily dollar volume. Falls back to config default."""
         try:
-            a = float(v)
-        except (TypeError, ValueError):
-            return 1.0
-        if not math.isfinite(a) or a <= 0:
-            return 1.0
-        # Avoid absurd values that would block essentially all entries.
-        return float(min(a, 20.0))
+            df = price_data.get(ticker)
+            if df is None or df.empty or "Volume" not in df.columns or "Close" not in df.columns:
+                return float(getattr(self.config, "mi_adv_usd_default", 50_000_000.0))
+            hist = df.loc[df.index <= pd.Timestamp(date)]
+            if len(hist) < 2:
+                return float(getattr(self.config, "mi_adv_usd_default", 50_000_000.0))
+            dvol = (hist["Volume"] * hist["Close"]).tail(20)
+            adv = float(dvol.mean())
+            return adv if adv > 0 else float(getattr(self.config, "mi_adv_usd_default", 50_000_000.0))
+        except Exception:
+            return float(getattr(self.config, "mi_adv_usd_default", 50_000_000.0))
+
+    def _compute_vol_daily(self, ticker: str, price_data: dict, date) -> float:
+        """20-day realised daily return volatility. Falls back to 1.5% (S&P average)."""
+        try:
+            df = price_data.get(ticker)
+            if df is None or df.empty or "Close" not in df.columns:
+                return 0.015
+            hist = df["Close"].loc[df.index <= pd.Timestamp(date)].tail(21)
+            if len(hist) < 3:
+                return 0.015
+            vol = float(hist.pct_change().dropna().std())
+            return vol if vol > 0 else 0.015
+        except Exception:
+            return 0.015
 
     def _crisis_transition_exit_price(self, pos, date, price_data) -> float | None:
         """Exit at Open when enabled; else None (caller uses Close in _close_position)."""
@@ -2617,6 +2760,15 @@ class Backtester:
 
         exit_price = self.execution.apply_exit_slippage(base_price, pos.signal)
         exit_cost = self.cost_model.cost_dollars(pos.position_size) if self.cost_model else self.execution.commission
+        # Almgren-Chriss exit impact (no permanent impact on exit leg)
+        if self._market_impact_model is not None and pos.position_size > 0:
+            try:
+                _adv = self._compute_adv_usd(tk, price_data, date)
+                _vol = self._compute_vol_daily(tk, price_data, date)
+                _mi = MarketImpactModel(adv_usd=_adv, params=self._market_impact_model.params)
+                exit_cost += _mi.cost_dollars(pos.position_size, _vol, is_exit=True)
+            except Exception:
+                pass
         # Tag exit reason on the position before logging the trade
         pos.exit_reason = reason or pos.exit_reason
 

@@ -1,33 +1,67 @@
 """
 Portfolio construction helpers.
 
-Implements deterministic top-K selection from adjusted scores and long-only
-weight normalization to sum to 1.
+Implements deterministic top-K selection from adjusted scores and
+long-only weight normalization, plus institutional-grade enhancements:
+
+  - ``construct_top_k_weights``:  fixed scoring bug (negative score shifting
+    only applies when long-only; long-short keeps mean-zero weights)
+  - ``construct_inverse_vol_weights``:  inverse-volatility weighting (1/σ)
+    with optional correlation-aware diversification cap
+  - ``construct_risk_parity_weights``: equal risk contribution (ERC)
+
+All weight functions follow the same contract:
+  - Input: scores dict + optional vol/corr data
+  - Output: dict[ticker, weight] summing to 1 (long-only) or net-zero (L/S)
 """
 
 from __future__ import annotations
 
+import logging
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Optional
 
+import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 def construct_top_k_weights(
     adjusted_scores: Mapping[str, float],
     top_k: int,
+    long_only: bool = True,
 ) -> dict[str, float]:
     """
-    Build long-only portfolio weights from adjusted scores.
+    Build portfolio weights from adjusted scores with corrected allocation logic.
 
-    Rules:
-    - Select top K by adjusted score (descending), deterministic tie-break by ticker.
-    - Convert selected scores into non-negative allocation signals:
-      * if min(score) < 0, shift by -min(score)
-      * otherwise use raw selected scores
-    - If all allocation signals sum to 0, fallback to equal weights.
-    - Return only selected tickers; weights sum to 1.
+    Fix vs. previous implementation
+    ---------------------------------
+    The old code shifted all scores by -min_score to make them non-negative.
+    This silently flips the signal direction when ALL selected scores are
+    negative (e.g. a Bear-regime day where every stock scores < 0).
+    In that case the "top" scorer was the least-negative stock, but after
+    shifting it received the highest weight — which is correct.  However the
+    total weight was then anchored to very small (near-zero) differences,
+    creating extreme concentration.
+
+    Fixed rule (long-only):
+      - Use softmax-style allocation: w_i = exp(score_i) / sum(exp(score_j))
+        This is always positive, preserves ordering, and handles negative scores
+        gracefully without distorting relative magnitude.
+      - Fallback to equal weight when score dispersion is near zero.
+
+    Long/short:
+      - Weights are proportional to raw score (positive for longs, negative for shorts)
+      - Normalized so sum(|weight|) = 1
+
+    Parameters
+    ----------
+    adjusted_scores : {ticker: score}
+    top_k : maximum number of positions to select
+    long_only : if True, select top K longs only (positive weights)
     """
     if top_k <= 0:
         return {}
@@ -46,29 +80,35 @@ def construct_top_k_weights(
         return {}
 
     ranked = sorted(clean, key=lambda x: (-x[1], x[0]))
-    selected = ranked[: min(top_k, len(ranked))]
-    selected_scores = [s for _, s in selected]
+    selected = ranked[:min(top_k, len(ranked))]
 
-    min_s = min(selected_scores)
-    if min_s < 0:
-        alloc = {t: s - min_s for t, s in selected}
+    if long_only:
+        # Softmax allocation — always positive, handles negative scores correctly
+        scores_arr = np.array([s for _, s in selected], dtype=float)
+        # Temperature-scaled softmax (temperature=1 by default)
+        scores_arr = scores_arr - scores_arr.max()   # numerical stability
+        exp_scores = np.exp(scores_arr)
+        total = float(exp_scores.sum())
+        if total <= 0 or not np.isfinite(total):
+            w = 1.0 / len(selected)
+            return {t: w for t, _ in selected}
+        return {t: float(exp_scores[i] / total) for i, (t, _) in enumerate(selected)}
+
     else:
+        # Long/short: preserve sign, normalise by sum of abs weights
         alloc = {t: s for t, s in selected}
-
-    total = sum(alloc.values())
-    if total <= 0:
-        w = 1.0 / len(selected)
-        return {t: w for t, _ in selected}
-
-    return {t: v / total for t, v in alloc.items()}
+        total_abs = sum(abs(v) for v in alloc.values())
+        if total_abs <= 0:
+            return {}
+        return {t: v / total_abs for t, v in alloc.items()}
 
 
 @dataclass(frozen=True)
 class RegimeExposureConfig:
     normal_top_k: int = 10
     normal_exposure: float = 1.0
-    crisis_top_k: int = 4
-    crisis_exposure: float = 0.25
+    crisis_top_k: int = 8     # Phase 4: raised from 4 — was leaving too much alpha on table
+    crisis_exposure: float = 0.45  # Phase 4: raised from 0.25 — was suppressing returns to 25%
     crisis_regime_value: str = "Crisis"
 
 
@@ -110,6 +150,157 @@ def construct_regime_aware_portfolio(
         "effective_exposure": exposure,
         "top_k_used": top_k,
     }
+
+
+def construct_inverse_vol_weights(
+    tickers: list[str],
+    volatilities: dict[str, float],
+    scores: Optional[Mapping[str, float]] = None,
+    max_single_weight: float = 0.25,
+    min_vol_floor: float = 0.005,
+) -> dict[str, float]:
+    """
+    Inverse-volatility weighting (1/σ) — standard at AQR, Bridgewater.
+
+    Each position's weight is inversely proportional to its realised
+    volatility.  Lower-vol stocks get higher weights, providing natural
+    risk equalisation without a full covariance matrix.
+
+    Optionally blends with score-proportional weights when *scores* provided:
+        w_blend_i = 0.5 × w_invvol_i + 0.5 × w_score_i
+
+    Parameters
+    ----------
+    tickers : positions to weight (pre-selected subset)
+    volatilities : {ticker: annualised_vol} — must include all tickers
+    scores : optional {ticker: adjusted_score} for score-blended weights
+    max_single_weight : maximum weight any single name can receive
+    min_vol_floor : floor applied to vol before inversion (prevents extreme weights)
+
+    Returns
+    -------
+    dict[ticker, weight], weights sum to 1
+    """
+    if not tickers:
+        return {}
+
+    inv_vols: dict[str, float] = {}
+    for t in tickers:
+        vol = volatilities.get(t, 0.2)       # default 20% annual vol
+        vol = max(float(vol), min_vol_floor)  # apply floor
+        inv_vols[t] = 1.0 / vol
+
+    total_inv = sum(inv_vols.values())
+    if total_inv <= 0:
+        w_eq = 1.0 / len(tickers)
+        return {t: w_eq for t in tickers}
+
+    inv_vol_weights = {t: v / total_inv for t, v in inv_vols.items()}
+
+    # Optionally blend with score weights
+    if scores is not None:
+        score_vals = [(t, float(scores.get(t, 0.0))) for t in tickers]
+        # Softmax of scores
+        s_arr = np.array([s for _, s in score_vals])
+        s_arr -= s_arr.max()
+        exp_s = np.exp(s_arr)
+        exp_sum = float(exp_s.sum())
+        score_weights = (
+            {t: float(exp_s[i] / exp_sum) for i, (t, _) in enumerate(score_vals)}
+            if exp_sum > 0
+            else {t: 1.0 / len(tickers) for t in tickers}
+        )
+        blended = {t: 0.5 * inv_vol_weights[t] + 0.5 * score_weights[t] for t in tickers}
+    else:
+        blended = inv_vol_weights
+
+    # Cap at max_single_weight and renormalise
+    capped = {t: min(w, max_single_weight) for t, w in blended.items()}
+    total_capped = sum(capped.values())
+    if total_capped <= 0:
+        w_eq = 1.0 / len(tickers)
+        return {t: w_eq for t in tickers}
+
+    return {t: w / total_capped for t, w in capped.items()}
+
+
+def construct_risk_parity_weights(
+    tickers: list[str],
+    covariance_matrix: Optional[np.ndarray] = None,
+    volatilities: Optional[dict[str, float]] = None,
+    max_iter: int = 100,
+    tol: float = 1e-8,
+) -> dict[str, float]:
+    """
+    Equal risk contribution (ERC / Risk Parity) weights.
+
+    Each asset contributes equally to total portfolio variance.
+    When *covariance_matrix* is provided, uses the full Σ (Ledoit-Wolf
+    shrinkage recommended before passing).  Otherwise falls back to
+    diagonal Σ = diag(vol²), equivalent to inverse-vol weighting.
+
+    Algorithm: Cyclical coordinate descent (Chaves et al. 2012).
+
+    Parameters
+    ----------
+    tickers : list of tickers (must align with covariance_matrix rows/cols)
+    covariance_matrix : (n×n) annualised covariance matrix
+    volatilities : fallback if no covariance_matrix supplied
+    max_iter : maximum CCD iterations
+    tol : convergence tolerance on weight vector
+
+    Returns
+    -------
+    dict[ticker, weight], weights sum to 1
+    """
+    n = len(tickers)
+    if n == 0:
+        return {}
+    if n == 1:
+        return {tickers[0]: 1.0}
+
+    # Build Σ
+    if covariance_matrix is not None and covariance_matrix.shape == (n, n):
+        Sigma = covariance_matrix.astype(float)
+    elif volatilities is not None:
+        vols = np.array([max(volatilities.get(t, 0.2), 1e-4) for t in tickers])
+        Sigma = np.diag(vols ** 2)
+    else:
+        vols = np.full(n, 0.2)
+        Sigma = np.diag(vols ** 2)
+
+    # Ensure positive-definite (add ridge for numerical stability)
+    Sigma += np.eye(n) * 1e-8
+
+    # Cyclical coordinate descent for ERC
+    w = np.ones(n) / n
+    for _ in range(max_iter):
+        w_prev = w.copy()
+        for i in range(n):
+            # Marginal risk contribution of asset i
+            Sigma_w = Sigma @ w
+            rc_i = w[i] * Sigma_w[i]
+            # Target: rc_i = portfolio_vol / n  (equal contribution)
+            port_var = float(w @ Sigma_w)
+            target_rc = port_var / n
+            # Newton step for w_i
+            a = Sigma[i, i]
+            b = float(np.dot(Sigma[i, :], w) - Sigma[i, i] * w[i])
+            # Solve: w_i * (a*w_i + b) = target_rc
+            # a*w_i^2 + b*w_i - target_rc = 0
+            if a > 0:
+                disc = b ** 2 + 4 * a * target_rc
+                if disc >= 0:
+                    w[i] = (-b + math.sqrt(disc)) / (2 * a)
+        # Renormalise
+        w = np.abs(w)
+        total = float(w.sum())
+        if total > 0:
+            w /= total
+        if np.max(np.abs(w - w_prev)) < tol:
+            break
+
+    return {t: float(w[i]) for i, t in enumerate(tickers)}
 
 
 def compute_rank_based_weights(df: pd.DataFrame, long_only: bool = False) -> pd.DataFrame:

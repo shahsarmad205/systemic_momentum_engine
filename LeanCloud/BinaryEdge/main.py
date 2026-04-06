@@ -14,37 +14,38 @@ from datetime import timedelta
 class TrendSignalAlgorithm(QCAlgorithm):
     def Initialize(self):
         # 1. Backtest Window & Capital
-        self.SetStartDate(2023, 1, 1)  # Production OOS Window
-        self.SetEndDate(2026, 1, 1)
+        self.SetStartDate(2008, 1, 1)  # User requested: 2008-2022
+        self.SetEndDate(2022, 12, 31)
+
         self.SetCash(100000)
+        self.SetWarmUp(0)  # Instant Warm-up Pillar: Using manual History backfill
         
-        # 2. Universe Selection: Automatically select Top 300 Liquid US Names
-        # Matches the liquid momentum research baseline (avg. $20M+ volume)
+        # 2. Universe Selection: Institutional Liquid Universe
         self.UniverseSettings.Resolution = Resolution.Daily
         self.AddUniverse(self.CoarseSelectionFunction)
 
-        # 3. SPY for Macro Regime & Conviction Gate
+        # 3. Benchmark for Macro Regime
         self.spy = self.AddEquity("SPY", Resolution.Daily).Symbol
-        self.threshold = self.GetParameter("conviction_threshold", 0.51)
         
-        # 4. Load Production Long Model
+        # 4. Load Models
         long_model = LoadProductionModel(self, "best_long_model.pkl")
         
-        if long_model is None:
-            self.Error("Long Alpha model not found. Deployment aborted.")
-            self.Quit()
-            
-        # 5. Connect Alpha Model (Pillar 7 Long-Only)
-        self.AddAlpha(TrendSignalAlphaModel(long_model, None, self.spy))
+        # 5. Connect Alpha Model
+        self.AddAlpha(TrendSignalAlphaModel(self, long_model, None, self.spy))
         
-        # 6. Portfolio Construction: Equal weighting for the Top 10 insights
-        self.SetPortfolioConstruction(EqualWeightingPortfolioConstructionModel(lambda time: None))
-        
-        # 7. Risk Management (Optional: trailing stop-losses from research engine)
-        # self.AddRiskManagement(TrailingStopRiskManagementModel(0.05))
+        # 6. Portfolio Construction: Weekly rebalance only (matches 10-day holding period).
+        # CRITICAL: RebalancePortfolioOnInsightChanges=False prevents the refresh insights
+        # (emitted every 5 days to keep LEAN signals alive) from triggering a full
+        # portfolio rebalance each time — that was causing 16,000+ orders and $16k fees.
+        self.Settings.RebalancePortfolioOnInsightChanges = False
+        self.Settings.RebalancePortfolioOnSecurityChanges = False
+        self.SetPortfolioConstruction(EqualWeightingPortfolioConstructionModel(
+            timedelta(days=7)  # Rebalance once per week, matching ~5-day holding period
+        ))
         
         # 8. Execution: Immediate at Market Open
         self.SetExecution(ImmediateExecutionModel())
+
 
     def OnData(self, data):
         # Additional logic if not using AlphaModel Framework
@@ -52,9 +53,18 @@ class TrendSignalAlgorithm(QCAlgorithm):
 
     def CoarseSelectionFunction(self, coarse):
         """
-        Dynamically filter the universe for high-liquidity names.
-        Matches the $20M dollar-volume floor in candidates.py.
+        Institutional Filter: Price > $10 and Dollar Volume > $100M.
+        Mirrors the 'sp500' mode in backtest_config.yaml.
         """
-        sorted_by_dollar_volume = sorted(coarse, key=lambda x: x.DollarVolume, reverse=True)
-        # Return top 300 liquid candidates (Institutional Universe)
-        return [x.Symbol for x in sorted_by_dollar_volume[:300]]
+        # Convert iterator to list once to prevent exhaustion
+        coarse_list = list(coarse)
+        
+        # Filter for Price and Institutional Volume
+        filtered = [x for x in coarse_list if x.Price > 10 and x.DollarVolume > 1e8]
+        
+        # Diagnostic Log: Monitor the universe funnel
+        self.Log(f"UNIVERSE - Total Coarse: {len(coarse_list)} | Passed Filters: {len(filtered)}")
+        
+        # Sort by Volume and take Top 500 to match S&P 500 breadth
+        sorted_by_vol = sorted(filtered, key=lambda x: x.DollarVolume, reverse=True)
+        return [x.Symbol for x in sorted_by_vol[:500]]

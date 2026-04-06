@@ -137,12 +137,39 @@ def walk_forward_splits(
     end_date: str,
     n_windows: int = 4,
     train_ratio: float = 0.7,
+    embargo_days: int = 21,
 ) -> list[dict]:
     """
-    Generate rolling walk-forward train/test date splits.
+    Generate rolling walk-forward train/test date splits with embargo period.
 
-    Returns list of dicts:
-        {"train_start", "train_end", "test_start", "test_end"}
+    The **embargo** is a gap between the end of the training set and the
+    start of the test set.  It prevents leakage from autocorrelated returns:
+    if a trade opened on the last training day is still open at the start of
+    the test window, and we use that trade's outcome in both training loss and
+    test performance, we have a leakage path.
+
+    Institutional standard (López de Prado 2018, Chapter 7):
+      - Embargo = max(holding_period, 1 month) trading days
+      - Purging: remove training observations where the forward-return
+        window overlaps with the test period (handled in feature_builder)
+
+    Parameters
+    ----------
+    start_date, end_date : str
+        ISO date strings for the full backtest period.
+    n_windows : int
+        Number of walk-forward windows.
+    train_ratio : float
+        Fraction of each window used for training (before embargo).
+    embargo_days : int
+        Calendar days to exclude between train_end and test_start.
+        Default: 21 calendar days ≈ 15 trading days (covers a 10-day
+        holding period with buffer).
+
+    Returns
+    -------
+    list of dicts:
+        {"train_start", "train_end", "test_start", "test_end", "embargo_days"}
     """
     start = pd.Timestamp(start_date)
     end = pd.Timestamp(end_date)
@@ -155,7 +182,7 @@ def walk_forward_splits(
         w_end = min(w_start + pd.Timedelta(days=window_size), end)
 
         train_end = w_start + pd.Timedelta(days=int(window_size * train_ratio))
-        test_start = train_end + pd.Timedelta(days=1)
+        test_start = train_end + pd.Timedelta(days=max(embargo_days, 1))
 
         if test_start >= w_end:
             continue
@@ -165,6 +192,7 @@ def walk_forward_splits(
             "train_end": train_end.strftime("%Y-%m-%d"),
             "test_start": test_start.strftime("%Y-%m-%d"),
             "test_end": w_end.strftime("%Y-%m-%d"),
+            "embargo_days": embargo_days,
         })
 
     return splits
@@ -194,11 +222,13 @@ def run_walk_forward(
 
     from .backtester import Backtester
 
+    embargo_days = int(getattr(config, "walk_forward_embargo_days", 21))
     splits = walk_forward_splits(
         config.start_date,
         config.end_date,
         config.walk_forward_windows,
         config.walk_forward_train_ratio,
+        embargo_days=embargo_days,
     )
 
     if train_weights is None:
@@ -286,6 +316,35 @@ def run_walk_forward(
         os.makedirs(os.path.dirname(report_path) or ".", exist_ok=True)
         summary_df.to_csv(report_path, index=False)
         print(f"\n  Walk-forward validation report saved → {report_path}")
+
+    # Statistical significance report on OOS results
+    oos_sharpes = summary_df["oos_sharpe"].dropna().tolist() if "oos_sharpe" in summary_df.columns else []
+    if oos_sharpes:
+        try:
+            from .metrics import walk_forward_significance_report
+            n_days = max(
+                int((pd.Timestamp(config.end_date) - pd.Timestamp(config.start_date)).days
+                    / max(len(splits), 1) * (1 - getattr(config, "walk_forward_train_ratio", 0.7))),
+                20,
+            )
+            sig_report = walk_forward_significance_report(
+                oos_sharpes=oos_sharpes,
+                n_days_per_window=n_days,
+                n_total_trials=len(splits),
+            )
+            print(f"\n{'='*65}")
+            print("  WALK-FORWARD STATISTICAL SIGNIFICANCE REPORT")
+            print(f"{'='*65}")
+            print(f"  {sig_report.get('summary', '')}")
+            print(f"  Mean OOS Sharpe   : {sig_report.get('mean_oos_sharpe', 0):.4f}")
+            print(f"  Positive fraction : {sig_report.get('positive_fraction', 0):.1%}")
+            print(f"  Deflated SR (DSR) : {sig_report.get('deflated_sharpe_ratio', 0):.4f}  "
+                  f"({'CREDIBLE ✓' if sig_report.get('dsr_is_credible') else 'SUSPECT ✗'})")
+            print(f"  BHY significant   : {sig_report.get('bhy_n_significant', 0)}/{len(oos_sharpes)} windows")
+            print(f"  Bonferroni α      : {sig_report.get('bonferroni_corrected_alpha', 0):.5f}")
+            print(f"{'='*65}")
+        except Exception as exc:
+            print(f"\n  [WARN] Statistical significance report failed: {exc}")
 
     return results, summary_df
 
@@ -489,3 +548,70 @@ def run_execution_costs_sensitivity(
         if verbose:
             print(f"  Saved → {report_path}")
     return df
+
+
+# ------------------------------------------------------------------
+# Returns matrix / vol helpers (extracted from Backtester)
+# ------------------------------------------------------------------
+
+def build_returns_matrix(
+    price_data: dict,
+    as_of_date: "pd.Timestamp",
+    lookback_days: int,
+) -> "pd.DataFrame | None":
+    """
+    Build DataFrame of daily returns for all tickers up to *as_of_date*.
+
+    Uses only past data (no lookahead). Returns None if insufficient data.
+    Extracted from ``Backtester._build_returns_matrix`` so it can be used
+    independently (e.g. in tests and Monte Carlo runners).
+    """
+    series_list = []
+    for ticker, df in price_data.items():
+        if df is None or df.empty or "Close" not in df.columns:
+            continue
+        price_col = "AdjClose" if "AdjClose" in df.columns else "Close"
+        past = df[price_col].loc[df.index <= as_of_date].tail(lookback_days + 1)
+        if len(past) < 2:
+            continue
+        rets = past.pct_change().dropna()
+        if len(rets) < 2:
+            continue
+        rets.name = ticker
+        series_list.append(rets)
+    if not series_list:
+        return None
+    out = pd.concat(series_list, axis=1, join="inner")
+    if out.empty or out.shape[0] < 2 or out.shape[1] < 1:
+        return None
+    out = out.tail(lookback_days)
+    if len(out) < 2:
+        return None
+    return out
+
+
+def annualized_vol(
+    price_data: dict,
+    ticker: str,
+    as_of_date: "pd.Timestamp",
+    lookback_days: int = 20,
+) -> "float | None":
+    """
+    Return annualized volatility (std of daily returns) for *ticker* as of
+    *as_of_date*, or None if insufficient data.
+
+    Extracted from ``Backtester._annualized_vol``.
+    """
+    if ticker not in price_data:
+        return None
+    df = price_data[ticker]
+    if "Close" not in df.columns or df.empty:
+        return None
+    price_col = "AdjClose" if "AdjClose" in df.columns else "Close"
+    series = df[price_col].loc[df.index <= as_of_date].tail(lookback_days + 1)
+    if len(series) < 2:
+        return None
+    rets = series.pct_change().dropna()
+    if len(rets) < 2:
+        return None
+    return float(rets.std() * (252 ** 0.5))

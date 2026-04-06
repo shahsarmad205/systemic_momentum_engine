@@ -6,7 +6,8 @@ Exports core engine, signal, configuration, and analysis utilities.
 from __future__ import annotations
 
 # Core Engine and Signals
-from .backtester import Backtester, BacktestResult
+from .backtester import Backtester
+from .result import BacktestResult  # canonical location; backtester re-exports for backward compat
 from .signals import SignalEngine
 from .engine import StrategyEngine
 
@@ -41,7 +42,13 @@ from .plotting import (
 # Strategy candidates (Flattened from strategy/)
 from .candidates import build_ranked_candidates
 from .cross_sectional import build_cross_sectional_candidates
-from .regime_multipliers import get_multiplier, load_regime_multipliers
+from .regime_multipliers import (
+    get_multiplier,
+    load_regime_multipliers,
+    signal_confidence_multiplier_for_regime,
+    threshold_aggressiveness_for_regime,
+)
+from .analytics import annualized_vol, build_returns_matrix
 
 __all__ = [
     "Backtester",

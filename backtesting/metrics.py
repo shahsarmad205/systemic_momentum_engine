@@ -1320,6 +1320,269 @@ def compute_probabilistic_sharpe_ratio(observed_sr: float, n_days: int, skew: fl
     # SR variance with non-normal correction
     sr_variance = (1 - skew * observed_sr + ((kurt - 1) / 4) * observed_sr**2) / (n_days - 1)
     if sr_variance <= 0: return 0.0
-    
+
     psr = norm.cdf((observed_sr - benchmark_sr) / np.sqrt(sr_variance))
     return float(psr)
+
+
+# ------------------------------------------------------------------
+# Deflated Sharpe Ratio (DSR)
+# ------------------------------------------------------------------
+
+def compute_deflated_sharpe_ratio(
+    observed_sr: float,
+    n_days: int,
+    n_trials: int,
+    skew: float = 0.0,
+    kurt: float = 3.0,
+    benchmark_sr: float = 0.0,
+) -> float:
+    """
+    López de Prado (2018) Deflated Sharpe Ratio.
+
+    Corrects the Probabilistic Sharpe Ratio for multiple testing across
+    *n_trials* strategies/parameter sets tried before selecting the
+    reported Sharpe.
+
+    DSR = PSR(SR*, T, γ̂₁, γ̂₂)
+
+    where SR* is the expected maximum SR under the null when testing
+    *n_trials* strategies, approximated via the expected maximum of
+    n_trials i.i.d. standard normals:
+
+        SR* ≈ (1 - γ_EM) * Φ⁻¹(1 - 1/n_trials)
+             + γ_EM * Φ⁻¹(1 - 1/(n_trials * e))
+
+    where γ_EM ≈ 0.5772 (Euler-Mascheroni constant).
+
+    Parameters
+    ----------
+    observed_sr : float
+        Annualised Sharpe ratio of the selected strategy.
+    n_days : int
+        Number of trading days in the backtest.
+    n_trials : int
+        Number of strategies / parameter combinations evaluated
+        (including variations rejected before arriving at this one).
+    skew : float
+        Skewness of strategy daily returns.
+    kurt : float
+        Excess kurtosis of strategy daily returns.
+    benchmark_sr : float
+        Minimum acceptable Sharpe (default 0: test if truly positive).
+
+    Returns
+    -------
+    float in [0, 1]: probability that the observed SR is genuine.
+    Values < 0.95 indicate the result may be selection-bias artefact.
+
+    References
+    ----------
+    Bailey, D. & López de Prado, M. (2014). The deflated Sharpe ratio:
+    correcting for selection bias, backtest overfitting, and non-normality.
+    Journal of Portfolio Management 40(5), 94–107.
+    """
+    if n_trials < 1:
+        n_trials = 1
+
+    # Expected maximum SR under the null (Equation 4 in Bailey & LdP 2014)
+    # e_max is the expected maximum of n_trials standard normal variates.
+    # It represents the expected max *z-statistic*, not an annualized SR.
+    EULER_MASCHERONI = 0.5772156649
+    e_max = (
+        (1 - EULER_MASCHERONI) * norm.ppf(1.0 - 1.0 / n_trials)
+        + EULER_MASCHERONI * norm.ppf(1.0 - 1.0 / (n_trials * np.e))
+    ) if n_trials > 1 else 0.0
+
+    # Convert e_max (dimensionless z-score) to annualized SR units.
+    #
+    # Derivation: for i.i.d. returns with T observations, the sample SR
+    # has std ≈ 1/sqrt(T) in per-period units.  The corresponding
+    # annualized SR has std ≈ sqrt(252/T).  So the expected maximum
+    # annualized SR across n_trials strategies under the null is:
+    #
+    #    SR*_ann = e_max × sqrt(252 / n_days)
+    #
+    # This is the scale-adjusted benchmark to compare against observed_sr.
+    sr_star_ann = e_max * np.sqrt(252.0 / max(n_days, 1))
+    sr_star = max(sr_star_ann, float(benchmark_sr))
+
+    # SR variance in annualized units (Bailey & LdP 2012, Equation 5)
+    # Uses non-normal correction for skewness and excess kurtosis.
+    sr_variance = (
+        (1.0 - skew * observed_sr + ((kurt - 1.0) / 4.0) * observed_sr ** 2)
+        / max(n_days - 1, 1)
+    )
+    if sr_variance <= 0:
+        return 1.0 if observed_sr > sr_star else 0.0
+
+    dsr = float(norm.cdf((observed_sr - sr_star) / np.sqrt(sr_variance)))
+    return dsr
+
+
+# ------------------------------------------------------------------
+# Multiple testing correction (Bonferroni + BHY)
+# ------------------------------------------------------------------
+
+def bonferroni_correction(
+    p_values: list[float],
+    alpha: float = 0.05,
+) -> dict:
+    """
+    Family-wise error rate control via Bonferroni correction.
+
+    Parameters
+    ----------
+    p_values : list of p-values (one per strategy/parameter tested)
+    alpha : significance level (default 5%)
+
+    Returns
+    -------
+    dict with:
+        corrected_alpha : float — the adjusted significance threshold
+        rejected : list[bool] — True if H₀ rejected after correction
+        n_significant : int
+    """
+    n = len(p_values)
+    if n == 0:
+        return {"corrected_alpha": alpha, "rejected": [], "n_significant": 0}
+    corrected_alpha = alpha / n
+    rejected = [p <= corrected_alpha for p in p_values]
+    return {
+        "corrected_alpha": corrected_alpha,
+        "rejected": rejected,
+        "n_significant": sum(rejected),
+    }
+
+
+def bhy_correction(
+    p_values: list[float],
+    alpha: float = 0.05,
+) -> dict:
+    """
+    Benjamini-Hochberg-Yekutieli (BHY) false discovery rate correction.
+
+    More powerful than Bonferroni when hypotheses are correlated (typical
+    in strategy selection, where strategies share the same market data).
+
+    Parameters
+    ----------
+    p_values : list of p-values
+    alpha : FDR level (default 5%)
+
+    Returns
+    -------
+    dict with:
+        threshold : float — BHY critical threshold
+        rejected : list[bool] — True if H₀ rejected
+        n_significant : int
+        q_values : list[float] — adjusted p-values
+    """
+    n = len(p_values)
+    if n == 0:
+        return {"threshold": 0.0, "rejected": [], "n_significant": 0, "q_values": []}
+
+    # BHY uses c(m) = sum(1/k for k in 1..m) instead of c(m) = 1 (BH assumes independence)
+    c_m = float(sum(1.0 / k for k in range(1, n + 1)))
+
+    indexed = sorted(enumerate(p_values), key=lambda x: x[1])
+    ranks = {idx: rank + 1 for rank, (idx, _) in enumerate(indexed)}
+
+    q_values = [0.0] * n
+    rejected = [False] * n
+    threshold = 0.0
+
+    for orig_idx, p in indexed:
+        rank = ranks[orig_idx]
+        bhy_threshold = (rank / n) * (alpha / c_m)
+        q_val = min(p * n * c_m / rank, 1.0)
+        q_values[orig_idx] = q_val
+        if p <= bhy_threshold:
+            rejected[orig_idx] = True
+            threshold = max(threshold, bhy_threshold)
+
+    return {
+        "threshold": threshold,
+        "rejected": rejected,
+        "n_significant": sum(rejected),
+        "q_values": q_values,
+    }
+
+
+def walk_forward_significance_report(
+    oos_sharpes: list[float],
+    n_days_per_window: int,
+    n_total_trials: int | None = None,
+    alpha: float = 0.05,
+) -> dict:
+    """
+    Statistical significance analysis of walk-forward OOS Sharpe ratios.
+
+    Applies:
+    1. Individual window t-test (H₀: SR ≤ 0)
+    2. Bonferroni correction across windows
+    3. BHY correction across windows
+    4. DSR for the best window (corrects for selecting the winner)
+
+    Parameters
+    ----------
+    oos_sharpes : list of annualised Sharpe ratios, one per OOS window
+    n_days_per_window : approximate trading days per OOS window
+    n_total_trials : total strategies/parameters tried (for DSR).
+                     If None, defaults to len(oos_sharpes).
+    alpha : significance level
+
+    Returns
+    -------
+    dict with full statistical report
+    """
+    n_windows = len(oos_sharpes)
+    if n_windows == 0:
+        return {}
+
+    if n_total_trials is None:
+        n_total_trials = n_windows
+
+    # Convert annualised SR to t-statistics (SR_ann = SR_daily × sqrt(252))
+    # T = SR_ann × sqrt(T) / sqrt(252) ... simplify:
+    # t-stat for H₀: μ = 0 from Sharpe: t = SR_ann × sqrt(n) / sqrt(252)
+    t_stats = [sr * np.sqrt(n_days_per_window / 252) for sr in oos_sharpes]
+    p_values = [float(2.0 * (1.0 - norm.cdf(abs(t)))) for t in t_stats]
+
+    bonf = bonferroni_correction(p_values, alpha=alpha)
+    bhy  = bhy_correction(p_values, alpha=alpha)
+
+    best_sr = max(oos_sharpes)
+    best_idx = oos_sharpes.index(best_sr)
+    dsr = compute_deflated_sharpe_ratio(
+        observed_sr=best_sr,
+        n_days=n_days_per_window * n_windows,
+        n_trials=n_total_trials,
+    )
+
+    mean_sr = float(np.mean(oos_sharpes))
+    positive_fraction = float(sum(s > 0 for s in oos_sharpes) / n_windows)
+
+    return {
+        "n_windows": n_windows,
+        "mean_oos_sharpe": round(mean_sr, 4),
+        "positive_fraction": round(positive_fraction, 4),
+        "oos_sharpes": oos_sharpes,
+        "t_statistics": [round(t, 4) for t in t_stats],
+        "p_values_raw": [round(p, 6) for p in p_values],
+        "bonferroni_corrected_alpha": round(bonf["corrected_alpha"], 6),
+        "bonferroni_n_significant": bonf["n_significant"],
+        "bonferroni_rejected": bonf["rejected"],
+        "bhy_n_significant": bhy["n_significant"],
+        "bhy_rejected": bhy["rejected"],
+        "bhy_q_values": [round(q, 6) for q in bhy["q_values"]],
+        "best_window_idx": best_idx,
+        "best_window_sr": round(best_sr, 4),
+        "deflated_sharpe_ratio": round(dsr, 4),
+        "dsr_is_credible": dsr >= (1.0 - alpha),
+        "summary": (
+            f"WF OOS: {n_windows} windows | mean SR={mean_sr:.3f} | "
+            f"{bonf['n_significant']}/{n_windows} Bonferroni-significant | "
+            f"DSR={dsr:.3f} ({'CREDIBLE' if dsr >= 0.95 else 'SUSPECT'})"
+        ),
+    }

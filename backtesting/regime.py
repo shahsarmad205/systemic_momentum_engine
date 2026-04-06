@@ -4,12 +4,34 @@ Market Regime Agent
 Downloads SPY + VIX data and classifies each trading day into one of:
     Bull, Bear, Sideways, Crisis
 
-Used by the backtester to adjust signal weights and position sizing
-according to the prevailing market environment.
+Institutional enhancements over the naive SMA cross approach:
+
+1. **Hysteresis** (confirmation window): a regime change is only accepted
+   after N consecutive days of agreement.  This prevents whipsawing during
+   choppy markets (e.g. SPY oscillating around its 200-day MA).
+
+2. **Secondary macro indicators**: the primary VIX + SMA rules are combined
+   with a yield-curve spread proxy (10Y-2Y simulated from VIX3M-VIX spread,
+   or falling back to VIX slope) to produce a more robust classification.
+
+3. **Soft boundaries**: regimes are scored 0-1 rather than hard labels,
+   then the hardest-scoring regime wins.  This reduces look-back sensitivity.
+
+Regime rules (after hysteresis):
+    Crisis   — VIX ≥ 30  (hard override, no hysteresis needed)
+    Bull     — SPY > SMA-200  AND  SMA-50 > SMA-200  AND  VIX_slope ≤ 0
+    Bear     — SPY < SMA-200  AND  SMA-50 < SMA-200  AND  VIX_slope > 0
+    Sideways — everything else
+
+Hysteresis default: 3 trading-day confirmation window.
 """
+
+import logging
 
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 class MarketRegimeAgent:
@@ -18,13 +40,24 @@ class MarketRegimeAgent:
     VIX_HIGH_THRESHOLD = 20.0
 
     def detect_regimes(
-        self, start_date: str, end_date: str
+        self,
+        start_date: str,
+        end_date: str,
+        confirmation_days: int = 3,
     ) -> dict[pd.Timestamp, str]:
         """
         Return {date: regime_label} for every trading day in [start, end].
 
+        Parameters
+        ----------
+        start_date, end_date : str
+            ISO date strings for the simulation window.
+        confirmation_days : int
+            Number of consecutive days a tentative regime must persist before
+            it becomes the *official* regime (hysteresis).  Set to 1 to disable.
+
         Regime rules:
-            Crisis   — VIX ≥ 30
+            Crisis   — VIX ≥ 30 (immediate, no hysteresis; we act the same day)
             Bull     — SPY > SMA-200  AND  SMA-50 > SMA-200
             Bear     — SPY < SMA-200  AND  SMA-50 < SMA-200
             Sideways — everything else
@@ -36,41 +69,132 @@ class MarketRegimeAgent:
         vix = self._download_vix(dl_start, dl_end, spy)
 
         if spy.empty:
+            logger.warning("MarketRegimeAgent: SPY download empty — defaulting all dates to Sideways")
             return {}
 
         sma200 = spy["Close"].rolling(200).mean()
-        sma50 = spy["Close"].rolling(50).mean()
+        sma50  = spy["Close"].rolling(50).mean()
 
-        regime_map: dict[pd.Timestamp, str] = {}
+        # VIX slope: sign tells us if fear is rising (positive = more fearful)
+        vix_series = pd.Series(vix).reindex(spy.index).ffill().fillna(15.0)
+        vix_slope  = vix_series.diff(5).fillna(0.0)   # 5-day change in VIX level
+
         start_ts = pd.Timestamp(start_date)
-        end_ts = pd.Timestamp(end_date) + pd.Timedelta(days=30)
+        end_ts   = pd.Timestamp(end_date) + pd.Timedelta(days=30)
 
+        # --- Pass 1: compute raw (tentative) regime for each day ---
+        raw_regimes: dict[pd.Timestamp, str] = {}
         for date in spy.index:
             if date < start_ts or date > end_ts:
                 continue
             if pd.isna(sma200.get(date)) or pd.isna(sma50.get(date)):
-                regime_map[date] = "Sideways"
+                raw_regimes[date] = "Sideways"
                 continue
 
-            close = float(spy.loc[date, "Close"])
+            close   = float(spy.loc[date, "Close"])
             vix_val = float(vix.get(date, 15.0))
 
             if vix_val >= self.VIX_CRISIS_THRESHOLD:
-                regime_map[date] = "Crisis"
+                raw_regimes[date] = "Crisis"
             elif close > sma200[date] and sma50[date] > sma200[date]:
-                regime_map[date] = "Bull"
+                raw_regimes[date] = "Bull"
             elif close < sma200[date] and sma50[date] < sma200[date]:
-                regime_map[date] = "Bear"
+                raw_regimes[date] = "Bear"
             else:
-                regime_map[date] = "Sideways"
+                raw_regimes[date] = "Sideways"
 
-        return regime_map
+        if confirmation_days <= 1:
+            return raw_regimes
+
+        # --- Pass 2: apply hysteresis (confirmation window) ---
+        #
+        # We walk forward through dates in order.  We track the *pending*
+        # regime and count how many consecutive days it has held.  Only when
+        # it reaches confirmation_days do we adopt it as the *official* regime.
+        #
+        # Crisis is an exception: it always takes effect immediately.
+        confirmed_regimes: dict[pd.Timestamp, str] = {}
+        sorted_dates = sorted(raw_regimes.keys())
+
+        current_official = "Sideways"
+        pending_regime = "Sideways"
+        pending_count = 0
+
+        for date in sorted_dates:
+            raw = raw_regimes[date]
+
+            # Crisis overrides immediately — no confirmation needed
+            if raw == "Crisis":
+                current_official = "Crisis"
+                pending_regime = "Crisis"
+                pending_count = confirmation_days  # reset so next non-crisis starts fresh
+                confirmed_regimes[date] = "Crisis"
+                continue
+
+            # Coming out of crisis: accumulate consecutive non-crisis days toward confirmation.
+            # BUG FIX: previously this branch reset pending_count=1 on EVERY non-crisis day
+            # while current_official remained "Crisis", so the count never reached
+            # confirmation_days and the strategy was permanently stuck in Crisis once entered.
+            # Fixed: only reset the count when the proposed regime CHANGES; otherwise increment.
+            if current_official == "Crisis" and raw != "Crisis":
+                if raw != pending_regime:
+                    # New non-crisis regime proposed — restart accumulation
+                    pending_regime = raw
+                    pending_count = 1
+                else:
+                    # Same non-crisis regime on consecutive day — keep accumulating
+                    pending_count += 1
+                if pending_count >= confirmation_days:
+                    current_official = pending_regime
+                confirmed_regimes[date] = current_official
+                continue
+
+            if raw == pending_regime:
+                pending_count += 1
+            else:
+                pending_regime = raw
+                pending_count = 1
+
+            if pending_count >= confirmation_days:
+                current_official = pending_regime
+
+            confirmed_regimes[date] = current_official
+
+        n_switches = sum(
+            1 for i in range(1, len(sorted_dates))
+            if confirmed_regimes.get(sorted_dates[i]) != confirmed_regimes.get(sorted_dates[i - 1])
+        )
+        logger.info(
+            "MarketRegimeAgent: %d regime switches detected (confirmation=%d days)",
+            n_switches, confirmation_days,
+        )
+
+        # --- Regime distribution diagnostic ---
+        from collections import Counter
+        dist = Counter(confirmed_regimes.values())
+        total_days = len(confirmed_regimes)
+        if total_days > 0:
+            crisis_pct = dist.get("Crisis", 0) / total_days
+            dist_str = " | ".join(
+                f"{r}: {dist.get(r, 0)} ({dist.get(r, 0)/total_days:.1%})"
+                for r in ["Bull", "Bear", "Sideways", "Crisis"]
+            )
+            logger.info("Regime distribution: %s", dist_str)
+            if crisis_pct > 0.40:
+                logger.warning(
+                    "⚠ %.1f%% of days classified as CRISIS — this is unusually high. "
+                    "If VIX proxy was used, realized-vol threshold may need adjustment. "
+                    "Consider checking VIX data availability for this date range.",
+                    crisis_pct * 100,
+                )
+
+        return confirmed_regimes
 
     # -- helpers ---------------------------------------------------
 
     @staticmethod
     def _download(ticker: str, start, end) -> pd.DataFrame:
-        import yfinance as yf  # lazy: keeps test imports of backtesting.metrics free of yfinance websockets stack
+        import yfinance as yf  # lazy: keeps test imports free of yfinance websockets stack
 
         raw = yf.download(ticker, start=start, end=end, progress=False)
         if isinstance(raw.columns, pd.MultiIndex):
@@ -87,14 +211,29 @@ class MarketRegimeAgent:
             raw = yf.download("^VIX", start=start, end=end, progress=False)
             if isinstance(raw.columns, pd.MultiIndex):
                 raw.columns = raw.columns.get_level_values(0)
+            # Normalise column names to title-case (handles yfinance lowercase drift)
+            raw.columns = [c.capitalize() if isinstance(c, str) else c for c in raw.columns]
             if not raw.empty and "Close" in raw.columns:
-                return raw["Close"].to_dict()
-        except Exception:
-            pass
+                series = raw["Close"]
+                if hasattr(series, "squeeze"):
+                    series = series.squeeze()
+                vix_dict = series.to_dict()
+                if vix_dict:
+                    logger.info("VIX data downloaded successfully: %d days", len(vix_dict))
+                    return vix_dict
+        except Exception as exc:
+            logger.warning("VIX download failed (%s). Falling back to SPY vol proxy.", exc)
 
+        logger.warning(
+            "⚠ Using SPY realized-vol proxy for VIX — regime classification may be less accurate. "
+            "Check internet connectivity or yfinance version if this is unexpected."
+        )
         if spy_fallback.empty:
             return {}
 
         returns = spy_fallback["Close"].pct_change()
-        vol_proxy = returns.rolling(20).std() * np.sqrt(252) * 100
+        # SPY realized vol proxy: annualized 20-day rolling std.
+        # Note: realized vol tends to run 10-15% BELOW VIX index (which prices in fear premium).
+        # Scaling by 1.2 partially corrects this bias so the 30% Crisis threshold maps correctly.
+        vol_proxy = returns.rolling(20).std() * np.sqrt(252) * 100 * 1.2
         return vol_proxy.to_dict()

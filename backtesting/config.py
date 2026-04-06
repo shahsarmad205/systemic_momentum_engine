@@ -60,8 +60,11 @@ class BacktestConfig:
     bear_regime_intraday_exit_drawdown_pct: float = 0.02
     # If True (long-only), do not open any new positions on Bear days (signal has no edge).
     bear_skip_new_entries: bool = False
-    # Long-only: on transition into Bear, close inherited longs (reduces holdthrough losses on Bear days).
+    # On transition into Bear, close inherited longs immediately.
     bear_liquidate_longs_on_regime_entry: bool = False
+    # On Bear entry, also truncate any surviving longs that weren't liquidated to at most N more days.
+    # Handles positions opened during the hysteresis window that bypass the one-time liquidation.
+    bear_max_carry_days: int = 2
 
     # When market regime first enters Crisis: shorten planned_exit for existing positions
     # (losers exit sooner; winners get a few extra days). See backtester crisis transition block.
@@ -87,6 +90,8 @@ class BacktestConfig:
     crisis_signal_quantile: float = 0.95
     # Max gross exposure (fraction of equity) while market regime is Bear.
     bear_gross_cap_fraction: float = 0.7
+    # Max gross exposure (fraction of equity) while market regime is Crisis.
+    crisis_gross_cap_fraction: float = 0.6
 
     # Rebalance frequency for generating new signals / updates.
     # Expressed in trading days (1 = daily, 5 = weekly).
@@ -135,6 +140,12 @@ class BacktestConfig:
     short_borrow_cost_bps: float = 0.0
     vol_scaling_enabled: bool = True
     vol_scaling_target: float = 0.15
+    # VIX-threshold deleveraging: when VIX crosses high_vix_threshold, multiply all new
+    # position sizes by vix_deleverage_scaling_factor (< 1).  This is applied on top of
+    # the existing SPY-vol scalar so both mechanisms stack.
+    vix_deleverage_enabled: bool = False
+    vix_deleverage_high_threshold: float = 28.0   # VIX level at which scaling kicks in
+    vix_deleverage_scaling_factor: float = 0.5    # multiply position sizes by this amount
     max_drawdown_pct: float = 0.20         # circuit breaker: halt new trades beyond this DD (e.g. 0.20 = -20%)
     drawdown_resume_pct: float = 0.10      # resume trading once DD improves above this level
     severe_drawdown_close_all_pct: float = 0.0  # 0=disabled; e.g. 0.30 = close all positions if DD worse than -30%
@@ -155,6 +166,11 @@ class BacktestConfig:
     # Regimes where shorts are suppressed even when allow_shorts=True.
     regime_suppress_shorts: list[str] = field(default_factory=lambda: ["Bull", "Crisis"])
 
+    # Regime hysteresis: number of consecutive days a tentative regime must
+    # persist before becoming the official regime. 1 = no hysteresis (legacy).
+    # 3 is the institutional default (prevents whipsawing around MA thresholds).
+    regime_confirmation_days: int = 3
+
     # Execution costs (realistic trading: commission + spread + slippage in bps)
     execution_costs_enabled: bool = True
     execution_costs_commission_bps: float = 2.0
@@ -163,6 +179,14 @@ class BacktestConfig:
     execution_costs_sensitivity_test: bool = False
     execution_costs_scenarios: list[float] = field(default_factory=lambda: [5.0, 10.0, 20.0])  # total bps
     execution_costs_sensitivity_report_path: str = "output/research/cost_sensitivity.csv"
+
+    # Almgren-Chriss market impact model (replaces ad-hoc k_bps * sqrt(rel_size))
+    # Enabled by default; disable to fall back to flat slippage_bps only.
+    market_impact_enabled: bool = True
+    mi_eta: float = 0.142           # temporary impact coefficient (Kissell & Malamut 2005)
+    mi_alpha: float = 0.314         # permanent impact coefficient
+    mi_gamma: float = 0.6           # participation rate exponent (0.5 = pure sqrt law)
+    mi_adv_usd_default: float = 50_000_000.0  # fallback ADV when volume data unavailable
 
     # Signal filtering
     min_signal_strength: float = 0.3
@@ -197,7 +221,8 @@ class BacktestConfig:
     ml_short_holding_period_days: int = 2
     ml_short_min_signal_strength: float = 0.6
     ml_short_overextension_threshold: float = 0.05
-    ml_short_snap_profit_pct: float = 0.02
+    ml_short_snap_profit_pct: float = 0.04
+    ml_short_stop_loss_pct: float = 0.0   # 0=disabled; e.g. 0.03 = exit short if price rises 3% (cap losses)
     ml_short_min_liquidity_usd: float = 20_000_000.0
     ml_short_max_squeeze_vol_ratio: float = 2.5
     ml_model_type: str = "classifier"
@@ -269,6 +294,10 @@ class BacktestConfig:
     walk_forward_train_ratio: float = 0.7
     walk_forward_train_weights: bool = True   # train weight model on train window before OOS backtest (learned mode)
     walk_forward_report_path: str = "output/backtests/walk_forward_validation_report.csv"
+    # Embargo: calendar-day gap between train_end and test_start to prevent
+    # autocorrelation leakage (López de Prado 2018, Ch. 7).
+    # Default 21 calendar days ≈ 15 trading days (covers a 10-day holding period).
+    walk_forward_embargo_days: int = 21
     ic_decay_lags: list[int] = field(default_factory=lambda: [1, 5, 10, 20])
     cost_sensitivity_scenarios: list[dict] | None = None  # optional; else use DEFAULT_COST_SCENARIOS
 
@@ -365,7 +394,9 @@ def load_config(path: str = "backtest_config.yaml") -> BacktestConfig:
         risk.get("bear_regime_intraday_exit_drawdown_pct", cfg.bear_regime_intraday_exit_drawdown_pct)
     )
     cfg.bear_skip_new_entries = bool(risk.get("bear_skip_new_entries", cfg.bear_skip_new_entries))
+    cfg.bear_max_carry_days = int(risk.get("bear_max_carry_days", cfg.bear_max_carry_days))
     cfg.bear_gross_cap_fraction = float(risk.get("bear_gross_cap_fraction", cfg.bear_gross_cap_fraction))
+    cfg.crisis_gross_cap_fraction = float(risk.get("crisis_gross_cap_fraction", cfg.crisis_gross_cap_fraction))
     cfg.bear_liquidate_longs_on_regime_entry = bool(
         risk.get("bear_liquidate_longs_on_regime_entry", cfg.bear_liquidate_longs_on_regime_entry)
     )
@@ -415,6 +446,12 @@ def load_config(path: str = "backtest_config.yaml") -> BacktestConfig:
     cfg.severe_drawdown_close_all_pct = float(
         risk.get("severe_drawdown_close_all_pct", cfg.severe_drawdown_close_all_pct)
     )
+    # VIX deleveraging (nested under risk.vix_deleveraging)
+    vix_delev = risk.get("vix_deleveraging", {})
+    if isinstance(vix_delev, dict):
+        cfg.vix_deleverage_enabled = bool(vix_delev.get("enabled", cfg.vix_deleverage_enabled))
+        cfg.vix_deleverage_high_threshold = float(vix_delev.get("high_vix_threshold", cfg.vix_deleverage_high_threshold))
+        cfg.vix_deleverage_scaling_factor = float(vix_delev.get("scaling_factor", cfg.vix_deleverage_scaling_factor))
     mv = raw.get("mean_variance", {})
     cfg.mean_variance_enabled = mv.get("enabled", cfg.mean_variance_enabled)
     cfg.mean_variance_method = str(mv.get("method", cfg.mean_variance_method))
@@ -446,6 +483,13 @@ def load_config(path: str = "backtest_config.yaml") -> BacktestConfig:
     cfg.execution_costs_sensitivity_report_path = str(
         ec.get("sensitivity_report_path", cfg.execution_costs_sensitivity_report_path)
     )
+    mi = raw.get("market_impact", {})
+    cfg.market_impact_enabled = bool(mi.get("enabled", cfg.market_impact_enabled))
+    cfg.mi_eta = float(mi.get("eta", cfg.mi_eta))
+    cfg.mi_alpha = float(mi.get("alpha", cfg.mi_alpha))
+    cfg.mi_gamma = float(mi.get("gamma", cfg.mi_gamma))
+    cfg.mi_adv_usd_default = float(mi.get("adv_usd_default", cfg.mi_adv_usd_default))
+
     # Cross-sectional short leg requires shorts
     if getattr(cfg, "cross_sectional_ranking", False) and getattr(cfg, "market_neutral", False):
         cfg.allow_shorts = True
@@ -508,7 +552,8 @@ def load_config(path: str = "backtest_config.yaml") -> BacktestConfig:
     cfg.ml_short_holding_period_days = int(sig.get("ml_short_holding_period_days", 2))
     cfg.ml_short_min_signal_strength = float(sig.get("ml_short_min_signal_strength", 0.6))
     cfg.ml_short_overextension_threshold = float(sig.get("ml_short_overextension_threshold", 0.05))
-    cfg.ml_short_snap_profit_pct = float(sig.get("ml_short_snap_profit_pct", 0.02))
+    cfg.ml_short_snap_profit_pct = float(sig.get("ml_short_snap_profit_pct", 0.04))
+    cfg.ml_short_stop_loss_pct = float(sig.get("ml_short_stop_loss_pct", cfg.ml_short_stop_loss_pct))
     cfg.ml_short_min_liquidity_usd = float(sig.get("ml_short_min_liquidity_usd", 20_000_000.0))
     cfg.ml_short_max_squeeze_vol_ratio = float(sig.get("ml_short_max_squeeze_vol_ratio", 2.5))
     cfg.ml_model_type = str(sig.get("ml_model_type", cfg.ml_model_type))

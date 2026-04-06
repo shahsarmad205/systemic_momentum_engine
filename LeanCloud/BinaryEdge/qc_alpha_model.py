@@ -55,66 +55,79 @@ class SafeUnpickler(pickle.Unpickler):
             raise
 
 class TrendSignalAlphaModel(AlphaModel):
-    def __init__(self, long_model, short_model, spy_symbol):
-        """
-        Pillar 17: Market-Neutral Alpha Engine.
-        Injects two separate estimators for symmetric momentum capture.
-        """
-        self.long_model = long_model
-        self.short_model = short_model
-        self.spy_symbol = spy_symbol
-        self.symbol_data = {}
-        self.active_signals = {} # Pillar 15: Zero-Churn State Tracker
-        
-        # Pillar 13, 14 & 17: Signal & Persistence Calibration
-        self.score_scale = 1.0 
-        self.score_direction = 1.0
-        self.min_score = 0.32 # Pillar 21: Tightened floor to prune Alpha-Drag
-        self.flip_buffer = 0.15 # Pillar 19: Sticky Hysteresis
-        self.top_n = 8 # Pillar 21: Concentrated Top 8 Long/Short
-        self.hold_n = 12 # Pillar 21: Persistent Hold-Gate (Top 12)
-        self.long_only = True  # Pillar 28: LOCKED to Long-Only (Pillar 7 Baseline)
-        self.forensic_logging = True # Active Audit Mode
+    def __init__(self, algorithm, model_data, short_model=None, spy_symbol=None):
+        # 1. Load Model & Features (Pillar 24 Dynamic Alignment)
+        if isinstance(model_data, tuple):
+            self.long_model, model_features = model_data
+        else:
+            self.long_model = model_data
+            model_features = None
 
-        # Full 15 Audited Features (Pillar 7 Final)
-        self.features = [
-            "capm_residual_vol", "momentum_acceleration", "ret_10d", 
-            "cs_momentum_percentile", "ret_20d", "rolling_vol_20", 
-            "ret_5d", "rsi_14", "ret_1d", "rsi_overbought", 
-            "vol_ratio_5_20", "vol_expansion", "down_up_vol_ratio", 
-            "dist_from_52w_high", "f_trend"
-        ]
+        self.short_model = short_model
+        self.spy_symbol = spy_symbol if spy_symbol else algorithm.AddEquity("SPY", Resolution.Daily).Symbol
+        self.symbol_data = {}
+        self.active_signals = {}
+        self.last_refresh = {}
+        self.long_only = True
+        
+        # Pillar 30: Strategy Parameters (10/15 Baseline)
+        self.top_n = 10
+        self.hold_n = 15
+        self.min_score = 0.20    # Lowered from 0.32 — rank-normalized scores rarely exceed 0.32
+        self.min_dollar_volume = 1e8
+        self.flip_buffer = 0.05
+        self.refresh_days = 10   # Match local holding_period_days=10 to minimize refresh churn
+
+        
+        # Benchmark Tracker
+        self.spy_window = RollingWindow[float](65)
+        spy_hist = algorithm.History(self.spy_symbol, 65, Resolution.Daily)
+        if spy_hist is not None:
+            for _, row in spy_hist.iterrows():
+                p = float(row['close']) if 'close' in row else float(row.close)
+                self.spy_window.Add(p)
+
+        # Pillar 24: Use features from model artifact if available, else fallback to hardcoded
+        if model_features:
+            algorithm.Log(f"Alpha Model: Loaded {len(model_features)} features from model artifact.")
+            self.features = model_features
+        else:
+            algorithm.Log("Alpha Model: No feature metadata found. Falling back to default list.")
+            self.features = [
+                "cs_momentum_percentile", "ret_5d", "dist_from_52w_high", 
+                "ret_10d", "capm_residual_vol", "ret_20d", "vol_expansion", 
+                "rsi_overbought", "f_trend", "rolling_vol_20", "rsi_14", 
+                "ret_1d", "vol_ratio_5_20", "down_up_vol_ratio", 
+                "earnings_surprise", "momentum_acceleration"
+            ]
+
 
     def OnSecuritiesChanged(self, algorithm, changes):
-        """Handle additions and removals from the universe."""
         for added in changes.AddedSecurities:
             if added.Symbol not in self.symbol_data:
-                self.symbol_data[added.Symbol] = SymbolData(algorithm, added.Symbol, self.spy_symbol)
-
+                self.symbol_data[added.Symbol] = SymbolData(algorithm, added.Symbol, self.spy_window)
         for removed in changes.RemovedSecurities:
-            data = self.symbol_data.pop(removed.Symbol, None)
-            if data:
-                # Cleanup logic if using consolidators
-                pass
+            self.symbol_data.pop(removed.Symbol, None)
 
     def Update(self, algorithm, data):
-        """Daily Alpha Update with Forensic Parity Audit."""
-        # 1. Update Indicators and Collect Raw Features
         spy_bar = data.Bars.get(self.spy_symbol)
+        if spy_bar:
+            self.spy_window.Add(spy_bar.Close)
+            
         raw_features = {}
-        
+        ready_count = 0
         for symbol, sd in self.symbol_data.items():
-            if symbol == self.spy_symbol: continue
-            if not data.Bars.ContainsKey(symbol): continue
-            
+            if symbol == self.spy_symbol or not data.Bars.ContainsKey(symbol): continue
             sd.Update(data.Bars[symbol])
-            if spy_bar:
-                sd.UpdateSpy(spy_bar)
-            if not sd.IsReady: continue
-            
-            feats = sd.GetFullFeatures()
-            if feats:
-                raw_features[symbol] = feats
+            if sd.IsReady:
+                ready_count += 1
+                if hasattr(algorithm.Securities[symbol], "DollarVolume"):
+                    if algorithm.Securities[symbol].DollarVolume < self.min_dollar_volume:
+                        continue
+                feats = sd.GetFullFeatures()
+                if feats: raw_features[symbol] = feats
+        
+        algorithm.Log(f"UPDATE - Processing {len(raw_features)} symbols | Ready: {ready_count}")
 
         if not raw_features:
             return []
@@ -124,12 +137,24 @@ class TrendSignalAlphaModel(AlphaModel):
         # Store raw for forensic audit comparison
         df_raw = df.copy()
         
+        # Pillar 29: Cross-Sectional Rank Implementation (CRITICAL)
+        # Model expects 'cs_momentum_percentile' based on momentum_6m
+        if "momentum_6m" in df.columns:
+            df["cs_momentum_percentile"] = df["momentum_6m"].rank(pct=True).fillna(0.5)
+        else:
+            df["cs_momentum_percentile"] = 0.5
+            
+        # Placeholder for features not available in cloud yet
+        df["earnings_surprise"] = 0.0
+        
         cs_z_cols = ['ret_5d', 'ret_10d', 'rolling_vol_20']
         for col in cs_z_cols:
             if col in df.columns:
                 mean = df[col].mean()
                 std = df[col].std(ddof=0)
                 df[col] = (df[col] - mean) / std if std > 1e-9 else 0.0
+        
+        algorithm.Log(f"UPDATE - Processing {len(df)} symbols | Ready Samples: {ready_count}")
 
         # 3. Research Mirror Inference (Dual-Model Pillar 17)
         long_raw_scores = {}
@@ -212,12 +237,12 @@ class TrendSignalAlphaModel(AlphaModel):
         
         top_candidates = sorted(final_scores.items(), key=lambda x: x[1], reverse=True)
         
-        # [FORENSIC LOG] Every morning, audit the #1 signal's math
-        if self.forensic_logging and top_candidates:
+        # [DIAGNOSTIC LOG] Every 10 days, audit the #1 signal's math
+        if top_candidates and (algorithm.Time.day % 10 == 0):
             top_symbol, top_score = top_candidates[0]
             raw_top = df_raw.loc[top_symbol]
             z_top = df.loc[top_symbol]
-            algorithm.Log(f"AUDIT - {top_symbol.Value} | Signal: {top_score:.4f} | Raw[5d]: {raw_top['ret_5d']:.4f} | Z[5d]: {z_top['ret_5d']:.4f}")
+            algorithm.Log(f"ALPHA AUDIT - {top_symbol.Value} | Rank Score: {top_score:.4f} | R[5d]: {raw_top['ret_5d']:.4f} | CS_MOM_PCT: {z_top['cs_momentum_percentile']:.4f}")
         
         insights = []
         # Final High-Conviction "Zero-Churn" Persistent Gate (10/15)
@@ -226,7 +251,7 @@ class TrendSignalAlphaModel(AlphaModel):
         # Build symbol list for rank lookup
         symbols_by_rank = [item[0] for item in top_candidates]
 
-        # A) Update Current Holdings: Determine Exits
+        # A) Update Current Holdings: Determine Exits and Refreshes
         symbols_to_remove = []
         for symbol, direction in list(self.active_signals.items()):
             try:
@@ -234,31 +259,42 @@ class TrendSignalAlphaModel(AlphaModel):
                 score = final_scores.get(symbol, 0.0)
                 new_direction = final_directions.get(symbol)
                 
-                # Exit Conditions:
-                # 1. Rank drops below Hold Gate (Top 15)
-                # 2. Score drops below Threshold (0.25)
-                # 3. Direction Flip (Hysteresis Buffer met)
+                # 1. Exit Conditions
                 if rank > self.hold_n or score < self.min_score or new_direction != direction:
                     insights.append(Insight.Price(symbol, timedelta(days=5), InsightDirection.Flat, score))
                     symbols_to_remove.append(symbol)
+                    self.last_refresh.pop(symbol, None)
+                    continue
+                
+                # 2. Refresh Condition: Every holding_period days to keep signal alive in LEAN
+                # Matches local holding_period_days=10. Less frequent = fewer rebalance triggers.
+                last_time = self.last_refresh.get(symbol)
+                if last_time is None or (algorithm.Time - last_time).days >= self.refresh_days:
+                    insights.append(Insight.Price(symbol, timedelta(days=self.refresh_days * 2), direction, score))
+                    self.last_refresh[symbol] = algorithm.Time
+                    
             except ValueError:
-                # Stock not in current candidates (delisted or dropped out of 300)
                 insights.append(Insight.Price(symbol, timedelta(days=5), InsightDirection.Flat, 0.0))
                 symbols_to_remove.append(symbol)
+                self.last_refresh.pop(symbol, None)
 
         for s in symbols_to_remove:
             self.active_signals.pop(s, None)
 
-        # B) Select New Entries: Only Top 10
+        # B) Select New Entries: Only Top N
         for symbol, score in top_candidates:
             rank = symbols_by_rank.index(symbol) + 1
             direction = final_directions[symbol]
             
-            # If Rank is in Top 10 and we aren't already predicting this symbol
             if rank <= self.top_n and symbol not in self.active_signals and score >= self.min_score:
-                insight = Insight.Price(symbol, timedelta(days=5), direction, score)
+                # New Entry — insight duration matches local holding_period_days=10
+                insight = Insight.Price(symbol, timedelta(days=self.refresh_days * 2), direction, score)
                 insights.append(insight)
                 self.active_signals[symbol] = direction
+                self.last_refresh[symbol] = algorithm.Time
+
+        if insights:
+            algorithm.Log(f"Alpha Engine: Zero-Churn Update (Active: {len(self.active_signals)}, Insights: {len(insights)})")
 
         if insights:
             algorithm.Log(f"Alpha Engine: Zero-Churn Selection (Active: {len(self.active_signals)}, Updates: {len(insights)})")
@@ -266,13 +302,12 @@ class TrendSignalAlphaModel(AlphaModel):
         return insights
 
 class SymbolData:
-    def __init__(self, algorithm, symbol, spy_symbol):
+    def __init__(self, algorithm, symbol, spy_window):
         self.symbol = symbol
         self.algorithm = algorithm
-        self.spy_symbol = spy_symbol
+        self.spy_window = spy_window # Shared reference to AlphaModel's window
         
         # 1. Manual Indicators (Pillar 18 Protective Firewall)
-        # We avoid algorithm.RSI/STD helpers to prevent automatic (unsanitized) data updates
         self.rsi = RelativeStrengthIndex(14)
         self.std20 = StandardDeviation(20)
         self.std5 = StandardDeviation(5)
@@ -283,11 +318,14 @@ class SymbolData:
         self.close_window = RollingWindow[float](253) # For 1y high and 6m mom
         self.returns_window = RollingWindow[float](2) # For daily return calculation
         self.vol_history = RollingWindow[float](252) # Pillar 22: For 1y vol-percentile ranking
-        self.spy_window = RollingWindow[float](61)   # For CAPM regression
         
         # 3. Warm-up
         from datetime import timedelta
-        history = algorithm.History(symbol, timedelta(days=253))
+        
+        # A. (Optimized) SPY window is now shared. No local history call needed.
+
+        # B. Symbol Warm-up (Fill indicators and close window)
+        history = algorithm.History(symbol, 253, Resolution.Daily)
         if history is not None and len(history) > 0:
             for idx, row in history.iterrows():
                 # Extract close price from the pandas row
@@ -296,18 +334,18 @@ class SymbolData:
                 except:
                     close = float(row[4]) if len(row) > 4 else 0  # Close is typically 4th column
                 
-                    # Pillar 18: Nuclear Sanitization (Decimal Resilience)
-                    # Rounding to 4 decimals and clamping to institutional range (0.01 to 20,000)
-                    # This definitively prevents internal C# overflows in Variance.cs
-                    close = max(0.01, min(20000.0, round(close, 4)))
-                    if np.isfinite(close):
-                        self.close_window.Add(close)
-                        # Update indicators with timestamp
-                        if hasattr(idx, 'tz_localize'):
-                            time = idx
-                        else:
-                            time = idx[1] if isinstance(idx, tuple) else idx
-                    
+                # Pillar 18: Nuclear Sanitization (Decimal Resilience)
+                # Rounding to 4 decimals and clamping to institutional range (0.01 to 20,000)
+                # This definitively prevents internal C# overflows in Variance.cs
+                close = max(0.01, min(20000.0, round(close, 4)))
+                if np.isfinite(close):
+                    self.close_window.Add(close)
+                    # Update indicators with timestamp
+                    if hasattr(idx, 'tz_localize'):
+                        time = idx
+                    else:
+                        time = idx[1] if isinstance(idx, tuple) else idx
+                
                     # Pillar 18: Ultimate Numerical Firewall (Indicator Safeguard)
                     try:
                         self.rsi.Update(time, close)
@@ -332,13 +370,17 @@ class SymbolData:
                         else:
                             raise e
 
+
     @property
     def IsReady(self):
-        """Returns True if windows and indicators are fully warmed up."""
-        return (self.close_window.IsReady and 
-                self.sma200.IsReady and 
+        """Returns True if windows and indicators are sufficiently warmed up for core alpha."""
+        # Pillar 7/29: Strictly require 253 days for 6m mom and 52w high features.
+        # This prevents 'pre-mature' signals that lack full predictive context.
+        return (self.close_window.Count >= 253 and 
+                self.sma50.IsReady and 
                 self.rsi.IsReady and 
                 self.spy_window.IsReady)
+
 
     def Update(self, bar):
         if bar is not None:
@@ -407,13 +449,19 @@ class SymbolData:
         
         # CAPM Residual Vol (Simplified Local Regression)
         try:
-            stock_rets = np.array([(self.close_window[i]/self.close_window[i+1])-1 for i in range(60)])
-            spy_rets = np.array([(self.spy_window[i]/self.spy_window[i+1])-1 for i in range(60)])
-            var_spy = np.var(spy_rets)
-            beta = np.cov(stock_rets, spy_rets)[0][1] / var_spy if var_spy > 1e-9 else 1.0
-            capm_res_vol = np.std(stock_rets - beta * spy_rets)
+            # Safe slice: Ensure we have enough data for the regression
+            win_size = min(60, self.close_window.Count - 1)
+            if win_size < 10: 
+                capm_res_vol = 0.05
+            else:
+                stock_rets = np.array([(self.close_window[i]/self.close_window[i+1])-1 for i in range(win_size)])
+                spy_rets = np.array([(self.spy_window[i]/self.spy_window[i+1])-1 for i in range(win_size)])
+                var_spy = np.var(spy_rets)
+                beta = np.cov(stock_rets, spy_rets)[0][1] / var_spy if var_spy > 1e-9 else 1.0
+                capm_res_vol = np.std(stock_rets - beta * spy_rets)
         except:
             capm_res_vol = 0.05
+
             
         # Pillar 22: Volatility Percentile (Logic Alignment)
         # We compute the percentile rank of CURRENT volatility relative to a 252-day window.
@@ -427,6 +475,36 @@ class SymbolData:
         # Vol Expansion & Ratios (Pillar 22: Return-Based)
         vol_exp = self.std5.Current.Value / self.std20.Current.Value if self.std20.Current.Value != 0 else 1.0
         
+        # All-weather features (value, quality, low-vol, mean-reversion)
+        # short_term_reversal: contrarian — stocks that fell tend to bounce
+        short_term_reversal = -max(-0.5, min(0.5, ret_5d))
+
+        # nearness_52w_low: value proxy — 1.0 = at 52w low, ~0 = far above
+        try:
+            win_size_52 = min(252, self.close_window.Count - 1)
+            min_52w = min(self.close_window[i] for i in range(win_size_52)) if win_size_52 > 0 else close
+            dist_low = (close - min_52w) / max(min_52w, 1e-6)
+            nearness_52w_low = 1.0 / (1.0 + max(0.0, dist_low))
+        except Exception:
+            nearness_52w_low = 0.5
+
+        # low_vol_score: low volatility anomaly (1 - vol_percentile)
+        low_vol_score = 1.0 - vol_perc
+
+        # quality_score: 60d rolling Sharpe proxy
+        try:
+            win_q = min(60, self.close_window.Count - 1)
+            if win_q >= 20:
+                rets_q = np.array([(self.close_window[i] / self.close_window[i + 1]) - 1.0
+                                   for i in range(win_q)])
+                mean_q = float(np.mean(rets_q))
+                std_q = float(np.std(rets_q))
+                quality_score = max(-5.0, min(5.0, (mean_q / std_q * (252 ** 0.5)) if std_q > 1e-9 else 0.0))
+            else:
+                quality_score = 0.0
+        except Exception:
+            quality_score = 0.0
+
         return {
             "f_trend": (0.30 * mom3m * 10.0 + 0.25 * mom6m * 10.0 + 0.25 * ma_cross + 0.20 * ret_1d * 10.0),
             "ret_1d": ret_1d,
@@ -438,12 +516,17 @@ class SymbolData:
             "rsi_overbought": 1.0 if self.rsi.Current.Value > 70 else 0.0,
             "vol_ratio_5_20": vol_exp,
             "vol_expansion": vol_exp,
-            "volatility_percentile": vol_perc, # Pillar 22: Parity Feature
+            "volatility_percentile": vol_perc,
             "momentum_acceleration": (ret_5d - ret_20d),
             "capm_residual_vol": capm_res_vol,
             "dist_from_52w_high": (close / max(self.close_window)) - 1.0,
             "momentum_6m": mom6m,
-            "down_up_vol_ratio": 1.0, 
+            "down_up_vol_ratio": 1.0,
+            # All-weather features
+            "short_term_reversal": short_term_reversal,
+            "nearness_52w_low": nearness_52w_low,
+            "low_vol_score": low_vol_score,
+            "quality_score": quality_score,
         }
 
 class SimpleModel:
@@ -455,56 +538,94 @@ class SimpleModel:
 def LoadProductionModel(algorithm, model_path="best_long_model.pkl"):
     """
     Helper to load the local .pkl or .joblib model into the Lean environment.
-    Handles artifact dictionaries and fallbacks.
+    Prioritizes local project files over Object Store to ensure 'lean cloud push' 
+    updates take effect immediately.
     """
     import joblib
     import io
     import pickle
-    try:
-        # 1. Attempt to load from Object Store (Recommended for Cloud)
-        algorithm.Log(f"Locating production model in Object Store: {model_path}")
-        if algorithm.ObjectStore.ContainsKey(model_path):
-            model_bytes = algorithm.ObjectStore.ReadBytes(model_path)
-            try:
-                obj = joblib.load(io.BytesIO(model_bytes))
-            except Exception as e:
-                algorithm.Log(f"Joblib load failed, trying pickle: {str(e)}")
-                obj = pickle.loads(bytes(model_bytes))
-            
-            # Pillar 13 Final: Smart Unpacker (Dictionary Artifact support)
-            if isinstance(obj, dict) and "estimator" in obj:
-                algorithm.Log(f"Unpacked estimator from artifact dictionary: {model_path}")
-                model = obj["estimator"]
-                # Additional artifacts can be extracted here: obj.get("feature_columns"), etc.
-            else:
-                model = obj
-        else:
-            algorithm.Error(f"Model path '{model_path}' not found in Object Store.")
-            # Log all available keys if missing
-            keys = [item.Key for item in algorithm.ObjectStore]
-            algorithm.Log(f"Available keys in Object Store: {', '.join(keys) if keys else 'NONE'}")
-            
-            # 2. Fallback to standard local path
-            algorithm.Log(f"Attempting fallback to local project file: {model_path}")
-            try:
-                model = joblib.load(model_path)
-            except:
-                with open(model_path, 'rb') as f:
-                    model = pickle.load(f)
+    import os
+    
+    model = None
+    feature_names = None
+    source = "UNKNOWN"
 
-        # 3. Unpack the estimator if it's stored in an artifact dictionary
-        if isinstance(model, dict) and "estimator" in model:
-            algorithm.Log(f"Unpacked estimator from artifact dictionary: {model_path}")
-            model = model["estimator"]
-        
-        # 4. Final validation: ensure it has the required interface
-        if model is not None and hasattr(model, "predict_proba"):
-            algorithm.Log(f"Model successfully validated for production: {model_path}")
-            return model
+    # Use absolute path relative to this script's location
+    # This is more robust in cloud environments than relative paths
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    full_local_path = os.path.join(base_dir, model_path)
+
+    try:
+        # 0. Diagnostic: Log environment structure
+        try:
+            algorithm.Log(f"DEBUG: Current Directory: {os.getcwd()}")
+            algorithm.Log(f"DEBUG: Script Directory: {base_dir}")
+            algorithm.Log(f"DEBUG: Directory Contents: {', '.join(os.listdir(base_dir))}")
+        except:
+            pass
+
+        # 1. Attempt to load from Local Project File First (Pillar 7 Deployment)
+        algorithm.Log(f"Attempting to load model from local project path: {full_local_path}")
+        if os.path.isfile(full_local_path):
+            try:
+                # Try joblib first (modern scikit-learn standard)
+                obj = joblib.load(full_local_path)
+                source = "LOCAL_PROJECT"
+            except Exception as e:
+                # Fallback to standard pickle
+                try:
+                    with open(full_local_path, 'rb') as f:
+                        obj = pickle.load(f)
+                        source = "LOCAL_PROJECT"
+                except Exception as ex:
+                    algorithm.Log(f"Local file found but failed to load: {str(ex)}")
+                    obj = None
         else:
-            algorithm.Error(f"Loaded object does not support predict_proba: {type(model)}")
-            return SimpleModel()
+            algorithm.Log(f"Local project file not found at {full_local_path}. Checking Object Store...")
+            obj = None
+
+        # 2. Fallback to Object Store (Recommended only for large persistent caches)
+        if obj is None:
+            algorithm.Log(f"Locating model in Object Store: {model_path}")
+            if algorithm.ObjectStore.ContainsKey(model_path):
+                model_bytes = algorithm.ObjectStore.ReadBytes(model_path)
+                try:
+                    obj = joblib.load(io.BytesIO(model_bytes))
+                    source = "OBJECT_STORE"
+                except:
+                    obj = pickle.loads(bytes(model_bytes))
+                    source = "OBJECT_STORE"
+            else:
+                algorithm.Error(f"CRITICAL: Model '{model_path}' not found in local project or Object Store.")
+                return (SimpleModel(), None)
+
+        # 3. Unpack Estimator and Features (Artifact Dictionary Support)
+        if isinstance(obj, dict) and "estimator" in obj:
+            algorithm.Log(f"Successfully unpacked estimator and metadata from {source} artifact.")
+            feature_names = obj.get("feature_columns")
+            model = obj["estimator"]
+        else:
+            algorithm.Log(f"Loaded raw model (no metadata) from {source}.")
+            model = obj
+            feature_names = None
+        
+        # 4. Final Validation
+        if model is not None:
+            if hasattr(model, "predict_proba") or hasattr(model, "predict"):
+                feat_count = len(feature_names) if feature_names else "UNKNOWN"
+                algorithm.Log(f"PRODUCTION MODEL READY: Type={type(model).__name__} | Features={feat_count} | Source={source}")
+                return (model, feature_names)
+            else:
+                algorithm.Error(f"Loaded object from {source} is not a valid predictor: {type(model)}")
+                return (SimpleModel(), None)
+        
+        return (SimpleModel(), None)
             
     except Exception as e:
-        algorithm.Error(f"Failed to load model {model_path}: {str(e)}")
-        return SimpleModel()
+        algorithm.Error(f"UNEXPECTED ERROR in LoadProductionModel: {str(e)}")
+        import traceback
+        algorithm.Log(traceback.format_exc())
+        return (SimpleModel(), None)
+
+
+

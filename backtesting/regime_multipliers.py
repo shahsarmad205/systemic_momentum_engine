@@ -115,6 +115,96 @@ def validate_multiplier_config(multipliers: dict) -> list[str]:
     return warnings
 
 
+import math
+
+
+_REGIME_CFG_ATTRS = {
+    "Bull":     "signal_confidence_multiplier_bull",
+    "Bear":     "signal_confidence_multiplier_bear",
+    "Sideways": "signal_confidence_multiplier_sideways",
+    "Crisis":   "signal_confidence_multiplier_crisis",
+}
+
+
+def signal_confidence_multiplier_for_regime(
+    regime_today: str,
+    config,
+    loaded_multipliers: dict | None = None,
+) -> float:
+    """
+    Return the signal-confidence multiplier for *regime_today*.
+
+    Resolution order:
+    1. ``config`` attribute (e.g. ``signal_confidence_multiplier_bull``)
+    2. ``loaded_multipliers`` dict (from ``load_regime_multipliers``)
+    3. Fallback map on ``config``
+    4. ``config.signal_confidence_multiplier`` or 1.0
+
+    Extracted from ``Backtester._signal_confidence_multiplier_for_regime``.
+    """
+    regime_key = str(regime_today or "Sideways")
+    attr = _REGIME_CFG_ATTRS.get(regime_key)
+    multiplier: float | None = None
+
+    if attr:
+        raw = getattr(config, attr, None)
+        if raw is not None:
+            try:
+                fv = float(raw)
+                if math.isfinite(fv) and fv > 0:
+                    multiplier = fv
+            except (TypeError, ValueError):
+                pass
+
+    if multiplier is None and loaded_multipliers is not None:
+        try:
+            multiplier = float(get_multiplier(regime_key, loaded_multipliers, default=1.0))
+        except Exception:
+            multiplier = None
+
+    if multiplier is None:
+        fallback = {
+            "Bull":     getattr(config, "signal_confidence_multiplier_bull", None),
+            "Sideways": getattr(config, "signal_confidence_multiplier_sideways", None),
+            "Bear":     getattr(config, "signal_confidence_multiplier_bear", None),
+            "Crisis":   getattr(config, "signal_confidence_multiplier_crisis", None),
+        }.get(regime_key)
+        if fallback is not None:
+            try:
+                multiplier = float(fallback)
+            except (TypeError, ValueError):
+                multiplier = None
+
+    if multiplier is None:
+        base = getattr(config, "signal_confidence_multiplier", None)
+        multiplier = float(base) if base is not None else 1.0
+
+    return multiplier
+
+
+def threshold_aggressiveness_for_regime(regime_today: str, config) -> float:
+    """
+    Return the rolling-std gate threshold scaler for *regime_today*.
+
+    Values > 1.0 require stronger |score| to enter. Extracted from
+    ``Backtester._threshold_aggressiveness_for_regime``.
+    """
+    regime_key = str(regime_today or "Sideways")
+    raw_map = getattr(config, "regime_threshold_aggressiveness", None)
+    if not isinstance(raw_map, dict):
+        return 1.0
+    v = raw_map.get(regime_key)
+    if v is None:
+        return 1.0
+    try:
+        a = float(v)
+    except (TypeError, ValueError):
+        return 1.0
+    if not math.isfinite(a) or a <= 0:
+        return 1.0
+    return float(min(a, 20.0))
+
+
 if __name__ == "__main__":
     loaded = load_regime_multipliers("backtest_config.yaml")
     print("Loaded regime multipliers:")

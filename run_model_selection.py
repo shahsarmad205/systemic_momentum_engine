@@ -1480,6 +1480,7 @@ def main() -> None:
 
             row = {
                 "model_name": "LearnedWeightsBaseline",
+                "model_kind": "baseline",
                 "oos_sharpe_mean": float(np.nanmean(sharpe_vals)),
                 "oos_sharpe_std": float(np.nanstd(sharpe_vals, ddof=1)) if len(wm) > 1 else 0.0,
                 "oos_ic_mean": float(np.nanmean(ic_vals)),
@@ -1545,6 +1546,8 @@ def main() -> None:
         consistent = full_pool[full_pool["model_kind"] == anchor_kind].head(size)
         return consistent.reset_index(drop=True)
 
+    if "model_kind" not in report.columns:
+        report["model_kind"] = "unknown"
     long_pool = _get_consistent_pool(report[report["model_kind"].isin(long_kinds)], long_kinds, top_n)
     short_pool = _get_consistent_pool(report[report["model_kind"].isin(short_kinds)], short_kinds, top_n) if do_shorts else pd.DataFrame()
 

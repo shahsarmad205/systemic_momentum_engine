@@ -480,6 +480,26 @@ def _build_features_for_ticker(
         up_v = volume.where(d_ret_lag > 0, 0).rolling(20).sum()
         down_up_vol_ratio = (down_v / up_v.replace(0, np.nan)).fillna(1.0)
 
+        # All-weather features: value, quality, low-vol anomaly, mean-reversion
+        # These provide signal in Bear/Crisis where pure momentum breaks down.
+
+        # Short-term reversal (contrarian; lagged 1d)
+        short_term_reversal = (-ret_5d.shift(1)).clip(-0.5, 0.5)
+
+        # 52w low proximity (value proxy: 1.0 = at 52w low, ~0 = far above)
+        min_52w = close.rolling(252, min_periods=60).min().replace(0, np.nan)
+        dist_from_52w_low = ((close - min_52w) / min_52w.clip(lower=1e-6)).clip(0, 10)
+        nearness_52w_low = 1.0 / (1.0 + dist_from_52w_low)
+
+        # Low-volatility score (low vol → high score; negated percentile rank)
+        vol_20_lv = daily_ret.rolling(20, min_periods=10).std()
+        low_vol_score = (1.0 - vol_20_lv.rolling(252, min_periods=60).rank(pct=True)).fillna(0.5)
+
+        # Quality score: rolling 60d Sharpe ratio proxy
+        roll_mean_60 = daily_ret.rolling(60, min_periods=20).mean()
+        roll_std_60 = daily_ret.rolling(60, min_periods=20).std().replace(0, np.nan).fillna(1e-6)
+        quality_score = (roll_mean_60 / roll_std_60 * np.sqrt(252)).clip(-5.0, 5.0)
+
         chunk = pd.DataFrame(
             {
                 "ticker": ticker,
@@ -525,13 +545,18 @@ def _build_features_for_ticker(
                 "rsi_14": rsi_14,
                 "ret_1d": ret_1d,
                 "vol_ratio_5_20": vol_ratio_5_20,
-                # New short features
+                # Short features
                 "dist_from_52w_high": dist_from_52w_high,
                 "rsi_overbought": rsi_overbought,
                 "vol_expansion": vol_expansion,
                 "momentum_acceleration": momentum_acceleration,
                 "down_up_vol_ratio": down_up_vol_ratio,
                 "earnings_surprise": np.nan,
+                # All-weather features (value, quality, low-vol, mean-reversion)
+                "short_term_reversal": short_term_reversal,
+                "nearness_52w_low": nearness_52w_low,
+                "low_vol_score": low_vol_score,
+                "quality_score": quality_score,
                 "forward_return": forward_ret,
             },
             index=features.index,

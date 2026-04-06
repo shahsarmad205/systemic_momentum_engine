@@ -77278,3 +77278,5 @@ vix_zscore                0.137887
 2026-04-05 13:51:13 INFO retrain start [run_id=26a20c40ac86 git_sha=196be87]
 2026-04-05 13:51:13 INFO Running: /opt/anaconda3/bin/python /Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py --config /Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtest_config.yaml --matrix-start-date 2003-01-01 --matrix-end-date 2023-01-01
 2026-04-05 13:53:46 ERROR Subprocess failed: Command '['/opt/anaconda3/bin/python', '/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py', '--config', '/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtest_config.yaml', '--matrix-start-date', '2003-01-01', '--matrix-end-date', '2023-01-01']' returned non-zero exit status 1.
+2026-04-06 16:30:39 INFO retrain start [run_id=1ae82af15aba git_sha=a9c5fd4]
+2026-04-06 16:30:39 INFO Running: /opt/anaconda3/bin/python /Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py --config /Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtest_config.yaml --matrix-start-date 2007-01-01 --matrix-end-date 2022-12-31

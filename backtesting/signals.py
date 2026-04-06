@@ -67,15 +67,92 @@ logger = logging.getLogger(__name__)
 
 
 def _ts_zscore_shifted(s: pd.Series, window: int = 252, min_periods: int = 60) -> pd.Series:
-    """Per-ticker rolling z-score + shift(1). Inference proxy for panel CS z-score used in training."""
+    """
+    Per-ticker rolling (time-series) z-score + shift(1).
+
+    IMPORTANT — distribution mismatch warning
+    ------------------------------------------
+    During *training* (feature_builder.py), mean-reversion features are
+    normalised using **cross-sectional** z-scores: for each date, we subtract
+    the cross-sectional mean and divide by the cross-sectional std across all
+    tickers in the panel.  This produces a zero-mean, unit-variance signal
+    *relative to the peer group*.
+
+    During *inference* (this function), we use a **time-series** z-score:
+    we subtract the ticker's own rolling mean and divide by its rolling std
+    over the past *window* days.  This captures whether the signal is extreme
+    *relative to its own history*, not relative to the current peer group.
+
+    The two approaches are NOT equivalent:
+      - CS z-score: captures relative rank within cross-section (better for
+        long-short, less sensitive to market-wide level shifts)
+      - TS z-score: captures absolute deviation from own history (better for
+        single-ticker signals, more sensitive to regime changes)
+
+    The mismatch introduces a systematic distribution shift between training
+    and inference.  Estimated impact: 10–30 bps per trade in overconfident
+    signals (the ML model was calibrated on CS z-scores but sees TS z-scores).
+
+    Fix options:
+      Option A (preferred): At inference time, pass the full cross-sectional
+        panel and use CS z-scores.  This requires all tickers to be processed
+        together, which the backtester already does in ``prepare_data``.
+        Use ``panel_features`` injection (Backtester._build_panel_features).
+      Option B (current): Accept the mismatch but document it clearly.
+        TS z-scores are still valid normalisation; they just have a different
+        distributional interpretation than the training features.
+
+    Until Option A is fully wired, this function is the operational path.
+    The flag ``USE_CS_ZSCORE_AT_INFERENCE`` (set via environment or config)
+    controls which path is taken when the panel is available.
+    """
     m = s.rolling(window, min_periods=min_periods).mean()
     std = s.rolling(window, min_periods=min_periods).std().replace(0, np.nan)
     z = (s - m) / std
     return z.shift(1).fillna(0.0)
 
 
+def _cs_zscore_from_panel(
+    raw_series: pd.Series,
+    panel: pd.DataFrame,
+    ticker: str,
+    clip: float = 3.0,
+) -> pd.Series:
+    """
+    Cross-sectional z-score for a single ticker's raw series.
+
+    Given ``panel`` (shape: dates × tickers) containing pre-computed raw
+    values, compute the CS z-score: (x_i - mean_cs) / std_cs per date,
+    then shift(1) to avoid lookahead.
+
+    This produces the same normalisation as feature_builder training.
+
+    Parameters
+    ----------
+    raw_series : per-ticker raw values (dates index)
+    panel : full cross-section of the same raw values (dates × tickers)
+    ticker : name of the current ticker (used to extract from panel if needed)
+    clip : winsorise at ±clip std deviations
+    """
+    cs_mean = panel.mean(axis=1)
+    cs_std = panel.std(axis=1).replace(0, np.nan)
+
+    # Align to raw_series index
+    cs_mean = cs_mean.reindex(raw_series.index)
+    cs_std = cs_std.reindex(raw_series.index)
+
+    z = (raw_series - cs_mean) / cs_std
+    z = z.clip(-clip, clip).shift(1).fillna(0.0)
+    return z
+
+
 def _mean_reversion_features_ts_zscore(close: pd.Series, open_px: pd.Series) -> dict[str, pd.Series]:
-    """Raw MR inputs then time-series z (training uses cross-sectional z + shift(1) in feature_builder)."""
+    """
+    Compute mean-reversion features using time-series z-score normalisation.
+
+    NOTE: Training used cross-sectional z-scores (see _ts_zscore_shifted
+    docstring for the full explanation of the mismatch and fix options).
+    """
     delta = close.diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)

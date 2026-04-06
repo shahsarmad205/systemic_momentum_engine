@@ -125,6 +125,42 @@ def calculate_liquidity_features(df: pd.DataFrame) -> pd.DataFrame:
     df["turnover_ratio"] = robust_zscore(ratio_raw)
     return df
 
+def calculate_value_quality_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    All-weather signals: mean-reversion, value proximity, low-vol anomaly, quality.
+
+    These complement pure price momentum and provide signal in Bear/Crisis regimes
+    where momentum breaks down:
+      - short_term_reversal : contrarian bounce signal (stocks that fell tend to mean-revert)
+      - nearness_52w_low    : value proxy — the closer to 52w low the "cheaper" the stock
+      - low_vol_score       : low-volatility anomaly (low-vol stocks outperform risk-adjusted)
+      - quality_score       : rolling 60d Sharpe ratio proxy (consistent earners beat volatile)
+    """
+    close = df["Close"] if "Close" in df.columns else df["close"]
+    daily_ret = close.pct_change()
+
+    # 1. Short-term reversal (1-week contrarian; lagged 1d for look-ahead safety)
+    ret_5d = close.pct_change(5).shift(1)
+    df["short_term_reversal"] = (-ret_5d).clip(-0.5, 0.5).fillna(0.0)
+
+    # 2. 52-week low proximity (value proxy)
+    min_52w = close.rolling(252, min_periods=60).min().replace(0, np.nan)
+    dist_low = ((close - min_52w) / min_52w.clip(lower=1e-6)).clip(0, 10)
+    df["nearness_52w_low"] = (1.0 / (1.0 + dist_low)).fillna(0.5)  # 1.0 = at low, ~0 = far above
+
+    # 3. Low-volatility score (negated percentile rank; low vol → high score)
+    vol_20 = daily_ret.rolling(20, min_periods=10).std()
+    vol_pct = vol_20.rolling(252, min_periods=60).rank(pct=True).fillna(0.5)
+    df["low_vol_score"] = (1.0 - vol_pct).fillna(0.5)  # 1.0 = lowest vol, 0.0 = highest
+
+    # 4. Quality score: rolling 60d Sharpe ratio (risk-adjusted consistency)
+    roll_mean = daily_ret.rolling(60, min_periods=20).mean()
+    roll_std = daily_ret.rolling(60, min_periods=20).std().replace(0, np.nan).fillna(1e-6)
+    df["quality_score"] = (roll_mean / roll_std * np.sqrt(252)).clip(-5.0, 5.0).fillna(0.0)
+
+    return df
+
+
 def detect_market_regime(df: pd.DataFrame) -> pd.DataFrame:
     close = pd.to_numeric(df["close"], errors="coerce")
     m50_r = df["ma_50_ratio"] if "ma_50_ratio" in df.columns else (ta.sma(close, 50) / close - 1)
@@ -210,6 +246,14 @@ def build_feature_matrix(df: pd.DataFrame, config=None) -> pd.DataFrame:
     except Exception as exc:
         warnings.warn(
             f"calculate_liquidity_features failed with {type(exc).__name__}: {exc}",
+            UserWarning,
+        )
+
+    try:
+        base = calculate_value_quality_features(base)
+    except Exception as exc:
+        warnings.warn(
+            f"calculate_value_quality_features failed with {type(exc).__name__}: {exc}",
             UserWarning,
         )
 

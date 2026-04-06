@@ -144,6 +144,8 @@ def main() -> int:
                 "run_backtest.py",
                 "--learned-weights",
                 str(wpath),
+                "--mode",
+                "learned",
             ],
             cwd=ROOT,
         )

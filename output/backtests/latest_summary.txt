@@ -2,90 +2,90 @@
 ============================================================
   BACKTEST RESULTS SUMMARY
 ============================================================
-  Sharpe Ratio         : 1.592
-  Net Sharpe Ratio     : 1.440
-  Sortino Ratio        : 0.628
-  CAGR                 : 25.46%
-  Max Drawdown         : -10.15%
-  Win Rate             : 51.4%
-  Trades per Year      : 307
-  Annual Turnover      : 1677%
-  Est. Cost Drag (ann) : 1.01%
-  Long P&L contrib     : 57.33%
-  Short P&L contrib    : 0.00%
+  Sharpe Ratio         : 0.862
+  Net Sharpe Ratio     : 0.616
+  Sortino Ratio        : 0.448
+  CAGR                 : 8.08%
+  Max Drawdown         : -28.55%
+  Win Rate             : 54.0%
+  Trades per Year      : 217
+  Annual Turnover      : 1382%
+  Est. Cost Drag (ann) : 1.43%
+  Long P&L contrib     : 251.96%
+  Short P&L contrib    : 6.96%
 ============================================================
 
 ============================================================
   INSTITUTIONAL ALPHA ANALYSIS (HELD-TO-EXPIRY)
 ============================================================
-  Expiry Win Rate:  53.8%  (exit_reason == 'expiry' only)
-  Avg Expiry Return: +1.311%
-  Sample Size: 584 expiry trades (of 615 total)
+  Expiry Win Rate:  53.9%  (exit_reason == 'expiry' only)
+  Avg Expiry Return: +0.914%
+  Sample Size: 2,798 expiry trades (of 3,041 total)
 
   EXIT REASON BREAKDOWN
-  expiry               : 584
-  crisis_transition_loser : 17
-  force_close          : 10
-  bear_regime_drawdown : 4
+  expiry               : 2798
+  short_snap_profit    : 122
+  crisis_transition_loser : 90
+  bear_regime_entry_liquidate : 31
 
   STOP LOSS / EXPIRY REALIZED STATS
   Stop loss pct        : 0.0%
   Stopped avg return   : +0.000%
-  Expiry avg return    : +1.311%
-  Expiry win rate      : 53.8%
+  Expiry avg return    : +0.914%
+  Expiry win rate      : 53.9%
 
   CLEAN PRE-2024 ANALYSIS (REALIZED EXPIRY)
-  Sample Size (n)      : 0
-  Win Rate             : 0.0%
-  95% Conf. Interval   : [0.0%, 100.0%]
-  p-value vs 50% null  : 1.00e+00
+  Sample Size (n)      : 2798
+  Win Rate             : 53.9%
+  95% Conf. Interval   : [52.0%, 55.7%]
+  p-value vs 50% null  : 2.39e-05
   p-value vs 70% null  : 1.00e+00
   p-value vs 80% null  : 1.00e+00
 
   ALL TRADES (ILLUSTRATIVE)
-  p-value vs 50% null  : 2.59e-01
+  p-value vs 50% null  : 5.65e-06
   p-value vs 60% null  : 1.00e+00
   p-value vs 70% null  : 1.00e+00
-  95% Conf. Interval   : [47.4%, 55.3%]
+  95% Conf. Interval   : [52.2%, 55.8%]
 
   REGIME ROBUSTNESS (EXPIRY WIN RATE)
-  Bull                 : 52.9% (n=531)
-  Bear                 : 69.2% (n=13)
-  Sideways             : 60.0% (n=40)
-  Crisis               : 0.0% (n=0)
+  Bull                 : 55.0% (n=2362)
+  Bear                 : 24.4% (n=82)
+  Sideways             : 53.2% (n=231)
+  Crisis               : 52.8% (n=123)
 
   YEAR-BY-YEAR PERSISTENCE
-  2024: 50.5% | 2025: 55.0% | 2026: 79.2%
+  2008: 25.0% | 2009: 52.1% | 2010: 58.8% | 2011: 50.0% | 2012: 57.1% | 2013: 60.6% | 2014: 53.0% | 2015: 44.7% | 2016: 51.9% | 2017: 51.9% | 2018: 51.8% | 2019: 60.2% | 2020: 62.0% | 2021: 51.8%
 ============================================================
 
 ============================================================
   ADVANCED STATISTICAL AUDIT & RIGOR DIAGNOSTICS
 ============================================================
   INFORMATION RATIO DECOMPOSITION (Grinold)
-  IC (Daily mean)      : 0.0714
-  Effective Breadth    : 80.0 independent bets/yr
-  Predicted IR         : 0.638
-  Realized IR (t-stat) : 1.243
+  IC (Daily mean)      : -0.0061
+  Effective Breadth    : 58.4 independent bets/yr
+  Predicted IR         : -0.046
+  Realized IR (t-stat) : -0.264
 
   SHARPE SIGNIFICANCE (Lo 2002 Correction)
-  T-statistic          : 23.248
+  T-statistic          : 25.157
   Significant (>1.96)  : YES
   Probabilistic Sharpe : 100.0%
 
   WIN RATE MLE (BETA-BINOMIAL POSTERIOR)
-  MAP Estimate         : 53.8%
-  95% Credible Int.    : [49.7%, 57.8%]
+  MAP Estimate         : 53.9%
+  95% Credible Int.    : [52.0%, 55.7%]
   P(True WR > 70%)     : 0.0%
 
   AUTOCORRELATION ADJUSTMENT (Newey-West)
-  Standard Sharpe      : 1.439
-  HAC-Adjusted Sharpe  : 1.440
+  Standard Sharpe      : 0.616
+  HAC-Adjusted Sharpe  : 0.616
   Inflation Factor     : 1.00x
 
   CONSERVATIVE KELLY (Bootstrap)
-  Kelly Mean           : 14.1%
-  Kelly 25th Ptile     : 10.9% (Recommended)
-  Kelly 5th Ptile      : 5.9%
+  Kelly Mean           : 13.1%
+  Kelly 25th Ptile     : 11.5% (Recommended)
+  Kelly 5th Ptile      : 9.2%
 
   FAMA-FRENCH ATTRIBUTION : [Skipped/No Internet]
 ============================================================
