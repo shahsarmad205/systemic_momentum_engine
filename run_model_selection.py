@@ -42,6 +42,99 @@ import pandas as pd
 import yaml
 from utils.universe import load_universe
 
+# ---------------------------------------------------------------------------
+# LGBMRanker wrapper — must be at module level so pickle can resolve its path.
+# ---------------------------------------------------------------------------
+try:
+    import lightgbm as _lgb
+    from sklearn.base import BaseEstimator, RegressorMixin as _RegressorMixin
+
+    class LGBMRankerWrapper(_RegressorMixin, BaseEstimator):
+        """
+        sklearn-compatible wrapper around LGBMRanker (lambdarank objective).
+
+        Defined at module level so instances can be pickled (local classes fail
+        pickle because Python can't resolve their dotted path at unpickle time).
+
+        Training converts raw forward_return values into per-date decile rank
+        labels (0=worst, 9=best), which is the correct cross-sectional learning
+        objective for stock selection.
+        """
+
+        def __init__(
+            self,
+            n_estimators: int = 100,
+            max_depth: int = 4,
+            learning_rate: float = 0.05,
+            num_leaves: int = 15,
+            min_child_samples: int = 20,
+            subsample: float = 0.8,
+            colsample_bytree: float = 0.8,
+        ) -> None:
+            self.n_estimators = n_estimators
+            self.max_depth = max_depth
+            self.learning_rate = learning_rate
+            self.num_leaves = num_leaves
+            self.min_child_samples = min_child_samples
+            self.subsample = subsample
+            self.colsample_bytree = colsample_bytree
+            self._model: Any = None
+            self._preloaded_date_groups: np.ndarray | None = None
+
+        def set_date_context(self, date_groups: np.ndarray) -> "LGBMRankerWrapper":
+            """Inject date groups before VotingRegressor calls .fit(X, y) without kwargs."""
+            self._preloaded_date_groups = date_groups
+            return self
+
+        def fit(self, X: np.ndarray, y: np.ndarray, **kw: Any) -> "LGBMRankerWrapper":
+            _kw_groups = kw.get("_date_groups")
+            date_groups = _kw_groups if _kw_groups is not None else self._preloaded_date_groups
+            if date_groups is None:
+                # Fallback: chunk into groups of ~500 rows (approx tickers/day for S&P 500).
+                # Keeps every group well within LightGBM's 10k-row-per-query limit.
+                date_groups = np.arange(len(y), dtype=int) // 500
+
+            labels = np.zeros(len(y), dtype=np.int32)
+            n_bins = 10
+            for g in np.unique(date_groups):
+                mask = date_groups == g
+                if mask.sum() < 2:
+                    continue
+                ranks = y[mask].argsort().argsort()
+                n = int(mask.sum())
+                bin_labels = np.minimum((ranks * n_bins) // n, n_bins - 1).astype(np.int32)
+                labels[mask] = bin_labels
+
+            _, counts = np.unique(date_groups, return_counts=True)
+            group_sizes = counts.tolist()
+
+            self._model = _lgb.LGBMRanker(
+                objective="lambdarank",
+                n_estimators=self.n_estimators,
+                max_depth=self.max_depth,
+                learning_rate=self.learning_rate,
+                num_leaves=self.num_leaves,
+                min_child_samples=self.min_child_samples,
+                subsample=self.subsample,
+                colsample_bytree=self.colsample_bytree,
+                random_state=42,
+                n_jobs=-1,
+                verbose=-1,
+            )
+            self._model.fit(X, labels, group=group_sizes)
+            return self
+
+        def predict(self, X: np.ndarray) -> np.ndarray:
+            if self._model is None:
+                return np.zeros(len(X), dtype=float)
+            return self._model.predict(X).astype(float)
+
+    _LGBM_AVAILABLE = True
+
+except ImportError:
+    _LGBM_AVAILABLE = False
+    LGBMRankerWrapper = None  # type: ignore[assignment,misc]
+
 
 def _read_json(path: Path) -> dict[str, Any]:
     try:
@@ -162,7 +255,16 @@ def _safe_pearson(x: np.ndarray, y: np.ndarray) -> float:
     return float(np.corrcoef(x, y)[0, 1])
 
 
-def _sharpe_from_series(pnl: np.ndarray) -> float:
+def _sharpe_from_series(pnl: np.ndarray, horizon: int = 1) -> float:
+    """
+    Annualised Sharpe with Newey-West correction for serial correlation.
+
+    When `horizon > 1`, overlapping forward-return windows create autocorrelation
+    that inflates the naive Sharpe (std is underestimated). The Newey-West HAC
+    estimator corrects the standard error using lags up to `horizon - 1`.
+    Correction factor: sqrt(1 + 2 * sum_k(1 - k/horizon) * rho_k) where rho_k
+    is the k-lag autocorrelation of the return series.
+    """
     pnl = pnl.astype(float)
     pnl = pnl[np.isfinite(pnl)]
     if len(pnl) < 10:
@@ -171,6 +273,21 @@ def _sharpe_from_series(pnl: np.ndarray) -> float:
     sd = float(np.std(pnl, ddof=1))
     if sd < 1e-12:
         return float("nan")
+
+    if horizon > 1 and len(pnl) > horizon * 2:
+        # Newey-West variance: V_NW = gamma_0 + 2 * sum_{k=1}^{h-1} (1 - k/h) * gamma_k
+        gamma_0 = float(np.var(pnl, ddof=1))
+        nw_var = gamma_0
+        for k in range(1, int(horizon)):
+            if k >= len(pnl):
+                break
+            gamma_k = float(np.cov(pnl[k:], pnl[:-k])[0, 1])
+            nw_var += 2.0 * (1.0 - k / horizon) * gamma_k
+        nw_var = max(nw_var, gamma_0 * 0.1)  # floor at 10% of naive variance
+        sd = float(np.sqrt(nw_var))
+        if sd < 1e-12:
+            return float("nan")
+
     return float((mu / sd) * np.sqrt(252.0))
 
 
@@ -289,6 +406,7 @@ def _strategy_daily_returns(
     *,
     max_positions: int,
     min_positions: int,
+    horizon: int = 1,
 ) -> pd.Series:
     """
     Simulate a simple daily-rebalanced long-only portfolio over a test slice.
@@ -298,6 +416,12 @@ def _strategy_daily_returns(
       - take up to max_positions with score > 0
       - if fewer than min_positions qualify, hold cash (0 return)
       - compute equal-weight return using realized forward_return as a proxy
+
+    ``horizon`` is the number of trading days in forward_return. Dividing by
+    horizon converts a multi-day cumulative return to a daily equivalent so
+    that the Sharpe calculation is not inflated by overlapping return windows.
+    The forward_return in the matrix is a horizon-day return stacked on every
+    calendar date, so without this correction Sharpe is inflated by ~sqrt(horizon).
 
     Returns:
       pd.Series of daily returns indexed by date (sorted)
@@ -434,7 +558,7 @@ def _test_portfolio_simulation_logic(*, tol: float = 1e-12) -> None:
     print("PASS: portfolio simulation self-test")
 
 
-def _chained_oos_metrics(oos: pd.DataFrame, *, max_positions: int = 10) -> tuple[float, float, float]:
+def _chained_oos_metrics(oos: pd.DataFrame, *, max_positions: int = 10, horizon: int = 1) -> tuple[float, float, float]:
     """
     Build a single chained OOS series from per-row predictions.
 
@@ -455,7 +579,7 @@ def _chained_oos_metrics(oos: pd.DataFrame, *, max_positions: int = 10) -> tuple
     # IC across all OOS rows (score vs forward return).
     ic = _safe_pearson(df["score"].to_numpy(dtype=float), df["forward_return"].to_numpy(dtype=float))
 
-    dr_s = _strategy_daily_returns(df, max_positions=int(max_positions), min_positions=1)
+    dr_s = _strategy_daily_returns(df, max_positions=int(max_positions), min_positions=1, horizon=int(horizon))
     dr = dr_s.to_numpy(dtype=float)
 
     sharpe = _sharpe_from_series(dr)
@@ -816,6 +940,29 @@ def _build_models() -> list[tuple[str, Any, bool, str]]:
         )
     except Exception:
         pass
+
+    # --- LightGBM rank objective (cross-sectional ranking) ---
+    # lambdarank optimizes NDCG — the correct objective for cross-sectional selection.
+    # Class is defined at module level (LGBMRankerWrapper) so pickle can resolve it.
+    if _LGBM_AVAILABLE:
+        models.append(
+            (
+                "LGBMRanker",
+                LGBMRankerWrapper(
+                    n_estimators=100,
+                    max_depth=4,
+                    learning_rate=0.05,
+                    num_leaves=15,
+                    min_child_samples=20,
+                    subsample=0.8,
+                    colsample_bytree=0.8,
+                ),
+                False,
+                "regressor",
+            )
+        )
+    else:
+        print("NOTE: lightgbm not installed — skipping LGBMRanker. Run: pip install lightgbm")
 
     # --- short classifiers (predict P(down); scored as negative) ---
     models.append(
@@ -1231,7 +1378,14 @@ def main() -> None:
                     t0 = time.perf_counter()
                     # Silence known spurious BLAS matmul warnings on Apple Silicon
                     with np.errstate(all="ignore"):
-                        win_model.fit(X_tr, y_tr)
+                        # LGBMRanker needs date groups for cross-sectional ranking
+                        if name == "LGBMRanker":
+                            tr_dates_sorted = pd.to_datetime(tr["date"], errors="coerce").to_numpy()
+                            # Map each date to a dense integer group index (sorted)
+                            unique_dates, date_groups = np.unique(tr_dates_sorted, return_inverse=True)
+                            win_model.fit(X_tr, y_tr, _date_groups=date_groups)
+                        else:
+                            win_model.fit(X_tr, y_tr)
                     t1 = time.perf_counter()
                 except Exception as exc:
                     print(f"  [window {win_idx}/{len(windows)}] train failed: {exc}")
@@ -1271,6 +1425,7 @@ def main() -> None:
                     te_scored,
                     max_positions=int(max_positions),
                     min_positions=int(min_positions),
+                    horizon=int(horizon),
                 )
                 n_daily_pts = int(len(daily_ret_s))
                 if n_daily_pts < int(args.min_oos_days):
@@ -1285,7 +1440,7 @@ def main() -> None:
                     max_positions=int(max_positions),
                     min_positions=int(min_positions),
                 )
-                sharpe = _sharpe_from_series(daily_ret_s.to_numpy(dtype=float))
+                sharpe = _sharpe_from_series(daily_ret_s.to_numpy(dtype=float), horizon=int(horizon))
                 sharpe_str = f"{sharpe:.4f}" if np.isfinite(sharpe) else "nan"
 
                 print(
@@ -1330,12 +1485,12 @@ def main() -> None:
 
         oos_df = pd.concat(oos_parts, ignore_index=True) if oos_parts else pd.DataFrame()
         chained_daily = _concat_window_daily_returns(daily_parts)
-        oos_sharpe_chained = _sharpe_from_series(chained_daily)
+        oos_sharpe_chained = _sharpe_from_series(chained_daily, horizon=int(horizon))
         oos_cagr_chained = _cagr_from_daily_returns(chained_daily)
         oos_max_dd = _max_drawdown_from_daily_returns(chained_daily)
         oos_win_rate = _win_rate_from_daily_returns(chained_daily)
         _oos_sharpe_chained_old, _oos_cagr_chained_old, oos_ic_chained = _chained_oos_metrics(
-            oos_df, max_positions=int(max_positions)
+            oos_df, max_positions=int(max_positions), horizon=int(horizon)
         )
 
         decay_val = float(getattr(cfg.model_selection, "selection_weight_decay", 0.95)) if hasattr(cfg, "model_selection") else 0.95
@@ -1422,6 +1577,7 @@ def main() -> None:
                     te_scored,
                     max_positions=int(max_positions),
                     min_positions=int(min_positions),
+                    horizon=int(horizon),
                 )
                 n_daily_pts = int(len(daily_ret_s))
                 if n_daily_pts < int(args.min_oos_days):
@@ -1436,7 +1592,7 @@ def main() -> None:
                     max_positions=int(max_positions),
                     min_positions=int(min_positions),
                 )
-                sharpe = _sharpe_from_series(daily_ret_s.to_numpy(dtype=float))
+                sharpe = _sharpe_from_series(daily_ret_s.to_numpy(dtype=float), horizon=int(horizon))
                 sharpe_str = f"{sharpe:.4f}" if np.isfinite(sharpe) else "nan"
                 print(
                     f"  [window {win_idx}/{len(windows)}] test=[{te_label}] | n_days={n_test_unique} | "
@@ -1472,11 +1628,11 @@ def main() -> None:
             te_t = np.array([w.test_time_s for w in wm], dtype=float)
             oos_df = pd.concat(oos_parts, ignore_index=True) if oos_parts else pd.DataFrame()
             chained_daily = _concat_window_daily_returns(daily_parts)
-            oos_sharpe_chained = _sharpe_from_series(chained_daily)
+            oos_sharpe_chained = _sharpe_from_series(chained_daily, horizon=int(horizon))
             oos_cagr_chained = _cagr_from_daily_returns(chained_daily)
             oos_max_dd = _max_drawdown_from_daily_returns(chained_daily)
             oos_win_rate = _win_rate_from_daily_returns(chained_daily)
-            _unused_s, _unused_c, oos_ic_chained = _chained_oos_metrics(oos_df, max_positions=int(max_positions))
+            _unused_s, _unused_c, oos_ic_chained = _chained_oos_metrics(oos_df, max_positions=int(max_positions), horizon=int(horizon))
 
             row = {
                 "model_name": "LearnedWeightsBaseline",
@@ -1534,12 +1690,22 @@ def main() -> None:
     print(f"Saved report: {report_path}")
 
     # --- ENSEMBLE WINNER SELECTION (Pillar 24) ---
-    top_n = int(args.get("ensemble_size", 5)) if isinstance(args, dict) else 5
+    top_n = int(ms_cfg.get("ensemble_size", 3))  # default 3: Ridge + XGBRegressor + LGBMRanker
     
-    long_kinds = ["classifier", "regressor"]
+    # Regressors only for longs: classifiers predict P(up) which clusters near 0.5
+    # and doesn't provide cross-sectional rank dispersion. Classifiers capture beta
+    # (market direction) not alpha (relative ranking). IC tells the truth — all
+    # classifiers have negative or near-zero IC_chained in OOS evaluation.
+    long_kinds = ["regressor"]
     short_kinds = ["short_classifier"]
 
     def _get_consistent_pool(full_pool, kinds, size):
+        if full_pool.empty: return full_pool
+        # Minimum IC threshold: discard models with negative chained IC.
+        # A model with IC < 0 has negative cross-sectional predictive power.
+        if "oos_ic_chained" in full_pool.columns:
+            ic_floor = full_pool["oos_ic_chained"].apply(lambda x: float(x) if np.isfinite(float(x)) else -999)
+            full_pool = full_pool[ic_floor >= 0.0].copy()
         if full_pool.empty: return full_pool
         # Type-Consistency Lockdown: Anchor to the #1 winner's type
         anchor_kind = full_pool.iloc[0]["model_kind"]
@@ -1617,6 +1783,13 @@ def main() -> None:
 
         print(f"Training best {b_label} ENSEMBLE ({len(estimators)} models) on full dataset...")
         with np.errstate(all="ignore"):
+            # Inject date groups into any LGBMRanker sub-estimators BEFORE VotingRegressor.fit()
+            # calls each sub-estimator's .fit(X, y) without kwargs (LightGBM limit: ≤10k rows/group).
+            all_dates = pd.to_datetime(df["date"], errors="coerce").to_numpy()
+            _, date_groups_all = np.unique(all_dates, return_inverse=True)
+            for _est_name, _est in estimators:
+                if hasattr(_est, "set_date_context"):
+                    _est.set_date_context(date_groups_all)
             ensemble.fit(X_all, y_fit)
         
         path = out_dir / f"best_{b_label}_model.pkl"

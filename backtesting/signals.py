@@ -606,7 +606,7 @@ class SignalEngine:
                         {
                             "path": str(getattr(self.config, "ml_long_model_path", "") or "").strip(),
                             "weight": float(getattr(self.config, "ml_long_weight", 0.5)),
-                            "type": "classifier",
+                            "type": "regressor",   # best_long_model.pkl is a VotingRegressor ensemble
                         },
                         {
                             "path": str(getattr(self.config, "ml_short_model_path", "") or "").strip(),
@@ -728,27 +728,33 @@ class SignalEngine:
                 adjusted = f_trend * self.weights.get("trend", 1.0)
             else:
                 # 1) Calculate Long Score and Short Score independently to prevent dilution
-                long_model = next((m for m in self._ensemble_models_cache if m.model_type == "classifier"), None)
+                long_model = next(
+                    (m for m in self._ensemble_models_cache if m.model_type in ("classifier", "regressor")), None
+                )
                 short_model = next((m for m in self._ensemble_models_cache if m.model_type == "short_classifier"), None)
                 
                 long_score = pd.Series(0.0, index=features.index)
                 short_score = pd.Series(0.0, index=features.index)
-                
+                short_score_raw = pd.Series(0.0, index=features.index)  # ungated — used for CS short ranking
+
                 from utils.ensemble_scoring import _predict_model
                 if long_model:
                     long_score = _predict_model(long_model, model_features, clip=bool(ens_cfg.get("clip", False)))
-                    
+
                 if short_model:
                     raw_short = _predict_model(short_model, model_features, clip=bool(ens_cfg.get("clip", False)))
-                    
-                    # Regime Gating: only allow short model to contribute in certain regimes
+                    # Store ungated raw short score for cross-sectional short-leg selection
+                    short_score_raw = raw_short.copy()
+
+                    # Regime Gating: only allow short model to contribute to combined adjusted_score
+                    # in certain regimes (keeps long-side clean in Bull regime)
                     if self.regime_series is not None:
                         panel_regimes = self.regime_series.reindex(features.index).astype(str).map(_normalise_regime_label).fillna("Sideways")
                     elif "trend_regime" in features.columns:
                         panel_regimes = features["trend_regime"].astype(str).map(_normalise_regime_label).fillna("Sideways")
                     else:
                         panel_regimes = pd.Series("Sideways", index=features.index)
-                        
+
                     allowed = getattr(self.config, "ml_short_allowed_regimes", ["Bear", "Crisis", "Sideways"])
                     gate_mask = panel_regimes.isin(allowed)
                     short_score = raw_short.where(gate_mask, 0.0)
@@ -831,11 +837,16 @@ class SignalEngine:
             scale = float(getattr(self.config, "score_scale", 1.0))
             adjusted = (adjusted * scale) * direction
 
+        # short_score_raw is only set in mode==ml; default to zeros in other modes
+        if "short_score_raw" not in dir():
+            short_score_raw = pd.Series(0.0, index=features.index)
+
         signal_df = pd.DataFrame(
             {
                 "trend_score": trend_scores,
                 "confidence": rolling_conf,
                 "adjusted_score": adjusted,
+                "short_score_raw": short_score_raw,
                 "sector_relative_20d": sr20,
                 "sector_relative_60d": sr60,
                 "rel_ret_5d": model_features["rel_ret_5d"] if "rel_ret_5d" in model_features.columns else 0.0,

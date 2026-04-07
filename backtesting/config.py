@@ -104,6 +104,7 @@ class BacktestConfig:
     market_neutral: bool = False  # if True, add bottom TOP_SHORTS as shorts; else long-only from top
     cross_sectional_rebalance_daily: bool = False  # if True, close positions not in today's target before opens
     daily_positions_csv_path: str = "output/portfolio/daily_positions.csv"
+    conviction_buffer: float = 0.0  # hysteresis around min_signal_strength (0=disabled)
 
     # No-trade band (reduces churn during cross-sectional daily rebalancing):
     # - Only close a position if its weight-to-zero exceeds `no_trade_band_weight_diff`.
@@ -361,6 +362,7 @@ def load_config(path: str = "backtest_config.yaml") -> BacktestConfig:
     cfg.no_trade_band_weight_diff = float(cs.get("no_trade_band_weight_diff", cfg.no_trade_band_weight_diff))
     cfg.no_trade_band_total_drift = float(cs.get("no_trade_band_total_drift", cfg.no_trade_band_total_drift))
     cfg.daily_positions_csv_path = cs.get("daily_positions_csv_path", cfg.daily_positions_csv_path)
+    cfg.conviction_buffer = float(cs.get("conviction_buffer", 0.0))
     dh = bt.get("dynamic_holding", {})
     cfg.dynamic_holding_enabled = dh.get("enabled", cfg.dynamic_holding_enabled)
     if "by_signal" in dh:
