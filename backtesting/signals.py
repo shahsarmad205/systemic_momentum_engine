@@ -17,6 +17,7 @@ contributes to the final adjusted score.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -261,6 +262,13 @@ class SignalEngine:
         self._ensemble_models_cache = None
         self._warned_all_nan_cols = False
         self._warned_ensemble_norm_ignored = False
+        # C2: regime-conditional model routing
+        self._current_regime: str = "Normal"
+        self._regime_model_cache: dict[str, Any] = {}  # regime_label → LoadedEnsembleModel
+
+    def set_regime(self, regime: str) -> None:
+        """C2: Called by the backtester each day to route predictions to the regime-specific model."""
+        self._current_regime = str(regime) if regime else "Normal"
 
     # ==============================================================
     # Core: vectorised price-based signals (trend + volatility)
@@ -276,6 +284,7 @@ class SignalEngine:
         vix_df: pd.DataFrame | None = None,
         vix3m_df: pd.DataFrame | None = None,
         panel_features: pd.DataFrame | None = None, # Pillar 29: Joint-Panel Feature Injection
+        ticker: str = "",  # C1: used to fetch earnings_surprise per ticker
     ) -> pd.DataFrame:
         """
         Compute trend_score, confidence, adjusted_score, signal for every bar.
@@ -648,6 +657,10 @@ class SignalEngine:
                 volume_zscore = pf.get("volume_zscore", volume_zscore)
                 vix_zscore_series = pf.get("vix_zscore", vix_zscore_series)
                 vol_spike_series = pf.get("vol_spike", vol_spike_series)
+                # A1 fix: override time-series percentile with cross-sectional percentile
+                # (training used CS rank; inference was using per-ticker TS rolling rank)
+                if "cs_momentum_percentile" in pf.columns:
+                    cs_momentum_series = pf["cs_momentum_percentile"]
 
             ret_20d = close.pct_change(20)
             ret_60d = close.pct_change(60)
@@ -710,6 +723,23 @@ class SignalEngine:
                         .fillna(1.0)
                     ).fillna(1.0),
                     "capm_residual_vol": signal_df_tmp["capm_residual_vol"].fillna(0.0),
+                    "capm_alpha": signal_df_tmp["capm_alpha"].fillna(0.0),
+                    # All-weather features (in training feature_subset but missing from inference)
+                    "short_term_reversal": (-ret_5d.shift(1)).clip(-0.5, 0.5).fillna(0.0),
+                    "nearness_52w_low": (
+                        1.0 / (1.0 + ((close / close.rolling(252, min_periods=60).min().replace(0, np.nan).clip(lower=1e-6)) - 1.0).clip(0, 10))
+                    ).fillna(0.5),
+                    "nearness_52w_high": (
+                        (close / close.rolling(252, min_periods=100).max().replace(0, np.nan)).clip(0.0, 1.0)
+                    ).fillna(0.5),
+                    "low_vol_score": (
+                        1.0 - daily_ret.rolling(20, min_periods=10).std().rolling(252, min_periods=60).rank(pct=True)
+                    ).fillna(0.5),
+                    "quality_score": (
+                        (daily_ret.rolling(60, min_periods=20).mean()
+                         / daily_ret.rolling(60, min_periods=20).std().replace(0, np.nan).fillna(1e-6)
+                         * np.sqrt(252)).clip(-5.0, 5.0)
+                    ).fillna(0.0),
                     "rel_ret_5d": (
                         ret_5d - (
                             spy_df["Close"].pct_change(5).shift(1).reindex(features.index).fillna(0.0)
@@ -737,7 +767,31 @@ class SignalEngine:
                 short_score = pd.Series(0.0, index=features.index)
                 short_score_raw = pd.Series(0.0, index=features.index)  # ungated — used for CS short ranking
 
-                from utils.ensemble_scoring import _predict_model
+                from utils.ensemble_scoring import _predict_model, LoadedEnsembleModel
+
+                # C2: regime-conditional model routing — only activate for Bear/Crisis/HighVol.
+                # Bull and Normal (80%+ of days) keep the superior general VotingRegressor
+                # since regime-specific XGBClassifiers are weaker single models.
+                _C2_REGIMES = {"Bear", "Crisis", "HighVol"}
+                regime_models_dir = str(getattr(self.config, "ml_regime_models_dir", "") or "").strip()
+                if regime_models_dir and long_model and self._current_regime in _C2_REGIMES:
+                    import os
+                    _regime_key = self._current_regime  # "Bear", "Crisis", or "HighVol"
+                    _regime_fname = {
+                        "Bear": "bear",
+                        "HighVol": "highvol", "Crisis": "highvol",
+                    }.get(_regime_key, "normal")
+                    _regime_path = os.path.join(regime_models_dir, f"xgb_regime_{_regime_fname}.pkl")
+                    if _regime_key not in self._regime_model_cache:
+                        if os.path.isfile(_regime_path):
+                            _r_loaded = load_ensemble_models({"models": [{"path": _regime_path, "weight": 1.0, "type": "classifier"}]})
+                            self._regime_model_cache[_regime_key] = _r_loaded[0] if _r_loaded else None
+                        else:
+                            self._regime_model_cache[_regime_key] = None
+                    _regime_model = self._regime_model_cache.get(_regime_key)
+                    if _regime_model is not None:
+                        long_model = _regime_model
+
                 if long_model:
                     long_score = _predict_model(long_model, model_features, clip=bool(ens_cfg.get("clip", False)))
 

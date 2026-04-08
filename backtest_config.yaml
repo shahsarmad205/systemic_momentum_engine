@@ -15,9 +15,17 @@ backtest:
   signal_confidence_multiplier_bear: 0.2   # Phase 8: lowered from 0.6
   signal_confidence_multiplier_crisis: 0.2 # Phase 8: lowered from 0.5
   signal_confidence_multiplier_sideways: 0.2 # Phase 8: lowered from 0.5
-  start_date: '2008-01-01'   # Backtest evaluation window (true OOS)
-  end_date: '2022-01-01'    # Backtest evaluation window end
+  start_date: '2008-01-01'   # TRUE OOS evaluation window — model trained on 2007-2022
+  end_date: '2022-12-31'    # Full year end for walk-forward windows
   holding_period_days: 10
+  dynamic_holding:                         # B2: holding period varies by signal strength
+    enabled: true
+    by_signal:
+      Bullish: 10
+      Bearish: 7
+    by_strength:                           # CS z-score bands for selected stocks (≈1.5–3.5 range)
+      - [2.0, 14]                          # |z| >= 2.0 → hold 14 days (high conviction)
+      - [1.0, 10]                          # |z| >= 1.0 → hold 10 days (normal)
 data:
   cache_dir: data/cache
   cache_ohlcv: true
@@ -25,10 +33,10 @@ data:
   provider: yahoo
 execution:
   commission_per_trade: 1.0
-  enable_shorts: true    # Phase 2: enabled long/short — was long-only, short P&L was 0%
-  long_only: false
+  enable_shorts: false   # Disabled: shorts are net -2.71% P&L drag despite 60.7% win rate (stop-loss squeeze). Longs alone +225%.
+  long_only: true
   slippage_bps: 1.0
-  regime_suppress_shorts: ["Bull", "Bear"]   # Phase 10: suppress in Bull+Bear — Bear shorts have 20% win rate
+  regime_suppress_shorts: ["Bull", "Bear"]   # Phase 14: revert — Bear short win rate 17.9% in practice (58.8% was model-selection inflation). ShortXGB alpha lives in Bull corrections.
 execution_costs:
   commission_bps: 1.0
   enabled: true
@@ -52,6 +60,8 @@ factor_neutralization:
   neutralize_market_beta: true
   neutralize_sector: true
   neutralize_size: true
+  neutralize_smb: false   # B1: FF SMB factor — disabled (ff5_daily.csv not present, returns zeros)
+  neutralize_rmw: false   # B1: FF RMW factor — disabled (same reason)
 feature_selection:
   feature_subset:
   - f_trend
@@ -69,6 +79,15 @@ feature_selection:
   - nearness_52w_low
   - low_vol_score
   - quality_score
+  # Phase A: new alpha factors
+  - nearness_52w_high       # George & Hwang 2004: proximity to 52w high predicts continuation
+  - capm_alpha              # rolling 60d excess return vs CAPM — pure stock-level alpha
+  - momentum_acceleration   # ret_5d - ret_10d: acceleration of momentum signal
+  # Phase A: sector-relative momentum (now meaningful with fixed sector mapping)
+  - sector_relative_20d     # stock return minus sector median (CS z-scored, lagged 1d)
+  - sector_relative_60d     # 60d version — slower sector-relative trend
+  # NOTE: idio_momentum_20d REMOVED — collapses to ~0 in Bull/Bear (stocks move with market),
+  # giving zero cross-sectional variance → model can't rank → no signal in 75% of trading days
   short_feature_subset:
   - dist_from_52w_high
   - rsi_overbought
@@ -79,7 +98,6 @@ feature_selection:
   - rolling_vol_20
   - ret_5d
   - ret_1d
-  - earnings_surprise
 live:
   trading_enabled: true
   trading_halt_env: TRADING_HALTED
@@ -125,7 +143,10 @@ pipeline:
   retrain_interval_days: 30
   retrain_script: run_retrain_baseline.py
 regime:
-  confirmation_days: 2   # Phase 7: reduced from 3 — faster Bear/Crisis detection (1 day lag reduction)
+  confirmation_days: 1   # Phase 13: 1 day — faster Bear/Crisis detection reduces exposure lag
+  continuous_score_enabled: true        # D1: use continuous regime score for gross exposure scaling
+  score_bull_gross_cap: 1.0             # D1: gross cap fraction at pure Bull (score=0)
+  score_crisis_gross_cap: 0.25          # D1: gross cap fraction at pure Crisis (score=1)
   adjustments:
     Bear:
       position_scale: 0.3    # Phase 9: lowered from 0.5 — Bear win rate 21.5% doesn't justify 50% exposure
@@ -186,10 +207,10 @@ retraining:
   validation_walk_forward_windows: 3
 risk:
   bear_gross_cap_fraction: 0.5    # Phase 9: lowered from 0.7
-  crisis_gross_cap_fraction: 0.4  # Phase 9: lowered from 0.6 — cap crisis gross to reduce 2008 DD
+  crisis_gross_cap_fraction: 0.3  # Phase 13: lowered from 0.4 — tighter crisis gross cap to break <20% DD
   bear_liquidate_longs_on_regime_entry: true   # Phase 6: liquidate inherited longs on Bear entry (Bear win rate was 23.8%)
-  bear_max_carry_days: 2   # Phase 7: truncate any surviving longs to max 2 more days on Bear entry (hysteresis survivors)
-  bear_max_holding_days: 3
+  bear_max_carry_days: 0   # Phase 13: zero carry — liquidate all longs immediately on Bear entry
+  bear_max_holding_days: 0
   bear_regime_intraday_exit_drawdown_pct: 0.02
   bear_signal_quantile: 0.5    # loosened from 0.7 — allow top 50% in Bear (was blocking too much)
   bear_signal_window_days: 60
@@ -213,13 +234,19 @@ risk:
   max_drawdown_pct: 0.0
   max_gross_exposure: 1.5
   max_net_exposure: 0.1
-  max_position_pct_of_equity: 0.09   # Phase 7: raised from 0.08 — 12 longs * 9% = 108% gross exposure cap
+  max_position_pct_of_equity: 0.08   # Phase 13: lowered from 0.09 — reduce peak exposure, helps 2008 DD
   max_short_single_name: 0.08       # Phase 4: match long cap
   min_holding_early_exit_drawdown_pct: 1.0
   position_sizing: signal_strength  # Phase 4: upgraded from equal — size by conviction
   short_borrow_cost_bps: 50
   stop_loss_pct: 0.0
   take_profit_pct: 0.0
+  sharpe_circuit_breaker:               # D3: rolling Sharpe CB — soft exposure reducer
+    enabled: true
+    window_days: 60
+    threshold: 0.0          # 60d annualized Sharpe below this → activate
+    recovery_threshold: 0.3  # Sharpe above this → deactivate
+    exposure_scale: 0.5     # multiply gross_cap_fraction by 0.5 when active
   var_check:
     check_target: false
     confidence: 0.95
@@ -231,8 +258,8 @@ risk:
     strict_coverage: false
   vix_deleveraging:
     enabled: true              # Phase 5: enabled — reduces drawdown during VIX spikes
-    high_vix_threshold: 25.0   # Phase 9: lowered from 28 — trigger earlier before full Crisis
-    scaling_factor: 0.4        # Phase 9: lowered from 0.5 — more aggressive deleveraging at high VIX
+    high_vix_threshold: 25.0   # Phase 13: reverted — VIX=22 triggers 30% of days, kills CAGR
+    scaling_factor: 0.35       # Phase 13: kept lower — more aggressive at true VIX spikes (>25)
     short_conviction_multiplier: 1.5
     short_ma_exit_enabled: true
     short_stop_loss_pct: 0.03
@@ -281,18 +308,20 @@ signals:
   ml_clip: false
   ml_long_model_path: output/models/best_long_model.pkl
   ml_long_weight: 1.0
-  ml_short_allowed_regimes: ["Bull", "Bear", "Sideways", "Crisis"]   # Phase 10: all regimes — short_score_raw drives CS short selection now
+  ml_short_allowed_regimes: ["Bull", "Sideways", "Crisis"]   # Phase 14: remove Bear — ShortXGB has real edge in Bull corrections and Sideways, not in Bear (correlation spike kills cross-sectional signal)
   ml_short_holding_period_days: 2
   ml_short_max_squeeze_vol_ratio: 2.2
   ml_short_min_liquidity_usd: 20000000.0
-  ml_short_min_signal_strength: 0.7
+  ml_short_min_signal_strength: 0.8   # Phase 13: raised from 0.7 — weak shorts lose in Bull-dominated OOS
   ml_short_model_path: output/models/best_short_model.pkl
   ml_short_overextension_threshold: 0.05
-  ml_short_snap_profit_pct: 0.04   # Phase 6: raised from 0.02 — was cutting winners too early (73% exits at 2%)
-  ml_short_stop_loss_pct: 0.0      # Phase 7: disabled — 3% stop was cutting 54% of shorts before they could work (win rate: 75%→44%)
+  ml_short_snap_profit_pct: 0.05   # D2: increased from 0.03 — let short winners run to 5% before snapping
+  ml_short_position_scale: 0.7    # D2: short book sized at 70% of long equivalent
+  ml_short_stop_loss_pct: 0.05     # Phase 14: re-enabled at 5% — 3% was too tight (54% of shorts stopped), 0% created unlimited downside; 5% balances RR
   ml_short_holding_period_days: 4  # Phase 7: extended from 2 — shorts need 4 days to play out after entry
   ml_short_weight: 0.5
   ml_standardize: false
+  ml_regime_models_dir: output/models   # C2: enable regime-conditional routing (bull/bear/highvol/normal PKLs)
   mode: ml
   score_direction: 1.0
   signal_confidence_multiplier: 0.3          # Phase 8: recalibrated for new regressor score scale (std=0.006)

@@ -56,6 +56,59 @@ from utils.quant_utils import get_sector
 HISTORY_BUFFER_DAYS = 400
 MARKET_TICKER = "SPY"  # for rolling correlation feature
 
+
+def _fetch_earnings_surprise(ticker: str, dates: pd.DatetimeIndex) -> pd.Series:
+    """
+    C1: Pull quarterly EPS surprise from yfinance and forward-fill within each quarter.
+
+    Surprise = (Reported EPS - EPS Estimate) / |EPS Estimate|, clipped to [-2, 2].
+    Lagged 1 trading day to avoid same-day lookahead (announcements are after close).
+    Returns a Series aligned to `dates`; NaN where data is unavailable.
+    """
+    try:
+        import yfinance as yf
+
+        t = yf.Ticker(ticker)
+        ed = t.get_earnings_dates(limit=20)
+        if ed is None or ed.empty:
+            return pd.Series(np.nan, index=dates)
+
+        surprise_col = next(
+            (c for c in ed.columns if "surprise" in c.lower()), None
+        )
+        if surprise_col is None:
+            return pd.Series(np.nan, index=dates)
+
+        # Normalize index to timezone-naive
+        idx = ed.index
+        if hasattr(idx, "tz") and idx.tz is not None:
+            idx = idx.tz_localize(None)
+
+        raw_vals = pd.to_numeric(ed[surprise_col], errors="coerce").values
+        # yfinance returns surprise as a percentage (e.g. 5.2 = 5.2%); convert to fraction
+        surprise = pd.Series(raw_vals / 100.0, index=idx)
+        surprise = surprise.dropna().clip(-2.0, 2.0).sort_index()
+
+        if surprise.empty:
+            return pd.Series(np.nan, index=dates)
+
+        # Normalize feature dates to timezone-naive for alignment
+        dates_naive = dates
+        if hasattr(dates, "tz") and dates.tz is not None:
+            dates_naive = dates.tz_localize(None)
+
+        # Build a daily business-day calendar spanning both series
+        cal_start = min(dates_naive.min(), surprise.index.min())
+        cal_end = max(dates_naive.max(), surprise.index.max())
+        all_bdates = pd.date_range(cal_start, cal_end, freq="B")
+
+        # Reindex to daily, shift 1 day (announcement is after market close)
+        # then forward-fill so the signal persists until the next earnings date
+        s = surprise.reindex(all_bdates).shift(1).ffill()
+        return s.reindex(dates_naive)
+    except Exception:
+        return pd.Series(np.nan, index=dates)
+
 # Re-export: canonical ticker→sector lives in utils.sectors (covers full learning universe).
 # Use get_sector(ticker) in workers; SECTOR_MAP is the static mapping dict.
 
@@ -409,6 +462,7 @@ def _build_features_for_ticker(
         capm_alpha = pd.Series(np.nan, index=features.index)
         capm_beta = pd.Series(1.0, index=features.index)
         capm_residual_vol = pd.Series(np.nan, index=features.index)
+        idio_momentum_20d = pd.Series(0.0, index=features.index)  # default: no market data
         # Raw 20d realised vol (std of daily returns) — used for cross-sectional vol_rank (ARE 1.3).
         vol_20_simple = daily_ret.rolling(20).std()
         if market_ret is not None:
@@ -424,6 +478,13 @@ def _build_features_for_ticker(
                 capm_residual_vol = capm_df["capm_residual_vol"]
             except Exception:
                 pass
+            # Idiosyncratic momentum: stock 20d return minus beta-adjusted market 20d return.
+            # Isolates pure alpha component from market-factor contribution.
+            # Computed after capm_beta is available (may still be default 1.0 if CAPM failed).
+            spy_ret_20d = (1.0 + market_aligned).rolling(20, min_periods=10).apply(
+                np.prod, raw=True
+            ) - 1.0
+            idio_momentum_20d = (ret_20d - capm_beta * spy_ret_20d).clip(-0.5, 0.5).fillna(0.0)
 
         # ------------------------------------------------------------------
         # Mean-reversion raw inputs (CS z-score + shift(1) applied in build_feature_matrix)
@@ -453,6 +514,14 @@ def _build_features_for_ticker(
         mr_bb_raw = (close - bb_lower) / bb_width
 
         forward_ret = close.shift(-holding_period) / close - 1
+
+        # C3: risk-adjusted return — forward return scaled by entry-day realized vol
+        # over the holding horizon. Rewards low-vol momentum: a 2% gain on a 5% vol
+        # stock is a stronger signal than 2% on a 20% vol stock.
+        _holding_period_vol = vol_20_raw * np.sqrt(holding_period)
+        forward_ret_risk_adj = (
+            forward_ret / _holding_period_vol.clip(lower=0.001)
+        ).clip(-10.0, 10.0)
 
         # Short-predictive features
         rsi_14 = mr_rsi_raw.shift(1)
@@ -490,6 +559,11 @@ def _build_features_for_ticker(
         min_52w = close.rolling(252, min_periods=60).min().replace(0, np.nan)
         dist_from_52w_low = ((close - min_52w) / min_52w.clip(lower=1e-6)).clip(0, 10)
         nearness_52w_low = 1.0 / (1.0 + dist_from_52w_low)
+
+        # 52w high proximity (momentum signal: George & Hwang 2004).
+        # 1.0 = stock AT 52w high (strong trend continuation signal for longs).
+        # max_52w already computed above for dist_from_52w_high.
+        nearness_52w_high = (close / max_52w.replace(0, np.nan)).clip(0.0, 1.0).fillna(0.5)
 
         # Low-volatility score (low vol → high score; negated percentile rank)
         vol_20_lv = daily_ret.rolling(20, min_periods=10).std()
@@ -551,13 +625,15 @@ def _build_features_for_ticker(
                 "vol_expansion": vol_expansion,
                 "momentum_acceleration": momentum_acceleration,
                 "down_up_vol_ratio": down_up_vol_ratio,
-                "earnings_surprise": np.nan,
                 # All-weather features (value, quality, low-vol, mean-reversion)
                 "short_term_reversal": short_term_reversal,
                 "nearness_52w_low": nearness_52w_low,
+                "nearness_52w_high": nearness_52w_high,
+                "idio_momentum_20d": idio_momentum_20d,
                 "low_vol_score": low_vol_score,
                 "quality_score": quality_score,
                 "forward_return": forward_ret,
+                "forward_return_risk_adj": forward_ret_risk_adj,  # C3: risk-adjusted target
             },
             index=features.index,
         )
@@ -870,6 +946,7 @@ def build_feature_matrix(
             "sector",
             "regime_label",
             "forward_return",
+            "forward_return_risk_adj",  # C3: risk-adjusted target
             "forward_return_excess",
             "direction",
         ]

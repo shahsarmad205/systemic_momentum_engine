@@ -100,9 +100,19 @@ def main() -> None:
     print(f"  Current weights : {getattr(config, 'learned_weights_path', '') or 'N/A'}")
     print("=========================================================\n")
 
-    # Ensure walk-forward uses dynamic weight training on each train window
-    config.signal_mode = "learned"
-    config.walk_forward_train_weights = True
+    # B3: Respect the configured signal_mode instead of always forcing "learned".
+    # When signal_mode is "ml" or "ensemble", auto-retrain evaluates the existing
+    # ML model ensemble (best_long_model.pkl + best_short_model.pkl) via walk-forward
+    # and promotes it only if its OOS Sharpe beats the current production model.
+    # The time-decayed ensemble blending (B3) only applies to "learned" mode.
+    active_mode = str(getattr(config, "signal_mode", "learned") or "learned").lower()
+    if active_mode in ("ml", "ensemble"):
+        config.walk_forward_train_weights = False  # no per-window weight training in ML mode
+        print(f"  signal_mode={active_mode!r}: running walk-forward evaluation of ML models (no weight retraining).")
+    else:
+        # Ensure walk-forward uses dynamic weight training on each train window (legacy learned mode)
+        config.signal_mode = "learned"
+        config.walk_forward_train_weights = True
 
     # --- 1) Baseline: current production model walk-forward (if any) ---
     prod_weights_path = getattr(config, "learned_weights_path", "") or ""
@@ -160,20 +170,80 @@ def main() -> None:
         )
         return
 
-    # --- 3) Promote best candidate weights from last walk-forward window ---
-    print("\nPhase 3: Promoting new production weights…")
-    # Take the last non-empty weights_path from candidate summary
-    non_empty = cand_summary[cand_summary["weights_path"] != ""]
+    # --- 3) Promote production model ---
+    print("\nPhase 3: Promoting new production model…")
+
+    if active_mode in ("ml", "ensemble"):
+        # B3 (ML mode): the ML models are already on disk (best_long_model.pkl etc.).
+        # Walk-forward confirmed they're still competitive. No file copy needed —
+        # the backtester reads the model paths directly from config.
+        print(
+            f"  signal_mode={active_mode!r}: ML models already at configured paths "
+            f"(ml_long_model_path={getattr(config, 'ml_long_model_path', 'N/A')}). "
+            "No file promotion required."
+        )
+        print("\nAuto-retrain (ML mode) finished successfully.")
+        return
+
+    # Legacy "learned" mode: time-decayed ensemble of walk-forward LearnedWeights
+    non_empty = cand_summary[cand_summary["weights_path"] != ""].copy()
     if non_empty.empty:
         print("  [ERROR] No candidate weights_path entries found; cannot promote.")
         return
 
-    best_row = non_empty.iloc[-1]
-    new_weights_path = Path(best_row["weights_path"]).resolve()
+    # Load all per-window LearnedWeights and blend with exponential time-decay.
+    # Windows are ordered oldest→newest; most-recent window gets weight λ^0=1.0.
+    _DECAY = 0.7  # λ: each older window discounted by 30%
+    from agents.weight_learning_agent.weight_model import LearnedWeights
+    import dataclasses
 
-    if not new_weights_path.is_file():
-        print(f"  [ERROR] Candidate weights file not found: {new_weights_path}")
+    window_weights: list[LearnedWeights] = []
+    decay_factors: list[float] = []
+    n_windows = len(non_empty)
+    for i, (_, row) in enumerate(non_empty.iterrows()):
+        p = Path(row["weights_path"]).resolve()
+        if not p.is_file():
+            print(f"  [WARN] Window {i} weights file not found, skipping: {p}")
+            continue
+        try:
+            lw = LearnedWeights.load(str(p))
+        except Exception as exc:
+            print(f"  [WARN] Failed to load window {i} weights ({p}): {exc}")
+            continue
+        # Exponent: most-recent window (last) → power 0; oldest → power (n-1)
+        power = (n_windows - 1) - i
+        window_weights.append(lw)
+        decay_factors.append(_DECAY ** power)
+        print(f"  Window {i}: decay={_DECAY**power:.3f}  path={p.name}")
+
+    if not window_weights:
+        print("  [ERROR] No valid window weights loaded; cannot promote.")
         return
+
+    # Weighted average of all numeric w_* fields
+    total_decay = sum(decay_factors)
+    base = dataclasses.asdict(window_weights[0])
+    blended: dict = {}
+    _NUMERIC_SKIP = {"n_samples", "score_direction"}
+    for key, val in base.items():
+        if isinstance(val, (int, float)) and key not in _NUMERIC_SKIP:
+            blended[key] = sum(
+                dataclasses.asdict(lw)[key] * d
+                for lw, d in zip(window_weights, decay_factors)
+            ) / total_decay
+        else:
+            # Keep metadata from the most-recent window
+            blended[key] = dataclasses.asdict(window_weights[-1])[key]
+
+    ensemble_lw = LearnedWeights.from_dict(blended)
+    print(f"  Ensemble blended from {len(window_weights)} windows (λ={_DECAY})")
+
+    # Write ensemble to a temp file so we have a real path to copy from
+    import tempfile, os
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".json")
+    os.close(tmp_fd)
+    ensemble_lw.save(tmp_path)
+    new_weights_path = Path(tmp_path).resolve()
 
     archive_dir = Path(args.archive_dir).expanduser().resolve()
     archive_dir.mkdir(parents=True, exist_ok=True)
@@ -197,6 +267,13 @@ def main() -> None:
     prod_dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(str(new_weights_path), str(prod_dest))
     print(f"  Updated production weights → {prod_dest}")
+
+    # Clean up temp file created for ensemble blend (if applicable)
+    if str(new_weights_path).endswith(".json") and "tmp" in str(new_weights_path).lower():
+        try:
+            new_weights_path.unlink(missing_ok=True)
+        except Exception:
+            pass
 
     print("\nAuto-retrain finished successfully.")
 

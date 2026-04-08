@@ -136,12 +136,24 @@ def build_cross_sectional_candidates(
                 "signal_score": adj_score,
             })
 
-    # Shorts: bottom TOP_SHORTS by long z-score (weakest momentum = short candidates).
-    # "Losers continue to lose" is a documented factor — bottom cross-sectional score
-    # outperforms dedicated short model which lacks sufficient OOS predictive power.
+    # Shorts: if short_score_raw is available in signal rows, rank by it (dedicated short model).
+    # Fallback: bottom of long z-score rank (weakest momentum = short candidates).
     if market_neutral or config.enable_shorts:
         long_tickers = {t for t, _, _ in long_slice}
-        short_slice = rows[-top_shorts:] if len(rows) >= top_shorts else []
+        use_short_score = any(
+            float(sig_row.get("short_score_raw", 0.0) or 0.0) != 0.0
+            for _, _, sig_row in rows
+        )
+        if use_short_score:
+            # Re-rank by short_score_raw descending (higher = stronger short signal)
+            short_ranked = sorted(
+                raw_candidates,
+                key=lambda x: float(x[2].get("short_score_raw", 0.0) or 0.0),
+                reverse=True,
+            )
+            short_slice = short_ranked[:top_shorts] if len(short_ranked) >= top_shorts else short_ranked
+        else:
+            short_slice = rows[-top_shorts:] if len(rows) >= top_shorts else []
         for ticker, adj_score, sig_row in short_slice:
             if ticker in long_tickers:
                 continue

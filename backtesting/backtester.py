@@ -174,6 +174,9 @@ class Backtester:
         self._equity_peak: float = config.initial_capital
         self._trading_halted: bool = False
         self._circuit_breaker_log: list[dict] = []
+        # D3: Rolling Sharpe circuit breaker state
+        self._sharpe_cb_active: bool = False
+        self._daily_equity_returns: list[float] = []   # running equity values for rolling Sharpe CB
 
         learned_weights = None
         regime_weights = None
@@ -283,6 +286,7 @@ class Backtester:
 
         # Phase 2 — regime detection
         regime_data: dict[pd.Timestamp, str] = {}
+        regime_score_data: dict[pd.Timestamp, float] = {}
         if self.config.regime_enabled:
             print("\nPhase 2: Detecting market regimes (SPY + VIX)…")
             confirmation_days = int(getattr(self.config, "regime_confirmation_days", 3))
@@ -294,12 +298,18 @@ class Backtester:
             for r in regime_data.values():
                 regime_counts[r] += 1
             print(f"  Regimes: {dict(regime_counts)}")
+            # D1: compute continuous regime scores for linear gross exposure scaling
+            if bool(getattr(self.config, "regime_continuous_score_enabled", True)):
+                regime_score_data = self.regime_agent.detect_regime_scores(
+                    self.config.start_date, self.config.end_date,
+                )
+                print(f"  Regime scores: {len(regime_score_data)} days computed")
         else:
             print("\nPhase 2: Regime detection disabled.")
 
         # Phase 3 — simulation
         print("\nPhase 3: Running day-by-day portfolio simulation…")
-        self._simulate(price_data, signal_data, regime_data)
+        self._simulate(price_data, signal_data, regime_data, regime_score_data)
 
         # Collect outputs
         trades = pd.DataFrame(self.portfolio.trade_log)
@@ -383,7 +393,7 @@ class Backtester:
             self.config.position_sizing = "equal"
             self.config.position_sizing_method = "equal"
             self.portfolio = Portfolio(self.config.initial_capital, self.config.max_positions)
-            self._simulate(price_data, signal_data, regime_data)
+            self._simulate(price_data, signal_data, regime_data, regime_score_data=regime_score_data)
             eq_trades = pd.DataFrame(self.portfolio.trade_log)
             eq_equity = pd.DataFrame(self.portfolio.equity_history)
             if not eq_trades.empty:
@@ -395,7 +405,7 @@ class Backtester:
             self.config.position_sizing = "kelly"
             self.config.position_sizing_method = "kelly"
             self.portfolio = Portfolio(self.config.initial_capital, self.config.max_positions)
-            self._simulate(price_data, signal_data, regime_data)
+            self._simulate(price_data, signal_data, regime_data, regime_score_data=regime_score_data)
             kelly_trades = pd.DataFrame(self.portfolio.trade_log)
             kelly_equity = pd.DataFrame(self.portfolio.equity_history)
             if not kelly_trades.empty:
@@ -655,13 +665,14 @@ class Backtester:
         price_data: dict,
         signal_data: dict,
         regime_data: dict,
+        regime_score_data: dict | None = None,
     ):
         """
         Run simulation with pre-built price_data, signal_data, regime_data (no data load).
         Resets portfolio and runs _simulate. Used for Monte Carlo (noise, delay).
         """
         self.portfolio = Portfolio(self.config.initial_capital, self.config.max_positions)
-        self._simulate(price_data, signal_data, regime_data)
+        self._simulate(price_data, signal_data, regime_data, regime_score_data=regime_score_data or {})
         trades = pd.DataFrame(self.portfolio.trade_log)
         daily_equity = pd.DataFrame(self.portfolio.equity_history)
         if not trades.empty:
@@ -853,14 +864,22 @@ class Backtester:
                     t_df["volume_zscore"] = (t_df["Volume"] - t_df["Volume"].rolling(20).mean()) / t_df["Volume"].rolling(20).std().replace(0, np.nan)
                     t_df["vix_zscore"] = 0.0
                     t_df["vol_spike"] = 0.0
+                    # cs_momentum_raw: 6m return (126 days) excluding last month (shift 21)
+                    # CS percentile rank applied below after panel concat
+                    t_df["cs_momentum_raw"] = t_df["Close"].pct_change(126).shift(21)
                     # Pillar 29: Force lowercase 'date' identifier
                     t_df.index.name = "date"
                     ticker_dfs.append(t_df.reset_index())
-                
+
                 if ticker_dfs:
                     panel_df = pd.concat(ticker_dfs, ignore_index=True)
                     # Apply cross-sectional z-score per date slice
                     panel_df = _apply_cross_sectional_zscore_columns(panel_df, list(_CS_Z_PANEL_INPLACE_COLS))
+                    # Cross-sectional momentum percentile: rank each ticker vs peers on same date
+                    panel_df["cs_momentum_percentile"] = (
+                        panel_df.groupby("date")["cs_momentum_raw"]
+                        .rank(pct=True, method="average")
+                    )
                     for tk in pending_prices.keys():
                         panel_map[tk] = panel_df[panel_df["ticker"] == tk].set_index("date").drop(columns=["ticker"])
                     print(f"  Vectorized synchronization complete.")
@@ -891,6 +910,7 @@ class Backtester:
                     spy_df=spy_df_global,
                     vix_df=vix_df_global,
                     vix3m_df=vix3m_df_global,
+                    ticker=ticker,  # C1: earnings_surprise cache lookup
                 )
                 if signals.empty:
                     print("no signals")
@@ -965,7 +985,10 @@ class Backtester:
     # Phase 3 — day-by-day simulation
     # ==============================================================
 
-    def _simulate(self, price_data, signal_data, regime_data):
+    def _simulate(self, price_data, signal_data, regime_data, regime_score_data: dict | None = None):
+        # D3: reset Sharpe CB state at start of each simulation run
+        self._sharpe_cb_active = False
+        self._daily_equity_returns = []
         self._factor_diagnostics = []
         # Precompute regime-level score dispersion once for fragmented-regime fallback
         # in the rolling-std confidence gate.
@@ -1203,6 +1226,9 @@ class Backtester:
             # Today's market regime (used for risk exits and entry filters).
             regime_today = regime_data.get(date, "Sideways")
             prev_reg_before = prev_regime
+            # C2: inform signal engine of current regime so it can route to regime-conditional model
+            if hasattr(self.signal_engine, "set_regime"):
+                self.signal_engine.set_regime(regime_today)
 
             # First day of Bear spell: exit inherited longs (holdthrough drag on Bear days).
             # Applies regardless of long_only — in L/S mode we still want to unwind longs on Bear entry.
@@ -1383,6 +1409,32 @@ class Backtester:
                     dd_abs * 100.0,
                     resume_dd * 100.0,
                 )
+
+            # D3: Rolling Sharpe circuit breaker — track equity and update CB state
+            self._daily_equity_returns.append(float(equity))
+            _sharpe_cb_w = int(getattr(self.config, "sharpe_cb_window_days", 60) or 60)
+            _sharpe_cb_thr = float(getattr(self.config, "sharpe_cb_threshold", 0.0) or 0.0)
+            _sharpe_cb_rec = float(getattr(self.config, "sharpe_cb_recovery_threshold", 0.3) or 0.3)
+            _sharpe_cb_en = bool(getattr(self.config, "sharpe_cb_enabled", True))
+            if _sharpe_cb_en and len(self._daily_equity_returns) >= _sharpe_cb_w:
+                eq_arr = np.array(self._daily_equity_returns[-_sharpe_cb_w - 1:], dtype=float)
+                rets = np.diff(eq_arr) / np.where(eq_arr[:-1] > 0, eq_arr[:-1], 1.0)
+                if len(rets) >= 20:
+                    roll_sharpe = float(np.mean(rets) / max(np.std(rets, ddof=1), 1e-10) * np.sqrt(252))
+                    if not self._sharpe_cb_active and roll_sharpe < _sharpe_cb_thr:
+                        self._sharpe_cb_active = True
+                        self._circuit_breaker_log.append({"event": "sharpe_cb_activate", "date": date, "sharpe": roll_sharpe})
+                        logger.warning(
+                            "Sharpe CB activated at %s: 60d Sharpe=%.2f < threshold=%.2f",
+                            date, roll_sharpe, _sharpe_cb_thr,
+                        )
+                    elif self._sharpe_cb_active and roll_sharpe > _sharpe_cb_rec:
+                        self._sharpe_cb_active = False
+                        self._circuit_breaker_log.append({"event": "sharpe_cb_deactivate", "date": date, "sharpe": roll_sharpe})
+                        logger.info(
+                            "Sharpe CB deactivated at %s: 60d Sharpe=%.2f > recovery=%.2f",
+                            date, roll_sharpe, _sharpe_cb_rec,
+                        )
 
             # --- 0b. Regime-change based exits (optional early exit) ---
             if getattr(self.config, "regime_exit_on_change", False):
@@ -1719,19 +1771,35 @@ class Backtester:
                 pending_entries = selected_entries
 
             vol_scalar_today = float(vol_scalar_series.loc[date]) if date in vol_scalar_series.index else 1.0
-            # Gross exposure caps:
-            # - Normal  : 100% gross (no extra cap)
-            # - Crisis  : configurable (default 0.6, was 0.4 — raised to allow more alpha in Crisis)
-            # - Bear    : 70% gross
-            gross_cap_fraction_today = 1.0
-            if regime_today == "Crisis":
-                gross_cap_fraction_today = float(
-                    getattr(self.config, "crisis_gross_cap_fraction", 0.6) or 0.6
-                )
-            elif regime_today == "Bear":
-                gross_cap_fraction_today = float(
-                    getattr(self.config, "bear_gross_cap_fraction", 0.7) or 0.7
-                )
+            # Gross exposure caps (D1: continuous regime score → linear interpolation)
+            # Precompute Sharpe CB params once per day so both gross_cap block and CB block share values.
+            sharpe_cb_window = int(getattr(self.config, "sharpe_cb_window_days", 60) or 60)
+            sharpe_cb_thr = float(getattr(self.config, "sharpe_cb_threshold", 0.0) or 0.0)
+            sharpe_cb_recovery = float(getattr(self.config, "sharpe_cb_recovery_threshold", 0.3) or 0.3)
+            sharpe_cb_scale = float(getattr(self.config, "sharpe_cb_exposure_scale", 0.5) or 0.5)
+            sharpe_cb_enabled = bool(getattr(self.config, "sharpe_cb_enabled", True))
+
+            _rs = float((regime_score_data or {}).get(date, float("nan")))
+            if np.isfinite(_rs) and bool(getattr(self.config, "regime_continuous_score_enabled", True)):
+                # D1: linear interpolation between bull cap and crisis cap using continuous score
+                _bull_cap = float(getattr(self.config, "regime_score_bull_gross_cap", 1.0))
+                _crisis_cap = float(getattr(self.config, "regime_score_crisis_gross_cap", 0.25))
+                gross_cap_fraction_today = _bull_cap + _rs * (_crisis_cap - _bull_cap)
+            else:
+                # Fallback: hard regime labels (original behavior)
+                gross_cap_fraction_today = 1.0
+                if regime_today == "Crisis":
+                    gross_cap_fraction_today = float(
+                        getattr(self.config, "crisis_gross_cap_fraction", 0.6) or 0.6
+                    )
+                elif regime_today == "Bear":
+                    gross_cap_fraction_today = float(
+                        getattr(self.config, "bear_gross_cap_fraction", 0.7) or 0.7
+                    )
+
+            # D3: Apply Sharpe CB scaling (stacks on top of regime gross cap)
+            if self._sharpe_cb_active:
+                gross_cap_fraction_today = gross_cap_fraction_today * sharpe_cb_scale
 
             # Precompute signal-score pool for volatility-scaled sizing (non-cross-sectional entries only).
             non_cs_entries = [
@@ -2169,6 +2237,12 @@ class Backtester:
                                 scheduled_entries.append((next_at, entry))
                         continue
                     # else: we set size_dollars in last-resort, fall through to sector cap and open_position
+
+                # D2: short book sizing scale — size shorts at a fraction of long equivalent
+                if entry.get("signal") == "Bearish":
+                    _short_scale = float(getattr(self.config, "ml_short_position_scale", 0.7))
+                    if size_dollars is not None and size_dollars > 0:
+                        size_dollars = size_dollars * _short_scale
 
                 # Beta adjustment: scale down high-beta positions to keep portfolio beta ~1
                 beta = float(entry.get("capm_beta", 0.0) or 0.0)

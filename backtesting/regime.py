@@ -190,6 +190,68 @@ class MarketRegimeAgent:
 
         return confirmed_regimes
 
+    def detect_regime_scores(
+        self,
+        start_date: str,
+        end_date: str,
+    ) -> dict[pd.Timestamp, float]:
+        """
+        Return {date: regime_score} for every trading day in [start, end].
+
+        Score is in [0.0, 1.0]:
+            0.0 = pure Bull  (full gross exposure)
+            1.0 = pure Crisis (minimum gross exposure)
+
+        Computed as max(vix_score, sma_score) where:
+            vix_score = sigmoid((VIX - 25) / 4)   → 0.5 at VIX=25, saturates at VIX=35+
+            sma_score = sigmoid(sma_gap / 0.025)   → 0.5 when at SMA200, 0 above, 1 below
+        """
+        dl_start = pd.Timestamp(start_date) - pd.Timedelta(days=self.LOOKBACK_BUFFER)
+        dl_end = pd.Timestamp(end_date) + pd.Timedelta(days=30)
+
+        spy = self._download("SPY", dl_start, dl_end)
+        vix = self._download_vix(dl_start, dl_end, spy)
+
+        if spy.empty:
+            logger.warning("detect_regime_scores: SPY download empty — returning empty scores")
+            return {}
+
+        sma200 = spy["Close"].rolling(200).mean()
+
+        start_ts = pd.Timestamp(start_date)
+        end_ts = pd.Timestamp(end_date) + pd.Timedelta(days=30)
+
+        scores: dict[pd.Timestamp, float] = {}
+        for date in spy.index:
+            if date < start_ts or date > end_ts:
+                continue
+            if pd.isna(sma200.get(date)):
+                scores[date] = 0.5  # neutral fallback
+                continue
+
+            close_val = float(spy.loc[date, "Close"])
+            sma200_val = float(sma200[date])
+            vix_val = float(vix.get(date, 15.0))
+
+            # VIX score: 0.5 at VIX=25, saturates near 1.0 at VIX=35+
+            vix_score = float(1.0 / (1.0 + np.exp(-(vix_val - 25.0) / 4.0)))
+
+            # SMA distance score: 0.5 when at SMA200, 0 when 5% above, 1 when 5% below
+            sma_gap = (sma200_val - close_val) / sma200_val  # positive = below SMA (bearish)
+            sma_score = float(1.0 / (1.0 + np.exp(-sma_gap / 0.025)))
+
+            # Combined: max of the two (take the more bearish signal)
+            regime_score = float(np.clip(max(vix_score, sma_score), 0.0, 1.0))
+            scores[date] = regime_score
+
+        logger.info(
+            "detect_regime_scores: computed %d daily scores (range %.3f–%.3f)",
+            len(scores),
+            min(scores.values()) if scores else float("nan"),
+            max(scores.values()) if scores else float("nan"),
+        )
+        return scores
+
     # -- helpers ---------------------------------------------------
 
     @staticmethod

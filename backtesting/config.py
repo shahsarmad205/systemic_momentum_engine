@@ -93,6 +93,11 @@ class BacktestConfig:
     # Max gross exposure (fraction of equity) while market regime is Crisis.
     crisis_gross_cap_fraction: float = 0.6
 
+    # D1: Continuous regime score → linear gross exposure scaling
+    regime_continuous_score_enabled: bool = True
+    regime_score_bull_gross_cap: float = 1.0    # gross cap at pure Bull (score=0)
+    regime_score_crisis_gross_cap: float = 0.25  # gross cap at pure Crisis (score=1)
+
     # Rebalance frequency for generating new signals / updates.
     # Expressed in trading days (1 = daily, 5 = weekly).
     rebalance_every_trading_days: int = 1
@@ -150,6 +155,13 @@ class BacktestConfig:
     max_drawdown_pct: float = 0.20         # circuit breaker: halt new trades beyond this DD (e.g. 0.20 = -20%)
     drawdown_resume_pct: float = 0.10      # resume trading once DD improves above this level
     severe_drawdown_close_all_pct: float = 0.0  # 0=disabled; e.g. 0.30 = close all positions if DD worse than -30%
+
+    # D3: Rolling Sharpe circuit breaker (soft exposure reducer)
+    sharpe_cb_enabled: bool = True
+    sharpe_cb_window_days: int = 60
+    sharpe_cb_threshold: float = 0.0
+    sharpe_cb_recovery_threshold: float = 0.3
+    sharpe_cb_exposure_scale: float = 0.5
 
     # Dynamic holding (optional): hold longer for stronger/different signal types
     dynamic_holding_enabled: bool = False
@@ -224,6 +236,8 @@ class BacktestConfig:
     ml_short_overextension_threshold: float = 0.05
     ml_short_snap_profit_pct: float = 0.04
     ml_short_stop_loss_pct: float = 0.0   # 0=disabled; e.g. 0.03 = exit short if price rises 3% (cap losses)
+    # D2: short book sizing scale relative to longs (0.7 = 70% of long equivalent)
+    ml_short_position_scale: float = 0.7
     ml_short_min_liquidity_usd: float = 20_000_000.0
     ml_short_max_squeeze_vol_ratio: float = 2.5
     ml_model_type: str = "classifier"
@@ -267,6 +281,10 @@ class BacktestConfig:
     factor_neutralize_market_beta: bool = True
     factor_neutralize_sector: bool = True
     factor_neutralize_size: bool = True
+    factor_neutralize_smb: bool = False
+    factor_neutralize_rmw: bool = False
+    # C2: regime-conditional ML models directory (set to enable regime routing)
+    ml_regime_models_dir: str = ""
     factor_market_index: str = "SPY"
     factor_rolling_window: int = 60
     factor_exposures_path: str = "output/research/factor_exposures.csv"
@@ -448,6 +466,14 @@ def load_config(path: str = "backtest_config.yaml") -> BacktestConfig:
     cfg.severe_drawdown_close_all_pct = float(
         risk.get("severe_drawdown_close_all_pct", cfg.severe_drawdown_close_all_pct)
     )
+    # D3: Rolling Sharpe circuit breaker (nested under risk.sharpe_circuit_breaker)
+    sharpe_cb = risk.get("sharpe_circuit_breaker", {})
+    cfg.sharpe_cb_enabled = bool(sharpe_cb.get("enabled", cfg.sharpe_cb_enabled))
+    cfg.sharpe_cb_window_days = int(sharpe_cb.get("window_days", cfg.sharpe_cb_window_days))
+    cfg.sharpe_cb_threshold = float(sharpe_cb.get("threshold", cfg.sharpe_cb_threshold))
+    cfg.sharpe_cb_recovery_threshold = float(sharpe_cb.get("recovery_threshold", cfg.sharpe_cb_recovery_threshold))
+    cfg.sharpe_cb_exposure_scale = float(sharpe_cb.get("exposure_scale", cfg.sharpe_cb_exposure_scale))
+
     # VIX deleveraging (nested under risk.vix_deleveraging)
     vix_delev = risk.get("vix_deleveraging", {})
     if isinstance(vix_delev, dict):
@@ -547,6 +573,7 @@ def load_config(path: str = "backtest_config.yaml") -> BacktestConfig:
     cfg.learned_weights_path = sig.get("learned_weights_path", cfg.learned_weights_path)
     cfg.ml_long_model_path = str(sig.get("ml_long_model_path", "output/models/best_long_model.pkl"))
     cfg.ml_short_model_path = str(sig.get("ml_short_model_path", "output/models/best_short_model.pkl"))
+    cfg.ml_regime_models_dir = str(sig.get("ml_regime_models_dir", cfg.ml_regime_models_dir))
     cfg.ml_long_weight = float(sig.get("ml_long_weight", 0.5))
     cfg.ml_short_weight = float(sig.get("ml_short_weight", 0.5))
     raw_regimes = sig.get("ml_short_allowed_regimes", ["Bear", "Crisis", "Sideways"])
@@ -556,6 +583,7 @@ def load_config(path: str = "backtest_config.yaml") -> BacktestConfig:
     cfg.ml_short_overextension_threshold = float(sig.get("ml_short_overextension_threshold", 0.05))
     cfg.ml_short_snap_profit_pct = float(sig.get("ml_short_snap_profit_pct", 0.04))
     cfg.ml_short_stop_loss_pct = float(sig.get("ml_short_stop_loss_pct", cfg.ml_short_stop_loss_pct))
+    cfg.ml_short_position_scale = float(sig.get("ml_short_position_scale", cfg.ml_short_position_scale))
     cfg.ml_short_min_liquidity_usd = float(sig.get("ml_short_min_liquidity_usd", 20_000_000.0))
     cfg.ml_short_max_squeeze_vol_ratio = float(sig.get("ml_short_max_squeeze_vol_ratio", 2.5))
     cfg.ml_model_type = str(sig.get("ml_model_type", cfg.ml_model_type))
@@ -583,6 +611,9 @@ def load_config(path: str = "backtest_config.yaml") -> BacktestConfig:
     cfg.regime_enabled = reg.get("enabled", cfg.regime_enabled)
     cfg.regime_adjustments = reg.get("adjustments", cfg.regime_adjustments)
     cfg.regime_exit_on_change = reg.get("exit_on_change", cfg.regime_exit_on_change)
+    cfg.regime_continuous_score_enabled = bool(reg.get("continuous_score_enabled", cfg.regime_continuous_score_enabled))
+    cfg.regime_score_bull_gross_cap = float(reg.get("score_bull_gross_cap", cfg.regime_score_bull_gross_cap))
+    cfg.regime_score_crisis_gross_cap = float(reg.get("score_crisis_gross_cap", cfg.regime_score_crisis_gross_cap))
     _thr_agg_default = {
         "Bull": 1.0,
         "Bear": 1.0,
@@ -629,6 +660,8 @@ def load_config(path: str = "backtest_config.yaml") -> BacktestConfig:
     cfg.factor_neutralize_market_beta = fn.get("neutralize_market_beta", cfg.factor_neutralize_market_beta)
     cfg.factor_neutralize_sector = fn.get("neutralize_sector", cfg.factor_neutralize_sector)
     cfg.factor_neutralize_size = fn.get("neutralize_size", cfg.factor_neutralize_size)
+    cfg.factor_neutralize_smb = fn.get("neutralize_smb", cfg.factor_neutralize_smb)
+    cfg.factor_neutralize_rmw = fn.get("neutralize_rmw", cfg.factor_neutralize_rmw)
     cfg.factor_market_index = str(fn.get("market_index", cfg.factor_market_index))
     cfg.factor_rolling_window = int(fn.get("rolling_window", cfg.factor_rolling_window))
     cfg.factor_exposures_path = str(fn.get("factor_exposures_path", cfg.factor_exposures_path))

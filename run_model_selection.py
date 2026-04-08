@@ -1005,6 +1005,102 @@ def _build_models() -> list[tuple[str, Any, bool, str]]:
     return models
 
 
+def _train_regime_models(
+    df: pd.DataFrame,
+    feat_cols: list[str],
+    all_singular: list[str],
+    out_dir: Path,
+    horizon: int,
+) -> None:
+    """
+    C2: Train regime-conditional XGBClassifier models on the full dataset.
+
+    One model per regime (Bull, Bear, HighVol, Normal).  Each model trains
+    only on observations from that regime, so it learns feature→return
+    relationships that are specific to that market environment.
+
+    Saved as:
+        output/models/xgb_regime_bull.pkl
+        output/models/xgb_regime_bear.pkl
+        output/models/xgb_regime_highvol.pkl
+        output/models/xgb_regime_normal.pkl
+    """
+    try:
+        from xgboost import XGBClassifier
+    except ImportError:
+        print("[C2] XGBoost not available; skipping regime-conditional model training.")
+        return
+
+    if "regime_label" not in df.columns:
+        print("[C2] regime_label column not found in feature matrix; skipping.")
+        return
+
+    active_feats = [c for c in feat_cols if c not in all_singular]
+    # Map both regime taxonomies:
+    # - feature_builder/regime_detection uses: Bull, Bear, HighVol, Normal
+    # - backtester/regime.py uses:            Bull, Bear, Crisis, Sideways
+    regime_map = {
+        "Bull": "bull",
+        "Bear": "bear",
+        "HighVol": "highvol",   # also treated as Crisis in the backtester
+        "Normal": "normal",
+        "Crisis": "highvol",
+        "Sideways": "normal",
+    }
+
+    print("\n[C2] Training regime-conditional XGBClassifier models...")
+    saved: list[str] = []
+    for regime_label, fname_suffix in regime_map.items():
+        rdf = df[df["regime_label"] == regime_label].copy()
+        n = len(rdf)
+        if n < 300:
+            print(f"  {regime_label}: only {n} samples — skipping (need ≥300).")
+            continue
+
+        X = rdf[active_feats].replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(-10.0, 10.0).values
+        y = rdf["y_bin"].fillna(0).astype(int).values
+        X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0).copy()
+
+        # Balance classes — regime-filtered sets can be skewed (e.g. Bear is mostly down)
+        scale = float(max((y == 0).sum(), 1)) / float(max((y == 1).sum(), 1))
+
+        xgb = XGBClassifier(
+            n_estimators=200,
+            max_depth=4,
+            learning_rate=0.05,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            scale_pos_weight=scale,
+            eval_metric="logloss",
+            verbosity=0,
+            random_state=42,
+        )
+        with np.errstate(all="ignore"):
+            xgb.fit(X, y)
+
+        path = out_dir / f"xgb_regime_{fname_suffix}.pkl"
+        artifact = {
+            "model_name": f"XGBClassifier_{regime_label}",
+            "model_type": "classifier",
+            "regime": regime_label,
+            "horizon_days": int(horizon),
+            "target": "y_bin",
+            "feature_columns": active_feats,
+            "n_train": int(n),
+            "trained_at": pd.Timestamp.utcnow().isoformat(),
+            "estimator": xgb,
+        }
+        with open(path, "wb") as fh:
+            pickle.dump(artifact, fh)
+        saved.append(str(path))
+        print(f"  {regime_label}: n={n}  scale_pos_weight={scale:.2f}  → saved {path.name}")
+
+    if saved:
+        print("\n[C2] Regime-conditional models ready. Add to backtest_config.yaml:")
+        print("  signals:")
+        print("    ml_regime_models_dir: output/models   # xgb_regime_bull/bear/highvol/normal.pkl")
+
+
 def _weighted_recency_mean(vals: np.ndarray, decay_base: float = 0.95) -> float:
     """
     Calculates a weighted mean favoring the most recent walk-forward windows.
@@ -1051,6 +1147,24 @@ def main() -> None:
         help="Metric to rank/select best model (default: oos_sharpe_chained; window means kept in report)",
     )
     parser.add_argument("--limit_tickers", type=int, default=0, help="Optional: limit universe size for quick runs")
+    parser.add_argument(
+        "--risk-adj-target",
+        action="store_true",
+        dest="risk_adj_target",
+        help=(
+            "C3: Use risk-adjusted return (forward_return / realized_vol) as the regressor target. "
+            "Rewards low-vol momentum; improves IC for cross-sectional ranking."
+        ),
+    )
+    parser.add_argument(
+        "--regime-models",
+        action="store_true",
+        dest="regime_models",
+        help=(
+            "C2: After main model selection, train regime-conditional XGBClassifier models "
+            "(Bull/Bear/Sideways/HighVol) on the full dataset and save to output/models/."
+        ),
+    )
     parser.add_argument(
         "--compare_baseline",
         action="store_true",
@@ -1214,6 +1328,17 @@ def main() -> None:
     df = df.dropna(subset=["forward_return"])
     df["y_bin"] = (df["forward_return"] > 0).astype(int)
 
+    # C3: risk-adjusted target — use when --risk-adj-target flag is passed.
+    # sign(risk_adj) == sign(forward_return) so y_bin is unchanged.
+    use_risk_adj = getattr(args, "risk_adj_target", False) and "forward_return_risk_adj" in df.columns
+    if use_risk_adj:
+        df["forward_return_risk_adj"] = pd.to_numeric(df["forward_return_risk_adj"], errors="coerce")
+        # Fall back to raw return where risk-adj is missing (e.g. very low vol)
+        df["forward_return_risk_adj"] = df["forward_return_risk_adj"].fillna(df["forward_return"])
+        print(f"[C3] Using risk-adjusted return target (forward_return / realized_vol_holding)")
+    else:
+        use_risk_adj = False
+
     # Optional baseline (LearnedWeights) uses the full feature set + its own scaler feature list.
     df_baseline: pd.DataFrame | None = None
     if args.compare_baseline:
@@ -1323,9 +1448,12 @@ def main() -> None:
                 
                 X_tr = tr[active_feats].replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(-10.0, 10.0).values
                 if is_regressor:
-                    # Clip regression target to prevent exploding coefficients/gradients
-                    # A 30% return move in 1 trading day is a reasonable bound for stability.
-                    y_tr = tr["forward_return"].replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(-0.3, 0.3).values.astype(float)
+                    if use_risk_adj:
+                        # C3: risk-adjusted target (forward_return / holding_vol); pre-clipped to [-10, 10]
+                        y_tr = tr["forward_return_risk_adj"].replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(-10.0, 10.0).values.astype(float)
+                    else:
+                        # Clip raw regression target to prevent exploding coefficients/gradients
+                        y_tr = tr["forward_return"].replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(-0.3, 0.3).values.astype(float)
                 elif is_short_classifier:
                     y_tr = (tr["forward_return"].replace([np.inf, -np.inf], np.nan).fillna(0.0) < 0).astype(int)
                 else:
@@ -1737,7 +1865,10 @@ def main() -> None:
     # (Shared X/y matrices for all winning fits)
     X_all_raw = df[feat_cols].replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(-10.0, 10.0).values
     y_all_cls = df["y_bin"].fillna(0).astype(int)
-    y_all_reg = df["forward_return"].replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(-0.5, 0.5).values.astype(float)
+    if use_risk_adj:
+        y_all_reg = df["forward_return_risk_adj"].replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(-10.0, 10.0).values.astype(float)
+    else:
+        y_all_reg = df["forward_return"].replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(-0.5, 0.5).values.astype(float)
     y_all_down = (df["forward_return"].replace([np.inf, -np.inf], np.nan).fillna(0.0) < 0).astype(int)
 
     X_all_df = pd.DataFrame(X_all_raw, columns=feat_cols)
@@ -1824,6 +1955,10 @@ def main() -> None:
     print("signals:")
     print('  mode: "ml"')
     print(f'  ml_model_path: "{out_dir.as_posix()}/best_long_model.pkl"')
+
+    # C2: Regime-conditional models (opt-in via --regime-models)
+    if getattr(args, "regime_models", False):
+        _train_regime_models(df, feat_cols, all_singular, out_dir, horizon)
 
 
 if __name__ == "__main__":
