@@ -1,281 +1,298 @@
 # Trend Signal Engine
 
-A production-grade quantitative research system for systematic momentum signal generation, weight learning, portfolio optimization, and walk-forward validation.
+A production-grade quantitative research and live-trading system for systematic momentum signal generation, ML ensemble scoring, portfolio optimization, and QuantConnect deployment.
 
 ---
 
-## What this is
+## Current Production Baseline
 
-The system is a production-grade quantitative trading engine that evolved from a basic momentum signal generator into a **Hardened Institutional Alpha** model. It utilizes a **Dual-Ensemble ML Architecture** (Long/Short models) with **Tactical Signal Routing** across four market regimes (Bull, Bear, Sideways, Crisis). 
+**Phase D — All-Time Best (April 2026)**
 
-The current production baseline is **Pillar 7: Long-Only Hardened Alpha**, which features asymmetric conviction gates, liquidity filtering ($20M floor), and squeeze protection. This version is optimized for migration to the **QuantConnect (Lean)** environment to enable institutional-scale live trading.
+| Metric | Value |
+|--------|-------|
+| **Sharpe Ratio** | **1.078** |
+| Net Sharpe (HAC-Adjusted) | 0.841 |
+| Sortino Ratio | 0.607 |
+| **CAGR** | **6.74%** |
+| **Max Drawdown** | **-15.14%** |
+| Total Return | +166.13% |
+| Win Rate (held-to-expiry) | **60.7%** |
+| Avg Expiry Return | +2.28% |
+| Trades | 2,399 |
+| Trades per Year | 160 |
+| T-statistic (Lo 2002) | 38.18 (p < 0.001) |
+| Probabilistic Sharpe | 100% |
+| Backtest Period | 2008–2022 (15 years) |
+| Universe | S&P 500 (~493 tickers) |
+
+**Year-by-Year Win Rates:**
+2008: 47.5% | 2009: 66.5% | 2010: 66.7% | 2011: 50.8% | 2012: 58.6% | 2013: 69.7% | 2014: 61.9% | 2015: 43.0% | 2016: 67.3% | 2017: 61.1% | 2018: 52.7% | 2019: 59.0% | 2020: 72.6% | 2021: 61.5% | 2022: 73.1%
+
+**Regime breakdown:**
+
+| Regime | Win Rate | Sample |
+|--------|----------|--------|
+| Bull | 60.6% | n=1,663 |
+| Bear | 70.0% | n=10 |
+| Sideways | 62.3% | n=138 |
+| Crisis | 59.8% | n=239 |
 
 ---
 
-## Quick start
+## Quick Start
 
 ```bash
-# Install
+# Install dependencies
 pip install -r requirements.txt
 
-# Run weight learning (logistic model — best OOS IC)
-python run_weight_learning.py --model logistic
-
-# Run full backtest
+# Run full backtest (2008–2022, S&P 500 universe)
 python run_backtest.py
 
-# Run walk-forward validation (true OOS)
+# Run walk-forward OOS validation
 python run_backtest.py --walk-forward
 
-# Run options analysis
-python run_options_analysis.py
+# Run ML model selection (trains VotingRegressor ensemble)
+python run_model_selection.py
 
-# Run VaR analysis
-python run_var_analysis.py
+# Run ML model selection with risk-adjusted target (C3)
+python run_model_selection.py --risk-adj-target
 
-# Run GBM simulation
-python run_gbm_analysis.py
-```
+# Run ML model selection + regime-specific models (C2)
+python run_model_selection.py --regime-models
 
-### Testing transaction costs
-
-Transaction costs are applied per position change (delta): `cost = |delta_notional| * (commission_bps + slippage_bps) / 10_000`. Tune them in `backtest_config.yaml` under `execution_costs` (`transaction_cost_commission_bps`, `transaction_cost_slippage_bps`, optional `transaction_cost_slippage_vol_mult`). The backtest prints performance **before** and **after** costs.
-
-```bash
-# 1. Run backtest (should print "BEFORE costs" and "AFTER costs" blocks when costs > 0)
-python run_backtest.py
-
-# 2. Cost sensitivity: vary slippage/commission; net return should fall as costs rise
-python run_backtest.py --cost-sensitivity
-# Check output/backtests/cost_sensitivity_report.csv: total_return and sharpe_ratio should decrease
-# as slippage_bps and commission_per_trade increase; total_transaction_costs should increase.
-
-# 3. Zero-cost baseline: set execution_costs.enabled: false and execution_costs_commission_bps/slippage to 0,
-# then run and compare final_capital to the run with costs enabled.
-
-# 4. CI unit tests (slippage helpers, OOS windows, adv cache, regime multipliers, golden smoke, kill switch)
-python -m pytest tests/ -v
-# Note: ``pyproject.toml`` quarantines a few legacy test modules (broken imports or stale expectations)
-# so ``pytest`` matches CI; un-ignore there as those tests are repaired.
-```
-
-### Testing turnover reduction (dead zone + position-update threshold)
-
-Turnover is reduced by (1) a **no-trade band** (`signal_dead_zone`): do not open when |adjusted_score| < dead_zone; (2) **position-update threshold**: only open/update when |new_signal - current_signal| > `position_update_threshold`. Tune in `backtest_config.yaml` under `signals`: `signal_dead_zone`, `position_update_threshold`. The backtest prints **Trades per Year** and **Annualised Turnover** in the results block.
-
-```bash
-# 1. Baseline: run with default dead_zone=0.15 and position_update_threshold=0.2; note Total Trades and Annualised Turnover
-python run_backtest.py
-# In output: "Total Trades", "Trades per Year", "Avg Daily Turnover", "Annualised Turnover"
-
-# 2. Stricter (fewer trades): increase dead zone and threshold in backtest_config.yaml, e.g.:
-#    signal_dead_zone: 0.25
-#    position_update_threshold: 0.3
-python run_backtest.py
-# Compare Total Trades and Annualised Turnover to step 1; expect ~50%+ lower turnover.
-
-# 3. Looser (more trades): set signal_dead_zone: 0.05 and position_update_threshold: 0.1; run and compare.
-python run_backtest.py
-```
-
-### Testing EMA smoothing (no lookahead)
-
-Raw signals are smoothed with an **exponential moving average (EMA)**; the window is configurable via `signals.smoothing_span` (e.g. 3, 5, 10 days). Smoothing is causal (each bar uses only past and current data). Compare performance across spans with `--smoothing-compare`.
-
-```bash
-# 1. Single backtest with default smoothing (span=5 in config)
-python run_backtest.py
-
-# 2. Compare smoothing spans (3, 5, 10 days): Sharpe, CAGR, turnover per span; optimal span by Sharpe
-python run_backtest.py --smoothing-compare
-# Check output/backtests/smoothing_comparison_report.csv for full numeric results.
-
-# 3. Custom spans: in backtest_config.yaml under signals set e.g.:
-#    smoothing_comparison_spans: [3, 5, 7, 10]
-# Then run again with --smoothing-compare.
-python run_backtest.py --smoothing-compare
-```
-
-### Testing volatility-adjusted position sizing
-
-Position sizing can be **volatility-adjusted**: position ∝ signal / volatility (rolling 20-day std of returns), normalized and capped to avoid extreme leverage. This stabilizes risk across time and can improve Sharpe vs binary/sign-based (equal) sizing.
-
-```bash
-# 1. Run backtest with vol-adjusted sizing (set risk.position_sizing: "vol_adjusted" in backtest_config.yaml)
-python run_backtest.py
-
-# 2. Compare binary (equal) vs vol-adjusted vs Kelly: each backtest runs 3 sizing methods and prints Sharpes
-#    (Equal = same size per position; Vol-adjusted = signal/vol with cap; Kelly = half-Kelly)
-python run_backtest.py
-# Look for "Position Sizing Comparison (binary/sign vs vol-adjusted vs Kelly)" in the output.
-
-# 3. Optional: tune in backtest_config.yaml under risk:
-#    vol_lookback_days: 20        # rolling window for vol (e.g. 20)
-#    vol_adjusted_max_scale: 2.0  # max position scale cap
-#    position_sizing: "vol_adjusted"  # use vol-adjusted as primary
-python run_backtest.py
-```
-
-### Testing walk-forward validation (no overfitting)
-
-Walk-forward splits data into **rolling train/test windows** (e.g. train 2 years, test 3 months). The model is **refit only on training data**; evaluation is **strictly out-of-sample** on test data. Aggregate Sharpe, CAGR and drawdown are computed across all test periods; a plot shows OOS performance over time.
-
-```bash
-# 1. Run walk-forward validation (uses research.train_years / test_years in config)
-python run_backtest.py --walk-forward
-
-# 2. Check outputs:
-#    - Console: per-window OOS Sharpe/return/drawdown + aggregate (chained OOS) metrics
-#    - Report: output/backtests/walk_forward_validation_report.csv
-#    - Plot:   output/backtests/walk_forward_performance.png (equity curve + per-window Sharpe bars)
-cat output/backtests/walk_forward_validation_report.csv
-
-# 3. Tune in backtest_config.yaml under research:
-#    train_years: 2        # train window (years)
-#    test_years: 0.25      # test window (e.g. 3 months)
-#    step_years: 0.25      # step between windows (typically = test_years)
-#    walk_forward_use_calendar: true   # false = use n_windows + train_ratio instead
-python run_backtest.py --walk-forward
+# Auto-retrain (respects signal_mode from config — ml or learned)
+python run_auto_retrain.py
 ```
 
 ---
 
 ## Architecture
 
-Market data is loaded via `utils/market_data.py` and cached locally. Features are built in `features/feature_pipeline.py`, which produces the inputs used for scoring. Signals are generated and thresholded in `backtesting/signals.py`, which consumes the feature matrices and outputs Bullish, Bearish, or Neutral per date and ticker. When using learned weights, the weight model is trained in `agents/weight_learning_agent/weight_model.py` on historical forward returns and the resulting coefficients are applied to the same features at inference time. The main simulation loop runs in `backtesting/backtester.py`, which steps through calendar days, applies regime filters, opens and closes positions, and records trades. Regime labels (Bull, Bear, Sideways, Crisis) come from `backtesting/regime.py` using SPY and VIX. The financial models live in dedicated modules: `options/black_scholes.py` for theoretical option pricing, `risk/var.py` for VaR and CVaR, `portfolio/mean_variance.py` for Markowitz optimization, and `simulation/gbm.py` for GBM simulation and calibration.
+### Signal Pipeline
 
----
-
-## Backtest results
-
-### Pillar 7: Production Long-Only (Hardened)
-Full backtest (2013–2024, 300 US large-cap tickers, Long-Only, Hardened Conviction Gating):
-
-| Metric | Value |
-|--------|-------|
-| **Net Sharpe Ratio** | **1.214** |
-| Sortino Ratio | 1.62 |
-| **CAGR** | **13.9%** |
-| **Max Drawdown** | **-11.21%** |
-| Win Rate | 46.3% |
-| Information Coefficient (IC) | 0.0173 |
-| Total Trades | 3,741 |
-| **Total Return** | **+310.0%** |
-
-### Regime breakdown (Pillar 7 Baseline):
-
-| Regime | Sharpe | Notes |
-|--------|--------|-------|
-| Bull | 1.36 | High-conviction trend following |
-| Bear | 0.50 | Tail-risk mitigation active |
-| Sideways | 0.23 | Capital preservation mode |
-| Crisis | -3.23 | Deleveraged via Crisis Guard |
-
-The transition from Pillar 1 (0.74 Sharpe) to Pillar 7 (1.21 Sharpe) was achieved primarily through **Alpha Hardening**: implementing liquidity floors ($20M 20d dollar-vol), squeeze protection (vol-expansion caps), and asymmetric conviction gating (Long threshold 0.60).
-
----
-
-## ML model comparison
-
-| Model | WF IC | WF Dir Acc | WF AUC | Selected |
-|-------|-------|------------|--------|----------|
-| Logistic | 0.039 | 56.4% | 0.511 | ✓ |
-| Ridge | 0.041 | 56.0% | 0.511 | |
-| Random Forest | 0.033 | 56.5% | 0.504 | |
-| XGBoost | 0.043 | 53.6% | 0.513 | |
-| GBR | 0.028 | 54.8% | 0.503 | |
-
-Logistic regression is selected as the production model: it is the simplest, has competitive IC, provides calibrated probability outputs, and has the lowest overfit risk. XGBoost shows the highest IC but the worst directional accuracy — a sign of overfit to return magnitude rather than direction.
-
----
-
-## Financial models
-
-**Kelly Criterion** (configured in `backtest_config.yaml` and used in the backtester): Position sizing uses half-Kelly with rolling estimates of win rate and average win/loss from the last 50 closed trades. When fewer than 20 trades are available, config defaults (e.g. 0.55 win rate, 0.02 avg win, 0.015 avg loss) are used. The result in the reference backtest is Sharpe 0.714 and average position size about 14.4% of equity.
-
-**CAPM** (`backtesting/signals.py`, `features/engine.py`): Rolling 60-day regression of stock returns on SPY yields market beta and Jensen’s alpha; alpha is z-scored over a trailing 252-day window. The universe shows a mean beta of about 1.30 versus SPY, with alpha used as a cross-sectional signal after z-scoring.
-
-**Black-Scholes** (`options/black_scholes.py`): On each signal entry the system prices theoretical at-the-money calls and puts using the Black-Scholes formula. Greeks (delta, gamma, theta, vega, rho) are computed at entry. Historical realised volatility (rolling standard deviation of log returns annualised) is used as an implied-volatility proxy; no live options data is required. Put-call parity is checked in validation.
-
-**Value at Risk** (`risk/var.py`): Three methods are implemented: historical VaR (rolling quantile of past returns), parametric VaR (Gaussian, using mean and standard deviation), and conditional VaR (Expected Shortfall) as the average loss beyond the VaR threshold. For the validation series, historical VaR at 95% is about 2.94% and CVaR about 3.53%.
-
-**Mean-Variance Optimization** (`portfolio/mean_variance.py`): Markowitz efficient frontier is approximated by simulating 1000 random long-only portfolios from the covariance matrix of returns. Max-Sharpe and min-variance weights are computed via `scipy.optimize.minimize` (SLSQP) with constraints that weights sum to one and each weight is between zero and a maximum (e.g. 0.25). The efficient frontier plot shows the scatter of simulated portfolios and the upper envelope.
-
-**Geometric Brownian Motion** (`simulation/gbm.py`): Drift and volatility (mu, sigma) are estimated from historical log returns (mu = mean × 252, sigma = std × √252). Paths are simulated with the standard GBM formula; price targets and calibration are backtested by comparing simulated confidence intervals to realised outcomes. Validation reports coverage of the 95% CI; in the test run, mean log return over one year is 0.0818 vs theoretical 0.0800.
-
----
-
-## Known limitations
-
-The backtest universe is limited to nine large-cap US technology names, so results are not representative of a diversified multi-sector portfolio. The strategy is long-only, so it carries full market beta and performs poorly in Crisis regimes (e.g. Sharpe -4.10 when the regime classifier labels Crisis). Walk-forward out-of-sample Sharpe is about 46% lower than the full-period backtest Sharpe, which is typical for momentum strategies but should be expected when moving to live or paper trading. The full-period information coefficient is negative (-0.0086) in the backtest; reported returns are driven by position sizing (Kelly), regime filtering, and execution rules rather than by raw directional prediction. Turnover is high (642 trades per year), so more realistic transaction cost assumptions would reduce net returns relative to the current conservative cost setup.
-
----
-
-## Live paper trading (added)
-
-The project now includes an after-close paper trading workflow that generates signals and (optionally) submits paper orders for next-day execution via Alpaca.
-
-### Daily runner
-
-Run at ~4:15pm ET after market close:
-
-```bash
-# Dry run (safe; no orders)
-python run_live_trading.py
-
-# Place orders (paper only)
-python run_live_trading.py --execute
-
-# Emergency: close all positions (interactive confirm)
-python run_live_trading.py --close-all
+```
+Market Data (Yahoo/Tiingo)
+    ↓
+Feature Builder (agents/weight_learning_agent/feature_builder.py)
+    23 features: momentum, volatility, CAPM, value, quality
+    + forward_return_risk_adj (C3)
+    ↓
+Cross-Sectional Z-Score Panel (Pillar 29 / A1)
+    Joint panel normalization — matches training distribution exactly
+    ↓
+ML Ensemble Scorer (utils/ensemble_scoring.py)
+    VotingRegressor: XGBRegressor + LGBMRanker + Ridge
+    + C2 Regime Routing: Bear → xgb_regime_bear.pkl
+                         Crisis/HighVol → xgb_regime_highvol.pkl
+    ↓
+Signal Engine (backtesting/signals.py)
+    Adjusted score + short_score_raw (dedicated short model)
+    ↓
+Cross-Sectional Ranking (backtesting/cross_sectional.py)
+    Top-N longs by adjusted_score
+    Shorts ranked by short_score_raw (dedicated short model — A2)
+    ↓
+Backtester (backtesting/backtester.py)
+    Regime-aware sizing, factor neutralization, dynamic holding
 ```
 
-### Execution engine + drawdown-based deleveraging
+### Regime Detection (backtesting/regime.py)
 
-`brokers/execution_engine.py` constructs a target book from ranked signals, reconciles it vs current Alpaca positions, and logs every run to JSONL. It also supports **dynamic deleveraging**:
+- **Hard labels**: Bull / Bear / Crisis / Sideways (SPY SMA-50/200 + VIX ≥ 30)
+- **Continuous score** (D1): sigmoid on VIX + SMA gap → [0=Bull, 1=Crisis]
+- Linear gross exposure interpolation: 100% in Bull → 25% in Crisis (no cliff edges)
+- Confirmation window: 1-day (configurable hysteresis)
 
-- Reads `output/live/daily_pnl.csv` (written by `run_performance_tracker.py` when Alpaca is configured)
-- Computes current drawdown from peak equity
-- Scales target notionals by a multiplier:
-  - drawdown < 5% → 1.0
-  - 5–10% → 0.8
-  - 10–15% → 0.6
-  - ≥15% → 0.4
+### Risk Controls
 
-The multiplier and drawdown are written to `output/live/execution_log.jsonl`.
+| Control | Mechanism |
+|---------|-----------|
+| D1 Continuous Regime Score | Linear gross cap interpolation vs hard label switches |
+| D3 Sharpe Circuit Breaker | 60d rolling Sharpe < 0.0 → halve gross cap; recover at > 0.3 |
+| Factor Neutralization (B1) | Market beta, sector, size neutralization per rebalance day |
+| Bear Regime | Liquidate longs on entry, no new longs, 7-day max hold |
+| Crisis Regime | Accelerated exit for losers, selective entries top-15% score only |
+| Dynamic Holding (B2) | Hold longer for high-conviction signals, exit earlier for weak |
+| Short Stop-Loss | 5% adverse move cap on all short positions |
 
-### Performance tracker
+---
 
-Run daily to append equity snapshots and compare live metrics vs backtest expectations:
+## ML Model
 
-```bash
-python run_performance_tracker.py
+### Production Ensemble (`output/models/best_long_model.pkl`)
+
+- **Type**: `VotingRegressor` (sklearn)
+- **Members**: XGBRegressor (60% weight) + LGBMRankerWrapper (cross-sectional lambdarank) + Ridge (40% weight)
+- **Target**: `forward_return` over 10-day horizon (or `forward_return_risk_adj` with `--risk-adj-target`)
+- **Features** (23):
+
+```
+vol_expansion, f_trend, short_term_reversal, ret_20d, ret_1d,
+vol_ratio_5_20, nearness_52w_low, sector_relative_60d,
+nearness_52w_high, cs_momentum_percentile,
+dist_from_52w_high, low_vol_score, momentum_acceleration,
+ret_5d, capm_residual_vol, down_up_vol_ratio, rsi_14,
+capm_alpha, ret_10d, sector_relative_20d, rsi_overbought,
+rolling_vol_20, quality_score
 ```
 
-### Outputs and logs
+### Regime-Conditional Models (C2)
 
-- `output/live/execution_log.jsonl` — execution audit log (includes drawdown multiplier)
-- `output/live/signal_history.csv` — live signal history
-- `output/live/daily_pnl.csv` — daily equity history (from tracker)
+| Model | Regime | Architecture |
+|-------|--------|--------------|
+| `xgb_regime_bear.pkl` | Bear | XGBClassifier |
+| `xgb_regime_highvol.pkl` | Crisis / HighVol | XGBClassifier |
+| `best_long_model.pkl` | Bull / Sideways / Normal | VotingRegressor |
 
-### Operations / cron
+Routing only activates for Bear/Crisis/HighVol. Bull (82% of days) always uses the superior general ensemble.
 
-- Runbook: `../docs/DAILY_OPERATIONS.md`
-- Cron helper (prints example `crontab` lines): `../scripts/setup_cron.sh`
+### Short Model (`output/models/best_short_model.pkl`)
 
-### Investor doc
+Dedicated short candidate scorer. Output (`short_score_raw`) is stored per ticker in the signal DataFrame and consumed by `cross_sectional.py` to rank short candidates independently from the long score.
 
-- `../docs/INVESTMENT_THESIS.md`
+---
+
+## Key Implementation Details
+
+### A1 — Training/Inference Feature Parity
+Training uses cross-sectional z-scores across the daily panel (`_apply_cross_sectional_zscore_columns`). Inference now applies the same transformation via `Pillar 29` joint-panel vectorization in `backtester.py:844–888` before calling `generate_signals`.
+
+### A2 — Short Model Wiring
+`cross_sectional.py` checks for non-zero `short_score_raw` values in the signal DataFrame. If present, shorts are ranked by the dedicated short model score rather than the bottom of the long-rank list.
+
+### B3 — Walk-Forward Ensemble
+`run_auto_retrain.py` respects `signal_mode` from config. In `ml` mode it runs OOS evaluation without overwriting model files. In `learned` mode it applies exponential time-decay blending (λ=0.7) across walk-forward windows.
+
+### C3 — Risk-Adjusted Target
+`forward_return_risk_adj = forward_return / (vol_20d × √holding_period)` — rewards high-return, low-volatility stocks. Enabled via `python run_model_selection.py --risk-adj-target`.
 
 ---
 
-## Future work
+## Configuration
 
-- **QuantConnect Migration (Pillar 7)**: Porting the audited 15-feature registry to the Lean SDK `AlphaModel`.
-- **Advanced Universe Expansion**: Automated liquidity-adjusting universe selection for the top-500 tradeable US names.
-- **Factor risk limiters**: Hard constraints in addition to neutralized scores.
-- **Shor-side re-activation**: Revisiting tactical shorts after 6 months of live OOS paper trading data.
+Key settings in `backtest_config.yaml`:
+
+```yaml
+signals:
+  mode: ml
+  ml_long_model_path: output/models/best_long_model.pkl
+  ml_short_model_path: output/models/best_short_model.pkl
+  ml_regime_models_dir: output/models   # C2: regime routing
+
+regime:
+  confirmation_days: 1
+  continuous_score_enabled: true        # D1: linear gross cap
+  score_bull_gross_cap: 1.0
+  score_crisis_gross_cap: 0.25
+
+risk:
+  max_drawdown_pct: 0.20                # hard circuit breaker
+  sharpe_circuit_breaker:               # D3: rolling Sharpe CB
+    enabled: true
+    window_days: 60
+    threshold: 0.0
+    recovery_threshold: 0.3
+    exposure_scale: 0.5
+```
 
 ---
+
+## QuantConnect Deployment
+
+The strategy is deployed to QuantConnect via `LeanCloud/BinaryEdge/`:
+
+```
+LeanCloud/BinaryEdge/
+├── main.py                 # QC algorithm (regime detection, D3 Sharpe CB)
+├── qc_alpha_model.py       # Alpha model (24-feature inference, C2 routing, D1 scaling)
+├── best_long_model.pkl     # VotingRegressor ensemble (13MB)
+├── xgb_regime_bear.pkl     # C2: Bear regime specialist
+├── xgb_regime_highvol.pkl  # C2: Crisis/HighVol specialist
+└── config.json
+```
+
+**Sync local → QC:**
+```bash
+lean cloud push
+lean backtest "LeanCloud/BinaryEdge"
+```
+
+**Key QC implementation notes:**
+- `LGBMRankerWrapper` is defined in `qc_alpha_model.py` and injected into `__main__` before unpickling (required for VotingRegressor deserialization)
+- `sector_relative_20d/60d` approximated as stock return minus universe mean return (no sector feed in QC)
+- `earnings_surprise` removed from model (was always 0.0 in QC — training/inference gap eliminated)
+- D3 Sharpe CB implemented in `OnEndOfDay` — reduces `top_n` when 60d Sharpe < 0
+
+---
+
+## Phases Implemented
+
+| Phase | Item | Status | Impact |
+|-------|------|--------|--------|
+| A | A1 CS z-score at inference | ✅ Wired | Closes training/inference gap |
+| A | A2 Short model wiring | ✅ Wired | Dedicated short ranking |
+| A | A3 Sector mapping (500 tickers) | ✅ Wired | sector_relative features valid |
+| B | B1 Factor neutralization | ✅ Wired | Reduces regime-driven drawdowns |
+| B | B2 Dynamic holding period | ✅ Wired | Higher conviction → longer hold |
+| B | B3 Walk-forward ensemble | ✅ Wired | ML mode: OOS eval; Learned mode: decay blend |
+| C | C1 Earnings surprise | ✅ Training + Inference | Yfinance per-ticker, cached |
+| C | C2 Regime-conditional models | ✅ Wired | Bear/Crisis specialist routing |
+| C | C3 Risk-adjusted target | ✅ Wired | `--risk-adj-target` flag |
+| D | D1 Continuous regime score | ✅ Wired | Linear gross cap interpolation |
+| D | D2 Short book sizing (0.7×) | ✅ Wired | Snap profit raised to 5% |
+| D | D3 Sharpe circuit breaker | ✅ Wired | 60d Sharpe → halve exposure |
+
+---
+
+## Next Steps
+
+1. **Retrain model** — `earnings_surprise` removed from all layers; retrain to get a clean 23-feature model:
+   ```bash
+   python run_model_selection.py --risk-adj-target
+   ```
+2. **Run local backtest** — confirm Sharpe ≥ 1.0 with shorts disabled + new model
+3. **Sync + QC backtest** — `lean cloud push && lean backtest "LeanCloud/BinaryEdge"`
+4. **Walk-forward OOS validation** — confirm Sharpe ≥ 0.7 across all OOS windows
+5. **Retrain regime models as regressors** — current `xgb_regime_*.pkl` are classifiers; matching the general VotingRegressor architecture would improve C2 quality
+6. **Live paper trading** — deploy after QC validation
+
+---
+
+## Project Structure
+
+```
+trend_signal_engine/
+├── backtesting/
+│   ├── backtester.py           # Main simulation loop
+│   ├── signals.py              # Signal engine + ML inference
+│   ├── cross_sectional.py      # CS ranking, short model routing (A2)
+│   ├── regime.py               # Regime detection + continuous score (D1)
+│   └── config.py               # BacktestConfig dataclass
+├── agents/weight_learning_agent/
+│   ├── feature_builder.py      # 24-feature panel builder, C1/C3
+│   └── weight_model.py         # LearnedWeights (legacy learned mode)
+├── utils/
+│   └── ensemble_scoring.py     # Model loading + ensemble inference
+├── research/
+│   └── factor_neutralization.py
+├── run_model_selection.py       # ML training: VotingRegressor, C2, C3
+├── run_auto_retrain.py          # Auto-retrain respecting signal_mode
+├── run_backtest.py              # Backtest entry point
+├── backtest_config.yaml         # All configuration
+├── LeanCloud/BinaryEdge/        # QuantConnect deployment
+│   ├── main.py
+│   ├── qc_alpha_model.py
+│   ├── best_long_model.pkl
+│   ├── xgb_regime_bear.pkl
+│   └── xgb_regime_highvol.pkl
+└── output/
+    ├── models/                  # Trained model artifacts
+    ├── backtests/               # Equity curves, trades, summaries
+    └── experiments/             # Timestamped experiment snapshots
+```
+
+---
+
+## Disclaimer
 
 This system is a research tool. Nothing here constitutes investment advice. Past backtest performance does not guarantee future results.

@@ -62,7 +62,23 @@ def _zscore_standardize(s: pd.Series) -> pd.Series:
 def _load_pickle(path: Path) -> Any:
     """Load a pickled model or joblib artifact with warnings suppressed."""
     import joblib
+    import sys
     import warnings
+
+    # LGBMRankerWrapper is defined in run_model_selection.py which runs as __main__
+    # when invoked directly.  Artifacts pickled there store the class as
+    # "__main__.LGBMRankerWrapper".  Patch __main__ before unpickling so that
+    # any context (backtester, signal engine, etc.) can deserialise the artifact.
+    try:
+        import run_model_selection as _rms  # noqa: PLC0415
+        _main = sys.modules.get("__main__")
+        if _main is not None and not hasattr(_main, "LGBMRankerWrapper"):
+            _lgbmrw = getattr(_rms, "LGBMRankerWrapper", None)
+            if _lgbmrw is not None:
+                setattr(_main, "LGBMRankerWrapper", _lgbmrw)
+    except Exception:
+        pass
+
     with warnings.catch_warnings():
         warnings.filterwarnings(
             "ignore",
@@ -168,8 +184,17 @@ def _predict_model(model: LoadedEnsembleModel, features_df: pd.DataFrame, clip: 
                 s = s.clip(-1.0, 1.0)
             return s
             
-        y = np.asarray(est.predict(X), dtype=float)
-    
+        # Auto-detect classifiers passed with type="regressor".
+        # RandomForestClassifier / GradientBoostingClassifier etc. expose
+        # predict_proba; calling .predict() returns binary {0,1} labels which
+        # discard probability information.  Use predict_proba when available.
+        if hasattr(est, "predict_proba"):
+            proba = est.predict_proba(X)
+            y = np.asarray(proba)[:, 1] if np.asarray(proba).ndim == 2 else np.asarray(proba)
+            y = 2.0 * y - 1.0  # map [0,1] → [-1,1]
+        else:
+            y = np.asarray(est.predict(X), dtype=float)
+
     return pd.Series(y, index=features_df.index, dtype=float)
 
 

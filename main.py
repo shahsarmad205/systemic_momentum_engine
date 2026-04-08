@@ -1,24 +1,14 @@
 """
-Trend Signal Engine — Multi-Agent Batch Runner (v4)
+Trend Signal Engine — Multi-Agent Batch Runner (v5)
 =====================================================
-Runs five agents across 50 stock tickers:
+Runs two agents across 50 stock tickers:
 
-    1. Trend Agent           → trend score, probability, raw signal
-    2. Volatility Agent      → rolling volatility, confidence level
-    3. Regional News Agent   → live stock/sector sentiment (hour-decayed)
-    4. Global News Agent     → live macro/geopolitical sentiment (hour-decayed)
-    5. Social Sentiment Agent → Reddit, Stocktwits sentiment (hour-decayed)
-
-After agent outputs are collected, price data is checked for abnormal
-returns and volume spikes (news impact detection).  When confirmed,
-regional and global sentiment impact weights are boosted.
+    1. Trend Agent      → trend score, probability, raw signal
+    2. Volatility Agent → rolling volatility, confidence level
 
 Adjusted trend score formula:
 
-    adjusted = trend_score * trend_confidence
-             + regional_sentiment * regional_impact   (×1.3 if news event)
-             + global_sentiment   * global_impact     (×1.2 if news event)
-             + social_sentiment   * social_impact
+    adjusted = trend_score * trend_confidence   (×learned_weights when available)
 
 Signal thresholds (applied directly to adjusted score):
     > 0.5  → Bullish
@@ -27,10 +17,6 @@ Signal thresholds (applied directly to adjusted score):
 
 All results are kept in memory (no CSV output).
 Plots are saved to output/plots/ — existing plots are skipped.
-
-Optional API keys for richer data:
-    export FINNHUB_KEY="..."
-    export NEWSAPI_KEY="..."
 
 Usage:
     python main.py                     (single batch run)
@@ -51,16 +37,6 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
-
-# --- Deprecated Agents Removed ---
-# Live sentiment/news integration has been sidelined during institutional simplification.
-
-# News-impact detection utility (optional for backtests)
-try:
-    from utils.news_impact import detect_news_impact
-except ModuleNotFoundError:  # pragma: no cover
-    def detect_news_impact(*args, **kwargs):
-        return {}
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +80,7 @@ def ensure_output_dirs():
 
 
 # ---------------------------------------------------------------------------
-# 3. Adjusted trend score — new formula
+# 3. Adjusted trend score
 # ---------------------------------------------------------------------------
 
 CONFIDENCE_MULTIPLIER = {
@@ -117,12 +93,6 @@ CONFIDENCE_MULTIPLIER = {
 def compute_adjusted_trend_score(
     trend_score: float,
     confidence: str,
-    regional_sentiment: float,
-    regional_impact: float,
-    global_sentiment: float,
-    global_impact: float,
-    social_sentiment: float,
-    social_impact: float,
     learned_weights=None,
     ret_5d: float = 0.0,
     ret_10d: float = 0.0,
@@ -130,11 +100,10 @@ def compute_adjusted_trend_score(
     relative_volume: float = 0.0,
 ) -> float:
     """
-    Adjusted trend score formula:
+    Adjusted trend score:
 
-        adjusted = w1 * trend_score * trend_confidence
-                 + w2 * regional_sentiment * regional_impact
-                 + ... + optional momentum/vol/volume terms when learned_weights has them.
+        adjusted = trend_score * trend_confidence
+                 + optional momentum/vol/volume terms when learned_weights has them.
 
     When *learned_weights* is provided, uses data-driven coefficients.
     """
@@ -143,21 +112,13 @@ def compute_adjusted_trend_score(
     if learned_weights is not None:
         adjusted = learned_weights.compute_adjusted_score(
             f_trend=trend_score * trend_confidence,
-            f_regional=regional_sentiment * regional_impact,
-            f_global=global_sentiment * global_impact,
-            f_social=social_sentiment * social_impact,
             ret_5d=ret_5d,
             ret_10d=ret_10d,
             rolling_vol=rolling_vol,
             relative_volume=relative_volume,
         )
     else:
-        adjusted = (
-            trend_score * trend_confidence
-            + regional_sentiment * regional_impact
-            + global_sentiment * global_impact
-            + social_sentiment * social_impact
-        )
+        adjusted = trend_score * trend_confidence
 
     return round(adjusted, 4)
 
@@ -179,16 +140,15 @@ def classify_final_signal(adjusted_trend: float) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 4. Process a single ticker through all five agents
+# 4. Process a single ticker through the two agents
 # ---------------------------------------------------------------------------
 
-def process_ticker(ticker: str, global_news_result: dict, learned_weights=None) -> dict | None:
+def process_ticker(ticker: str, learned_weights=None) -> dict | None:
     """
-    Run the full five-agent pipeline for one ticker.
+    Run the two-agent pipeline for one ticker.
 
-    The global news result is passed in (computed once for all tickers).
     When *learned_weights* is provided, the adjusted score uses data-driven
-    coefficients instead of the default equal-weight formula.
+    coefficients instead of the default formula.
     """
     # --- Download price data ---
     try:
@@ -217,36 +177,6 @@ def process_ticker(ticker: str, global_news_result: dict, learned_weights=None) 
         print(f"    [SKIP]  Not enough history for volatility ({ticker})")
         return None
 
-    # --- Agent 3: Regional News ---
-    regional_result = run_regional_news_model(ticker)
-
-    # --- Agent 4: Global News (pre-computed) ---
-    global_result = global_news_result
-
-    # --- Agent 5: Social Sentiment ---
-    social_result = run_social_sentiment_model(ticker)
-
-    # --- News Impact Detection (price-based confirmation) ---
-    impact_df = detect_news_impact(stock_data)
-    latest_row = impact_df.dropna(subset=["abnormal_return", "volume_ratio"]).iloc[-1] \
-        if not impact_df.dropna(subset=["abnormal_return", "volume_ratio"]).empty \
-        else None
-
-    news_event = False
-    impact_score = 0.0
-
-    if latest_row is not None:
-        news_event = bool(latest_row["news_event_flag"])
-        impact_score = round(float(latest_row["impact_score"]), 4)
-
-    # Boost sentiment weights when price data confirms news impact
-    reg_impact = regional_result["impact_factor"]
-    glob_impact = global_result["impact_factor"]
-
-    if news_event:
-        reg_impact = min(reg_impact * 1.3, 1.0)
-        glob_impact = min(glob_impact * 1.2, 1.0)
-
     # --- Optional: momentum/vol/volume for learned weights ---
     ret_5d = ret_10d = rolling_vol = relative_volume = 0.0
     if learned_weights is not None and not stock_data.empty and not features.empty:
@@ -265,16 +195,10 @@ def process_ticker(ticker: str, global_news_result: dict, learned_weights=None) 
             rel = volume.iloc[-1] / vma.iloc[-1] if vma.iloc[-1] and not pd.isna(vma.iloc[-1]) else 1.0
             relative_volume = float(rel) if not (pd.isna(rel) or np.isinf(rel)) else 1.0
 
-    # --- Compute adjusted trend score (with potentially boosted impacts) ---
+    # --- Compute adjusted trend score ---
     adjusted_score = compute_adjusted_trend_score(
         trend_score=trend_result["trend_score"],
         confidence=vol_result["confidence"],
-        regional_sentiment=regional_result["regional_sentiment_score"],
-        regional_impact=reg_impact,
-        global_sentiment=global_result["global_sentiment_score"],
-        global_impact=glob_impact,
-        social_sentiment=social_result["social_sentiment_score"],
-        social_impact=social_result["impact_factor"],
         learned_weights=learned_weights,
         ret_5d=ret_5d,
         ret_10d=ret_10d,
@@ -284,7 +208,7 @@ def process_ticker(ticker: str, global_news_result: dict, learned_weights=None) 
 
     final_signal = classify_final_signal(adjusted_score)
 
-    # --- Combine into one row (include sector for multi-asset context) ---
+    # --- Combine into one row ---
     from utils.quant_utils import get_sector
     combined = {
         "Ticker": ticker,
@@ -294,12 +218,7 @@ def process_ticker(ticker: str, global_news_result: dict, learned_weights=None) 
         "Volatility 20": vol_result["volatility_20"],
         "Volatility 50": vol_result["volatility_50"],
         "Confidence": vol_result["confidence"],
-        "Regional Sentiment": regional_result["regional_sentiment_score"],
-        "Global Sentiment": global_result["global_sentiment_score"],
-        "Social Sentiment": social_result["social_sentiment_score"],
         "Adjusted Score": adjusted_score,
-        "News Event": news_event,
-        "Impact Score": impact_score,
         "Final Signal": final_signal,
     }
 
@@ -315,7 +234,7 @@ LEARNED_WEIGHTS_PATH = "output/learned_weights.json"
 
 def run_pipeline(use_learned_weights: bool = False) -> pd.DataFrame:
     """
-    Execute the five-agent pipeline across all tickers.
+    Execute the two-agent pipeline across all tickers.
 
     Returns a DataFrame with one row per successfully processed ticker,
     sorted by adjusted score (strongest bullish first).
@@ -323,33 +242,24 @@ def run_pipeline(use_learned_weights: bool = False) -> pd.DataFrame:
     When *use_learned_weights* is True (or the file at LEARNED_WEIGHTS_PATH
     exists), the adjusted score is computed with data-driven weights.
     """
-    # Optionally load learned weights
     lw = None
     if use_learned_weights:
         try:
             from agents.weight_learning_agent import LearnedWeights
             lw = LearnedWeights.load(LEARNED_WEIGHTS_PATH)
             print(f"  Using learned weights from {LEARNED_WEIGHTS_PATH}")
-            print(f"    w_trend={lw.w_trend:.4f}  w_regional={lw.w_regional:.4f}  "
-                  f"w_global={lw.w_global:.4f}  w_social={lw.w_social:.4f}  "
-                  f"intercept={lw.intercept:.6f}")
+            print(f"    w_trend={lw.w_trend:.4f}  intercept={lw.intercept:.6f}")
         except FileNotFoundError:
             print(f"  [WARN] Learned weights not found at {LEARNED_WEIGHTS_PATH}, using rule-based")
         except Exception as exc:
             print(f"  [WARN] Failed to load learned weights: {exc}, using rule-based")
-
-    print("  Running Global News Agent (once for all tickers)...")
-    global_news_result = run_global_news_model()
-    print(f"    Global Sentiment : {global_news_result['global_sentiment_score']:+.4f}")
-    print(f"    Impact Factor    : {global_news_result['impact_factor']:.4f}")
-    print()
 
     all_results = []
     total = len(TICKERS)
 
     for i, ticker in enumerate(TICKERS, start=1):
         print(f"  [{i}/{total}] {ticker}")
-        result = process_ticker(ticker, global_news_result, learned_weights=lw)
+        result = process_ticker(ticker, learned_weights=lw)
 
         if result is not None:
             all_results.append(result)
@@ -389,23 +299,16 @@ def detect_news_impact_events(features: pd.DataFrame) -> pd.DataFrame:
     """
     Identify days where the absolute daily return exceeds 2 standard
     deviations of the rolling 20-day return distribution.
-
-    These outlier days are a price-based proxy for significant news events.
-    Returns a filtered DataFrame of only the event days.
     """
     daily_ret = features["daily_return"]
     rolling_std = daily_ret.rolling(window=20).std()
-
-    # Threshold: return magnitude is more than 2x the recent rolling std
     threshold = 2.0 * rolling_std
     is_event = daily_ret.abs() > threshold
-
-    event_days = features[is_event].copy()
-    return event_days
+    return features[is_event].copy()
 
 
 # ---------------------------------------------------------------------------
-# 8. Plotting — enhanced with news-event markers + social sentiment
+# 8. Plotting — three panels (price, trend score, volatility)
 # ---------------------------------------------------------------------------
 
 CONFIDENCE_COLOURS = {
@@ -426,18 +329,14 @@ def plot_combined_chart(
     features: pd.DataFrame,
     final_signal: str,
     confidence: str,
-    regional_sentiment: float,
-    global_sentiment: float,
-    social_sentiment: float,
     adjusted_score: float,
 ):
     """
-    Four-panel chart for one ticker:
+    Three-panel chart for one ticker:
 
         Panel 1 — Price + MAs + confidence shading + news-event markers
         Panel 2 — Rolling trend score bars
         Panel 3 — Rolling 20-day volatility
-        Panel 4 — Sentiment summary (regional + global + social)
 
     Saved as {ticker}_trend_plot.png.
     """
@@ -452,18 +351,15 @@ def plot_combined_chart(
     rolling_vol_20 = compute_rolling_volatility(daily_returns, window=20)
     rolling_conf = compute_rolling_confidence(daily_returns, window=20)
 
-    # Detect abnormal return days as news-event proxies
     event_days = detect_news_impact_events(features)
-
     signal_colour = SIGNAL_COLOURS.get(final_signal, "#888888")
 
-    # --- Build four-panel figure ---
-    fig, (ax_price, ax_score, ax_vol, ax_sent) = plt.subplots(
-        nrows=4,
+    fig, (ax_price, ax_score, ax_vol) = plt.subplots(
+        nrows=3,
         ncols=1,
-        figsize=(14, 13),
+        figsize=(14, 10),
         sharex=False,
-        gridspec_kw={"height_ratios": [3, 1, 1, 0.8]},
+        gridspec_kw={"height_ratios": [3, 1, 1]},
     )
 
     fig.suptitle(
@@ -484,7 +380,6 @@ def plot_combined_chart(
     price_min = close_prices.min() * 0.97
     price_max = close_prices.max() * 1.03
 
-    # Confidence background shading
     for conf_label, conf_colour in CONFIDENCE_COLOURS.items():
         mask = rolling_conf == conf_label
         ax_price.fill_between(
@@ -493,13 +388,11 @@ def plot_combined_chart(
             label=f"{conf_label} conf.",
         )
 
-    # News-event markers: triangles on days with abnormal price moves
     if not event_days.empty:
         event_dates = event_days.index
         event_prices = event_days["Close"]
         event_returns = event_days["daily_return"]
 
-        # Green up-triangle for positive events, red down-triangle for negative
         pos_mask = event_returns > 0
         neg_mask = event_returns <= 0
 
@@ -507,20 +400,19 @@ def plot_combined_chart(
             ax_price.scatter(
                 event_dates[pos_mask], event_prices[pos_mask],
                 marker="^", color="#27ae60", s=50, zorder=5,
-                label="News impact (+)",
+                label="Price spike (+)",
             )
         if neg_mask.any():
             ax_price.scatter(
                 event_dates[neg_mask], event_prices[neg_mask],
                 marker="v", color="#c0392b", s=50, zorder=5,
-                label="News impact (−)",
+                label="Price spike (−)",
             )
 
     ax_price.set_ylabel("Price ($)", fontsize=10)
     ax_price.set_ylim(price_min, price_max)
     ax_price.legend(loc="upper left", fontsize=7, ncol=4)
     ax_price.grid(True, alpha=0.3)
-
     ax_price.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
     ax_price.xaxis.set_major_formatter(mdates.DateFormatter("%b %Y"))
 
@@ -532,7 +424,6 @@ def plot_combined_chart(
     ax_score.axhline(y=0, color="#7f8c8d", linewidth=0.8)
     ax_score.set_ylabel("Trend Score", fontsize=10)
     ax_score.grid(True, alpha=0.3)
-
     ax_score.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
     ax_score.xaxis.set_major_formatter(mdates.DateFormatter("%b %Y"))
 
@@ -544,31 +435,8 @@ def plot_combined_chart(
     ax_vol.set_ylabel("Volatility", fontsize=10)
     ax_vol.legend(loc="upper left", fontsize=7)
     ax_vol.grid(True, alpha=0.3)
-
     ax_vol.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
     ax_vol.xaxis.set_major_formatter(mdates.DateFormatter("%b %Y"))
-
-    # =================================================================
-    # Panel 4: Sentiment Summary — Regional + Global + Social
-    # =================================================================
-    bar_labels = ["Regional News", "Global News", "Social Media"]
-    bar_values = [regional_sentiment, global_sentiment, social_sentiment]
-    bar_colors = ["#2ecc71" if v >= 0 else "#e74c3c" for v in bar_values]
-
-    ax_sent.barh(bar_labels, bar_values, color=bar_colors, height=0.5, alpha=0.8)
-    ax_sent.set_xlim(-1.0, 1.0)
-    ax_sent.axvline(x=0, color="#7f8c8d", linewidth=0.8)
-    ax_sent.set_xlabel("Sentiment Score", fontsize=10)
-    ax_sent.grid(True, alpha=0.3, axis="x")
-
-    # Value labels on bars
-    for i, val in enumerate(bar_values):
-        x_pos = val + 0.03 if val >= 0 else val - 0.03
-        ha = "left" if val >= 0 else "right"
-        ax_sent.text(
-            x_pos, i, f"{val:+.2f}",
-            va="center", ha=ha, fontsize=9, fontweight="bold",
-        )
 
     fig.autofmt_xdate(rotation=30)
     plt.tight_layout(rect=[0, 0, 1, 0.95])
@@ -609,14 +477,12 @@ def generate_all_plots(results_df: pd.DataFrame):
             if features.empty:
                 print(f"    [SKIP] Not enough data for {ticker}")
                 continue
+
             plot_path = plot_combined_chart(
                 ticker=ticker,
                 features=features,
                 final_signal=row["Final Signal"],
                 confidence=row["Confidence"],
-                regional_sentiment=row["Regional Sentiment"],
-                global_sentiment=row["Global Sentiment"],
-                social_sentiment=row["Social Sentiment"],
                 adjusted_score=row["Adjusted Score"],
             )
             print(f"    Saved → {plot_path}")
@@ -633,20 +499,17 @@ def print_summary(results_df: pd.DataFrame):
     """Print the results table and distribution summaries to the console."""
     display_cols = [
         "Ticker", "Trend Score", "Adjusted Score",
-        "Confidence", "Regional Sentiment", "Global Sentiment",
-        "Social Sentiment", "News Event", "Impact Score", "Final Signal",
+        "Confidence", "Final Signal",
     ]
     print(results_df[display_cols].to_string(index=False))
     print()
 
-    # Signal distribution
     signal_counts = results_df["Final Signal"].value_counts()
     print("Final Signal Summary:")
     for name, count in signal_counts.items():
         print(f"  {name}: {count}")
     print()
 
-    # Confidence distribution
     conf_counts = results_df["Confidence"].value_counts()
     print("Confidence Summary:")
     for name, count in conf_counts.items():
@@ -662,12 +525,11 @@ def main():
     ensure_output_dirs()
 
     print("=" * 70)
-    print("  Trend Signal Engine — Multi-Agent Batch Run (v3)")
-    print("  Agents: Trend + Volatility + Regional News + Global News + Social")
+    print("  Trend Signal Engine — Multi-Agent Batch Run (v5)")
+    print("  Agents: Trend + Volatility")
     print("=" * 70)
     print()
 
-    # ---- Phase 1: Run all five agents on every ticker ----
     results_df = run_pipeline()
 
     if results_df.empty:
@@ -675,12 +537,9 @@ def main():
         return
 
     print()
-
-    # ---- Phase 2: In-memory summary ----
     print_summary(results_df)
 
-    # ---- Phase 3: Generate plots ----
-    print("Generating enhanced plots (existing plots will be skipped)...")
+    print("Generating plots (existing plots will be skipped)...")
     print()
     generate_all_plots(results_df)
 

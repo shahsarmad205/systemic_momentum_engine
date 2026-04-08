@@ -6,6 +6,7 @@ TOP_LONGS highest and TOP_SHORTS lowest; equal capital per selected name.
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 
@@ -56,20 +57,38 @@ def build_cross_sectional_candidates(
     score_mult = regime_adj.get("score_mult", 1.0)
     position_scale = regime_adj.get("position_scale", 1.0)
 
-    # Collect (ticker, adj_score, sig_row) for every ticker with valid score
-    rows: list[tuple[str, float, any]] = []
+    # First pass: collect all finite scores for cross-sectional normalization
+    raw_candidates: list[tuple[str, float, any]] = []
     for ticker, sig_row in daily_signals_at_date:
         signal_raw = float(sig_row["adjusted_score"])
-        adj_score = signal_raw * score_mult
-        
-        # Hysteresis (Conviction Buffer): 
+        if np.isfinite(signal_raw):
+            raw_candidates.append((ticker, signal_raw, sig_row))
+
+    # Cross-sectional z-score: when model outputs near-constant predictions
+    # (std < 0.01), z-scoring restores meaningful rank dispersion across tickers.
+    if len(raw_candidates) >= 5:
+        all_scores = np.array([s for _, s, _ in raw_candidates], dtype=float)
+        score_std = float(all_scores.std())
+        score_mean = float(all_scores.mean())
+        if score_std > 1e-8:
+            raw_candidates = [
+                (t, (s - score_mean) / score_std, sr)
+                for t, s, sr in raw_candidates
+            ]
+
+    # Second pass: apply conviction-buffer threshold and regime multiplier
+    rows: list[tuple[str, float, any]] = []
+    for ticker, signal_norm, sig_row in raw_candidates:
+        adj_score = signal_norm * score_mult
+
+        # Hysteresis (Conviction Buffer):
         # Higher threshold for new entries, lower threshold for retention.
         is_held = ticker in currently_held_tickers
         effective_threshold = (min_strength - buffer) if is_held else (min_strength + buffer)
-        
-        if abs(signal_raw) < effective_threshold:
+
+        if abs(signal_norm) < effective_threshold:
             continue
-            
+
         rows.append((ticker, adj_score, sig_row))
 
     if not rows:
@@ -117,11 +136,24 @@ def build_cross_sectional_candidates(
                 "signal_score": adj_score,
             })
 
-    # Shorts: bottom TOP_SHORTS by score (lowest)
+    # Shorts: if short_score_raw is available in signal rows, rank by it (dedicated short model).
+    # Fallback: bottom of long z-score rank (weakest momentum = short candidates).
     if market_neutral or config.enable_shorts:
-        short_slice = rows[-top_shorts:] if len(rows) >= top_shorts else []
-        # Avoid duplicate ticker if same name in both legs
         long_tickers = {t for t, _, _ in long_slice}
+        use_short_score = any(
+            float(sig_row.get("short_score_raw", 0.0) or 0.0) != 0.0
+            for _, _, sig_row in rows
+        )
+        if use_short_score:
+            # Re-rank by short_score_raw descending (higher = stronger short signal)
+            short_ranked = sorted(
+                raw_candidates,
+                key=lambda x: float(x[2].get("short_score_raw", 0.0) or 0.0),
+                reverse=True,
+            )
+            short_slice = short_ranked[:top_shorts] if len(short_ranked) >= top_shorts else short_ranked
+        else:
+            short_slice = rows[-top_shorts:] if len(rows) >= top_shorts else []
         for ticker, adj_score, sig_row in short_slice:
             if ticker in long_tickers:
                 continue

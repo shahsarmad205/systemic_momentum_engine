@@ -1,13 +1,18 @@
 # ============================================================
-# QuantConnect (Lean SDK) — Long-Only ML Alpha Model (Pillar 7)
+# QuantConnect (Lean SDK) — ML Alpha Model
 # ============================================================
-# Full Feature Build (15 Audited Features)
-# Optimized for Local LEAN CLI & QuantConnect Cloud
+# Synced with trend_signal_engine backtesting pipeline.
+# Implements all Phase A-D improvements:
+#   A1: Cross-sectional z-scores at inference
+#   A2: Short model drives short selection (long-only mode here)
+#   A3: Full 23-feature alignment with best_long_model.pkl (earnings_surprise removed)
+#   C2: Regime-conditional routing for Bear/Crisis/HighVol
+#   D1: Continuous regime score → linear gross exposure scaling
+# ============================================================
 
 try:
     from AlgorithmImports import *
 except ImportError:
-    # Local Parity Testing Mocks
     class AlphaModel: pass
     class RollingWindow(list):
         def __init__(self, type_or_size, size=None):
@@ -16,616 +21,595 @@ except ImportError:
         def __class_getitem__(cls, item): return cls
         @property
         def IsReady(self): return len(self) >= self.size
+        @property
+        def Count(self): return len(self)
         def Add(self, item):
             self.insert(0, item)
             if len(self) > self.size: self.pop()
     class Resolution: Daily = 'Daily'
-    class IndicatorValue: pass
 
 import pandas as pd
 import numpy as np
 import pickle
-from datetime import timedelta
 import io
+from datetime import timedelta
 
-# Sentinel class to replace BitGenerator objects
-class _BitGeneratorStub:
-    def __setstate__(self, state):
-        pass
-    def __getstate__(self):
-        return {}
+# ============================================================
+# LGBMRankerWrapper stub — must be defined at module level
+# so that the pickled VotingRegressor (best_long_model.pkl)
+# can deserialize its LGBMRankerWrapper sub-estimator.
+# The stub delegates to the real LGBMRanker if lightgbm is
+# available; otherwise returns zeros gracefully.
+# ============================================================
+try:
+    from sklearn.base import BaseEstimator, RegressorMixin as _RegressorMixin
+    import lightgbm as _lgb
 
-# Custom unpickler that filters out problematic BitGenerator objects
-class SafeUnpickler(pickle.Unpickler):
-    def load(self):
-        # Override the dispatch table to handle BitGenerator reconstruction
-        # This prevents the C-level validation from happening
-        old_reducer_override = getattr(self, 'dispatch_table', {})
-        try:
-            return super().load()
-        except ValueError as e:
-            if 'is not a known BitGenerator' in str(e):
-                # Return a dummy model if BitGenerator can't be loaded
-                algorithm.Error(f"BitGenerator incompatibility detected: {str(e)}")
-                # Return a simple passthrough model
-                class DummyModel:
-                    def predict_proba(self, X):
-                        return [[0.5, 0.5]] * len(X)
-                return DummyModel()
-            raise
+    class LGBMRankerWrapper(_RegressorMixin, BaseEstimator):
+        def __init__(self, n_estimators=100, max_depth=4, learning_rate=0.05,
+                     num_leaves=15, min_child_samples=20, subsample=0.8,
+                     colsample_bytree=0.8):
+            self.n_estimators = n_estimators
+            self.max_depth = max_depth
+            self.learning_rate = learning_rate
+            self.num_leaves = num_leaves
+            self.min_child_samples = min_child_samples
+            self.subsample = subsample
+            self.colsample_bytree = colsample_bytree
+            self._model = None
+            self._preloaded_date_groups = None
+
+        def set_date_context(self, date_groups):
+            self._preloaded_date_groups = date_groups
+            return self
+
+        def fit(self, X, y, **kw):
+            return self  # inference-only in QC
+
+        def predict(self, X):
+            if self._model is None:
+                return np.zeros(len(X), dtype=float)
+            return self._model.predict(X).astype(float)
+
+except ImportError:
+    try:
+        from sklearn.base import BaseEstimator, RegressorMixin as _RegressorMixin
+
+        class LGBMRankerWrapper(_RegressorMixin, BaseEstimator):
+            def __init__(self, **kw): pass
+            def fit(self, X, y, **kw): return self
+            def predict(self, X): return np.zeros(len(X), dtype=float)
+
+    except ImportError:
+        class LGBMRankerWrapper:
+            def __init__(self, **kw): pass
+            def fit(self, X, y, **kw): return self
+            def predict(self, X): return np.zeros(len(X), dtype=float)
+
+
+# ============================================================
+# Model Loader
+# ============================================================
+
+class SimpleModel:
+    """Fallback neutral model when pickle fails."""
+    def predict(self, X):
+        return np.zeros(len(X), dtype=float)
+    def predict_proba(self, X):
+        return np.array([[0.5, 0.5]] * len(X))
+
+
+def LoadProductionModel(algorithm, model_path="best_long_model.pkl"):
+    """
+    Load model artifact from local project file or Object Store.
+    Injects LGBMRankerWrapper into __main__ before unpickling so the
+    VotingRegressor sub-estimator deserializes correctly.
+    Returns (estimator, feature_columns_list).
+    """
+    import joblib
+    import sys
+    import os
+
+    # Patch __main__ with LGBMRankerWrapper so pickle can resolve it
+    _main = sys.modules.get("__main__")
+    if _main is not None and not hasattr(_main, "LGBMRankerWrapper"):
+        setattr(_main, "LGBMRankerWrapper", LGBMRankerWrapper)
+
+    obj = None
+    source = "UNKNOWN"
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    full_path = os.path.join(base_dir, model_path)
+
+    try:
+        algorithm.Log(f"LoadProductionModel: looking for {full_path}")
+        if os.path.isfile(full_path):
+            try:
+                obj = joblib.load(full_path)
+                source = "LOCAL_FILE"
+            except Exception:
+                with open(full_path, "rb") as fh:
+                    obj = pickle.load(fh)
+                source = "LOCAL_PICKLE"
+        else:
+            algorithm.Log(f"Local file not found: {full_path}. Trying Object Store.")
+            if algorithm.ObjectStore.ContainsKey(model_path):
+                data = bytes(algorithm.ObjectStore.ReadBytes(model_path))
+                try:
+                    obj = joblib.load(io.BytesIO(data))
+                except Exception:
+                    obj = pickle.loads(data)
+                source = "OBJECT_STORE"
+            else:
+                algorithm.Error(f"Model '{model_path}' not found anywhere.")
+                return (SimpleModel(), None)
+    except Exception as exc:
+        algorithm.Error(f"LoadProductionModel failed for {model_path}: {exc}")
+        return (SimpleModel(), None)
+
+    if isinstance(obj, dict) and "estimator" in obj:
+        est = obj["estimator"]
+        feat_cols = obj.get("feature_columns")
+        algorithm.Log(f"Model loaded ({source}): {type(est).__name__} | features={len(feat_cols) if feat_cols else 'unknown'}")
+        return (est, feat_cols)
+    else:
+        algorithm.Log(f"Model loaded ({source}): {type(obj).__name__} (no metadata)")
+        return (obj, None)
+
+
+# ============================================================
+# Alpha Model
+# ============================================================
 
 class TrendSignalAlphaModel(AlphaModel):
-    def __init__(self, algorithm, model_data, short_model=None, spy_symbol=None):
-        # 1. Load Model & Features (Pillar 24 Dynamic Alignment)
+    def __init__(self, algorithm, model_data, short_model=None, spy_symbol=None,
+                 bear_model_data=None, highvol_model_data=None):
+        # Unpack (estimator, feature_columns) tuples
         if isinstance(model_data, tuple):
-            self.long_model, model_features = model_data
+            self.long_model, _feat_cols = model_data
         else:
-            self.long_model = model_data
-            model_features = None
+            self.long_model, _feat_cols = model_data, None
 
-        self.short_model = short_model
-        self.spy_symbol = spy_symbol if spy_symbol else algorithm.AddEquity("SPY", Resolution.Daily).Symbol
+        if isinstance(short_model, tuple):
+            self.short_model, _ = short_model
+        else:
+            self.short_model = short_model
+
+        # C2: regime-specific models (Bear / HighVol/Crisis only)
+        if isinstance(bear_model_data, tuple):
+            self.bear_model, _ = bear_model_data
+        else:
+            self.bear_model = bear_model_data
+
+        if isinstance(highvol_model_data, tuple):
+            self.highvol_model, _ = highvol_model_data
+        else:
+            self.highvol_model = highvol_model_data
+
+        self.spy_symbol = spy_symbol or algorithm.AddEquity("SPY", Resolution.Daily).Symbol
         self.symbol_data = {}
         self.active_signals = {}
         self.last_refresh = {}
         self.long_only = True
-        
-        # Pillar 30: Strategy Parameters (10/15 Baseline)
+
+        # Model feature columns (from artifact metadata)
+        self.features = _feat_cols if _feat_cols else [
+            "vol_expansion", "f_trend", "short_term_reversal", "ret_20d",
+            "ret_1d", "vol_ratio_5_20", "nearness_52w_low", "sector_relative_60d",
+            "nearness_52w_high", "cs_momentum_percentile",
+            "dist_from_52w_high", "low_vol_score", "momentum_acceleration",
+            "ret_5d", "capm_residual_vol", "down_up_vol_ratio", "rsi_14",
+            "capm_alpha", "ret_10d", "sector_relative_20d", "rsi_overbought",
+            "rolling_vol_20", "quality_score",
+        ]
+
+        # Strategy params
         self.top_n = 10
         self.hold_n = 15
-        self.min_score = 0.20    # Lowered from 0.32 — rank-normalized scores rarely exceed 0.32
+        self.min_score = 0.20
         self.min_dollar_volume = 1e8
         self.flip_buffer = 0.05
-        self.refresh_days = 10   # Match local holding_period_days=10 to minimize refresh churn
+        self.refresh_days = 10
 
-        
-        # Benchmark Tracker
-        self.spy_window = RollingWindow[float](65)
-        spy_hist = algorithm.History(self.spy_symbol, 65, Resolution.Daily)
-        if spy_hist is not None:
+        # D1: Continuous regime score state
+        self.current_regime = "Bull"        # label: Bull/Bear/Crisis/Sideways
+        self.regime_score = 0.0             # 0=Bull, 1=Crisis
+        self.bull_gross_cap = 1.0
+        self.crisis_gross_cap = 0.25
+
+        # SPY warm-up for regime detection
+        self.spy_close_window = RollingWindow[float](210)  # 200d MA + buffer
+        self.vix_window = RollingWindow[float](20)         # for VIX proxy
+
+        spy_hist = algorithm.History(self.spy_symbol, 210, Resolution.Daily)
+        if spy_hist is not None and len(spy_hist) > 0:
             for _, row in spy_hist.iterrows():
-                p = float(row['close']) if 'close' in row else float(row.close)
-                self.spy_window.Add(p)
+                p = float(row.get('close', row.get('Close', 0)))
+                if p > 0:
+                    self.spy_close_window.Add(p)
 
-        # Pillar 24: Use features from model artifact if available, else fallback to hardcoded
-        if model_features:
-            algorithm.Log(f"Alpha Model: Loaded {len(model_features)} features from model artifact.")
-            self.features = model_features
+        algorithm.Log(f"TrendSignalAlphaModel initialized | features={len(self.features)} | "
+                      f"bear_model={'yes' if self.bear_model else 'no'} | "
+                      f"highvol_model={'yes' if self.highvol_model else 'no'}")
+
+    # ----------------------------------------------------------
+    def _sigmoid(self, x):
+        return 1.0 / (1.0 + np.exp(-float(x)))
+
+    def _update_regime(self, algorithm):
+        """D1: Update regime label + continuous regime score from SPY+VIX proxy."""
+        if self.spy_close_window.Count < 205:
+            return
+
+        closes = [self.spy_close_window[i] for i in range(self.spy_close_window.Count)]
+        closes_arr = np.array(closes[::-1], dtype=float)  # oldest first
+
+        sma200 = float(np.mean(closes_arr[-200:]))
+        sma50  = float(np.mean(closes_arr[-50:]))
+        close  = closes_arr[-1]
+
+        # SPY realized vol (20d) as VIX proxy (annualized %)
+        if len(closes_arr) >= 21:
+            rets = np.diff(closes_arr[-21:]) / closes_arr[-21:-1]
+            vix_proxy = float(np.std(rets) * np.sqrt(252) * 100)
         else:
-            algorithm.Log("Alpha Model: No feature metadata found. Falling back to default list.")
-            self.features = [
-                "cs_momentum_percentile", "ret_5d", "dist_from_52w_high", 
-                "ret_10d", "capm_residual_vol", "ret_20d", "vol_expansion", 
-                "rsi_overbought", "f_trend", "rolling_vol_20", "rsi_14", 
-                "ret_1d", "vol_ratio_5_20", "down_up_vol_ratio", 
-                "earnings_surprise", "momentum_acceleration"
-            ]
+            vix_proxy = 15.0
 
+        # Hard label
+        if vix_proxy >= 30.0:
+            self.current_regime = "Crisis"
+        elif close > sma200 and sma50 > sma200:
+            self.current_regime = "Bull"
+        elif close < sma200 and sma50 < sma200:
+            self.current_regime = "Bear"
+        else:
+            self.current_regime = "Sideways"
 
+        # D1: continuous score [0=Bull, 1=Crisis]
+        vix_score = self._sigmoid((vix_proxy - 25.0) / 4.0)
+        sma_gap = (sma200 - close) / max(sma200, 1e-6)
+        sma_score = self._sigmoid(sma_gap / 0.025)
+        self.regime_score = float(np.clip(max(vix_score, sma_score), 0.0, 1.0))
+
+    def _gross_cap(self):
+        """D1: Linear interpolation of gross cap using continuous regime score."""
+        return self.bull_gross_cap + self.regime_score * (self.crisis_gross_cap - self.bull_gross_cap)
+
+    def _select_model(self):
+        """C2: Return the best model for the current regime."""
+        if self.current_regime == "Bear" and self.bear_model is not None:
+            return self.bear_model
+        if self.current_regime in ("Crisis", "HighVol") and self.highvol_model is not None:
+            return self.highvol_model
+        return self.long_model
+
+    # ----------------------------------------------------------
     def OnSecuritiesChanged(self, algorithm, changes):
         for added in changes.AddedSecurities:
             if added.Symbol not in self.symbol_data:
-                self.symbol_data[added.Symbol] = SymbolData(algorithm, added.Symbol, self.spy_window)
+                self.symbol_data[added.Symbol] = SymbolData(algorithm, added.Symbol, self.spy_close_window)
         for removed in changes.RemovedSecurities:
             self.symbol_data.pop(removed.Symbol, None)
 
     def Update(self, algorithm, data):
+        # Update SPY window
         spy_bar = data.Bars.get(self.spy_symbol)
         if spy_bar:
-            self.spy_window.Add(spy_bar.Close)
-            
+            self.spy_close_window.Add(spy_bar.Close)
+
+        # Update regime
+        self._update_regime(algorithm)
+        gross_cap = self._gross_cap()
+        effective_top_n = max(1, int(self.top_n * gross_cap))
+
+        # Gather features
         raw_features = {}
-        ready_count = 0
         for symbol, sd in self.symbol_data.items():
-            if symbol == self.spy_symbol or not data.Bars.ContainsKey(symbol): continue
+            if symbol == self.spy_symbol or not data.Bars.ContainsKey(symbol):
+                continue
             sd.Update(data.Bars[symbol])
-            if sd.IsReady:
-                ready_count += 1
-                if hasattr(algorithm.Securities[symbol], "DollarVolume"):
-                    if algorithm.Securities[symbol].DollarVolume < self.min_dollar_volume:
-                        continue
-                feats = sd.GetFullFeatures()
-                if feats: raw_features[symbol] = feats
-        
-        algorithm.Log(f"UPDATE - Processing {len(raw_features)} symbols | Ready: {ready_count}")
+            if not sd.IsReady:
+                continue
+            if hasattr(algorithm.Securities[symbol], "DollarVolume"):
+                if algorithm.Securities[symbol].DollarVolume < self.min_dollar_volume:
+                    continue
+            feats = sd.GetFullFeatures()
+            if feats:
+                raw_features[symbol] = feats
+
+        algorithm.Log(f"UPDATE | regime={self.current_regime} score={self.regime_score:.2f} "
+                      f"cap={gross_cap:.2f} top_n={effective_top_n} symbols={len(raw_features)}")
 
         if not raw_features:
             return []
 
-        # 2. Daily Matrix & Cross-Sectional Normalization
+        # Build panel DataFrame
         df = pd.DataFrame.from_dict(raw_features, orient='index')
-        # Store raw for forensic audit comparison
-        df_raw = df.copy()
-        
-        # Pillar 29: Cross-Sectional Rank Implementation (CRITICAL)
-        # Model expects 'cs_momentum_percentile' based on momentum_6m
-        if "momentum_6m" in df.columns:
-            df["cs_momentum_percentile"] = df["momentum_6m"].rank(pct=True).fillna(0.5)
-        else:
-            df["cs_momentum_percentile"] = 0.5
-            
-        # Placeholder for features not available in cloud yet
-        df["earnings_surprise"] = 0.0
-        
+
+        # A1: Cross-sectional z-scores (matches training)
         cs_z_cols = ['ret_5d', 'ret_10d', 'rolling_vol_20']
         for col in cs_z_cols:
             if col in df.columns:
                 mean = df[col].mean()
                 std = df[col].std(ddof=0)
                 df[col] = (df[col] - mean) / std if std > 1e-9 else 0.0
-        
-        algorithm.Log(f"UPDATE - Processing {len(df)} symbols | Ready Samples: {ready_count}")
 
-        # 3. Research Mirror Inference (Dual-Model Pillar 17)
+        # Cross-sectional momentum percentile
+        if "momentum_6m" in df.columns:
+            df["cs_momentum_percentile"] = df["momentum_6m"].rank(pct=True).fillna(0.5)
+        else:
+            df["cs_momentum_percentile"] = 0.5
+
+        # sector_relative_20d/60d: approximate as (stock ret - universe mean ret)
+        for col in ["ret_20d", "ret_60d"]:
+            if col in df.columns:
+                universe_mean = df[col].mean()
+                suffix = "20d" if "20" in col else "60d"
+                df[f"sector_relative_{suffix}"] = df[col] - universe_mean
+
+        # Select model for current regime (C2)
+        active_model = self._select_model()
+
+        # Inference
         long_raw_scores = {}
-        short_raw_scores = {}
-        
         for symbol, row in df.iterrows():
-            ordered_feats = [row.get(f, 0.0) for f in self.features]
+            ordered = np.array([float(row.get(f, 0.0)) for f in self.features], dtype=float)
+            ordered = np.where(np.isfinite(ordered), ordered, 0.0)
+            ordered = np.clip(ordered, -10.0, 10.0)
             try:
-                # 4. Long Model Prediction
-                if hasattr(self.long_model, "predict_proba"):
-                    lp = (2.0 * self.long_model.predict_proba([ordered_feats])[0][1]) - 1.0
+                if hasattr(active_model, "predict_proba"):
+                    proba = active_model.predict_proba([ordered])
+                    score = (2.0 * float(proba[0][1])) - 1.0
                 else:
-                    lp = self.long_model.predict([ordered_feats])[0]
-                
-                long_raw_scores[symbol] = lp
-                
-                # 5. Short Model Prediction (Only if not Long-Only and model provided)
-                if not self.long_only and self.short_model is not None:
-                    if hasattr(self.short_model, "predict_proba"):
-                        sp = (2.0 * self.short_model.predict_proba([ordered_feats])[0][1]) - 1.0
-                    else:
-                        sp = self.short_model.predict([ordered_feats])[0]
-                    short_raw_scores[symbol] = sp
-                else:
-                    short_raw_scores[symbol] = 0.0
-            except Exception as e:
-                algorithm.Log(f"Inference Failure for {symbol.Value}: {str(e)}")
+                    score = float(active_model.predict([ordered])[0])
+                long_raw_scores[symbol] = score
+            except Exception as exc:
+                algorithm.Log(f"Inference error {symbol.Value}: {exc}")
 
         if not long_raw_scores:
             return []
 
-        # 4. Dual Cross-Sectional Rank Normalization
+        # Cross-sectional rank normalization
         l_series = pd.Series(long_raw_scores).rank(pct=True, method='average').fillna(0.5)
-        s_series = pd.Series(short_raw_scores).rank(pct=True, method='average').fillna(0.5)
-        
         l_norm = (l_series * 2.0) - 1.0
-        s_norm = (s_series * 2.0) - 1.0
-        
-        # 5. Conviction Fusion: Resolve Long/Short Direction (Sticky Pillar 19)
-        final_scores = {}
-        final_directions = {}
-        
-        for symbol in long_raw_scores.keys():
-            l_score = l_norm[symbol]
-            s_score = s_norm[symbol]
-            
-            # Pillar 28: Long-Only Lockdown
-            if self.long_only:
-                final_scores[symbol] = l_score
-                final_directions[symbol] = InsightDirection.Up
-                continue
 
-            active_dir = self.active_signals.get(symbol)
-            
-            # Hysteresis Logic: Only flip if the other direction is significantly better
-            if active_dir == InsightDirection.Up:
-                # We are Long: Only flip to Short if Short is clearly better than Long + Buffer
-                if s_score > l_score + self.flip_buffer:
-                    final_scores[symbol] = s_score
-                    final_directions[symbol] = InsightDirection.Down
-                else:
-                    final_scores[symbol] = l_score
-                    final_directions[symbol] = InsightDirection.Up
-            elif active_dir == InsightDirection.Down:
-                # We are Short: Only flip to Long if Long is clearly better than Short + Buffer
-                if l_score > s_score + self.flip_buffer:
-                    final_scores[symbol] = l_score
-                    final_directions[symbol] = InsightDirection.Up
-                else:
-                    final_scores[symbol] = s_score
-                    final_directions[symbol] = InsightDirection.Down
-            else:
-                # No current position: simple comparison
-                if l_score >= s_score:
-                    final_scores[symbol] = l_score
-                    final_directions[symbol] = InsightDirection.Up
-                else:
-                    final_scores[symbol] = s_score
-                    final_directions[symbol] = InsightDirection.Down
-        
-        top_candidates = sorted(final_scores.items(), key=lambda x: x[1], reverse=True)
-        
-        # [DIAGNOSTIC LOG] Every 10 days, audit the #1 signal's math
-        if top_candidates and (algorithm.Time.day % 10 == 0):
-            top_symbol, top_score = top_candidates[0]
-            raw_top = df_raw.loc[top_symbol]
-            z_top = df.loc[top_symbol]
-            algorithm.Log(f"ALPHA AUDIT - {top_symbol.Value} | Rank Score: {top_score:.4f} | R[5d]: {raw_top['ret_5d']:.4f} | CS_MOM_PCT: {z_top['cs_momentum_percentile']:.4f}")
-        
+        top_candidates = sorted(l_norm.items(), key=lambda x: x[1], reverse=True)
+        symbols_by_rank = [s for s, _ in top_candidates]
+
         insights = []
-        # Final High-Conviction "Zero-Churn" Persistent Gate (10/15)
-        # Pillar 15: "Emit Once, Hold Forever" Principle
-        
-        # Build symbol list for rank lookup
-        symbols_by_rank = [item[0] for item in top_candidates]
 
-        # A) Update Current Holdings: Determine Exits and Refreshes
-        symbols_to_remove = []
+        # Update existing holdings
+        to_remove = []
         for symbol, direction in list(self.active_signals.items()):
             try:
                 rank = symbols_by_rank.index(symbol) + 1
-                score = final_scores.get(symbol, 0.0)
-                new_direction = final_directions.get(symbol)
-                
-                # 1. Exit Conditions
-                if rank > self.hold_n or score < self.min_score or new_direction != direction:
+                score = float(l_norm.get(symbol, 0.0))
+                if rank > self.hold_n or score < self.min_score:
                     insights.append(Insight.Price(symbol, timedelta(days=5), InsightDirection.Flat, score))
-                    symbols_to_remove.append(symbol)
+                    to_remove.append(symbol)
                     self.last_refresh.pop(symbol, None)
                     continue
-                
-                # 2. Refresh Condition: Every holding_period days to keep signal alive in LEAN
-                # Matches local holding_period_days=10. Less frequent = fewer rebalance triggers.
                 last_time = self.last_refresh.get(symbol)
                 if last_time is None or (algorithm.Time - last_time).days >= self.refresh_days:
                     insights.append(Insight.Price(symbol, timedelta(days=self.refresh_days * 2), direction, score))
                     self.last_refresh[symbol] = algorithm.Time
-                    
             except ValueError:
                 insights.append(Insight.Price(symbol, timedelta(days=5), InsightDirection.Flat, 0.0))
-                symbols_to_remove.append(symbol)
+                to_remove.append(symbol)
                 self.last_refresh.pop(symbol, None)
 
-        for s in symbols_to_remove:
+        for s in to_remove:
             self.active_signals.pop(s, None)
 
-        # B) Select New Entries: Only Top N
+        # New entries (capped by D1 gross cap)
         for symbol, score in top_candidates:
             rank = symbols_by_rank.index(symbol) + 1
-            direction = final_directions[symbol]
-            
-            if rank <= self.top_n and symbol not in self.active_signals and score >= self.min_score:
-                # New Entry — insight duration matches local holding_period_days=10
-                insight = Insight.Price(symbol, timedelta(days=self.refresh_days * 2), direction, score)
+            if rank <= effective_top_n and symbol not in self.active_signals and score >= self.min_score:
+                insight = Insight.Price(symbol, timedelta(days=self.refresh_days * 2),
+                                        InsightDirection.Up, score)
                 insights.append(insight)
-                self.active_signals[symbol] = direction
+                self.active_signals[symbol] = InsightDirection.Up
                 self.last_refresh[symbol] = algorithm.Time
 
         if insights:
-            algorithm.Log(f"Alpha Engine: Zero-Churn Update (Active: {len(self.active_signals)}, Insights: {len(insights)})")
-
-        if insights:
-            algorithm.Log(f"Alpha Engine: Zero-Churn Selection (Active: {len(self.active_signals)}, Updates: {len(insights)})")
+            algorithm.Log(f"Alpha: Active={len(self.active_signals)} Insights={len(insights)} "
+                          f"Model={type(active_model).__name__}")
 
         return insights
 
+
+# ============================================================
+# Per-Symbol Feature Builder
+# ============================================================
+
 class SymbolData:
-    def __init__(self, algorithm, symbol, spy_window):
+    def __init__(self, algorithm, symbol, spy_close_window):
         self.symbol = symbol
-        self.algorithm = algorithm
-        self.spy_window = spy_window # Shared reference to AlphaModel's window
-        
-        # 1. Manual Indicators (Pillar 18 Protective Firewall)
+        self.spy_close_window = spy_close_window  # shared reference
+
+        # Indicators
         self.rsi = RelativeStrengthIndex(14)
         self.std20 = StandardDeviation(20)
         self.std5 = StandardDeviation(5)
         self.sma50 = SimpleMovingAverage(50)
         self.sma200 = SimpleMovingAverage(200)
-        
-        # 2. Windows (Parity Lags)
-        self.close_window = RollingWindow[float](253) # For 1y high and 6m mom
-        self.returns_window = RollingWindow[float](2) # For daily return calculation
-        self.vol_history = RollingWindow[float](252) # Pillar 22: For 1y vol-percentile ranking
-        
-        # 3. Warm-up
-        from datetime import timedelta
-        
-        # A. (Optimized) SPY window is now shared. No local history call needed.
 
-        # B. Symbol Warm-up (Fill indicators and close window)
+        # Windows
+        self.close_window = RollingWindow[float](253)
+        self.returns_window = RollingWindow[float](2)
+        self.vol_history = RollingWindow[float](252)
+
+        # Warm-up from history
         history = algorithm.History(symbol, 253, Resolution.Daily)
         if history is not None and len(history) > 0:
             for idx, row in history.iterrows():
-                # Extract close price from the pandas row
                 try:
                     close = float(row['close'])
-                except:
-                    close = float(row[4]) if len(row) > 4 else 0  # Close is typically 4th column
-                
-                # Pillar 18: Nuclear Sanitization (Decimal Resilience)
-                # Rounding to 4 decimals and clamping to institutional range (0.01 to 20,000)
-                # This definitively prevents internal C# overflows in Variance.cs
+                except Exception:
+                    close = float(row[4]) if len(row) > 4 else 0.0
                 close = max(0.01, min(20000.0, round(close, 4)))
-                if np.isfinite(close):
-                    self.close_window.Add(close)
-                    # Update indicators with timestamp
-                    if hasattr(idx, 'tz_localize'):
-                        time = idx
-                    else:
-                        time = idx[1] if isinstance(idx, tuple) else idx
-                
-                    # Pillar 18: Ultimate Numerical Firewall (Indicator Safeguard)
-                    try:
-                        self.rsi.Update(time, close)
-                        
-                        # Pillar 22: Return-Based Volatility (Logic Alignment)
-                        self.returns_window.Add(close)
-                        if self.returns_window.Count >= 2:
-                            ret = (self.returns_window[0] / self.returns_window[1]) - 1.0
-                            ret = max(-0.5, min(0.5, ret))
-                            self.std20.Update(time, ret)
-                            self.std5.Update(time, ret)
-                            
-                            # Pillar 22: Annualized Volatility Tracking (Percentile Proxy)
-                            vol_raw = self.std20.Current.Value * np.sqrt(252)
-                            self.vol_history.Add(vol_raw)
-                            
-                        self.sma50.Update(time, close)
-                        self.sma200.Update(time, close)
-                    except Exception as e:
-                        if "Decimal" in str(e) or "too large" in str(e):
-                            pass
-                        else:
-                            raise e
-
+                if not np.isfinite(close):
+                    continue
+                time = idx[1] if isinstance(idx, tuple) else idx
+                self.close_window.Add(close)
+                try:
+                    self.rsi.Update(time, close)
+                    self.sma50.Update(time, close)
+                    self.sma200.Update(time, close)
+                    self.returns_window.Add(close)
+                    if self.returns_window.Count >= 2:
+                        ret = max(-0.5, min(0.5, (self.returns_window[0] / self.returns_window[1]) - 1.0))
+                        self.std20.Update(time, ret)
+                        self.std5.Update(time, ret)
+                        self.vol_history.Add(self.std20.Current.Value * np.sqrt(252))
+                except Exception:
+                    pass
 
     @property
     def IsReady(self):
-        """Returns True if windows and indicators are sufficiently warmed up for core alpha."""
-        # Pillar 7/29: Strictly require 253 days for 6m mom and 52w high features.
-        # This prevents 'pre-mature' signals that lack full predictive context.
-        return (self.close_window.Count >= 253 and 
-                self.sma50.IsReady and 
-                self.rsi.IsReady and 
-                self.spy_window.IsReady)
-
+        return (self.close_window.Count >= 253 and
+                self.sma50.IsReady and self.rsi.IsReady and
+                self.spy_close_window.Count >= 50)
 
     def Update(self, bar):
-        if bar is not None:
-            # Handle both Bar objects and pandas data
-            if hasattr(bar, 'EndTime'):
-                time = bar.EndTime
-            else:
-                # For pandas/history data, use the index (datetime)
-                time = bar.name if hasattr(bar, 'name') else None
-            
-            close = float(bar['close']) if isinstance(bar, dict) else float(bar.Close) if hasattr(bar, 'Close') else float(bar)
-            
-            # Pillar 18: Nuclear Sanitization (Decimal Resilience - Live)
-            close = max(0.01, min(20000.0, round(close, 4)))
-            
-            if time and np.isfinite(close): 
-                try:
-                    self.rsi.Update(time, close)
-                    # Pillar 22: Return-Based Volatility (Live Alignment)
-                    self.returns_window.Add(close)
-                    if self.returns_window.Count >= 2:
-                        ret = (self.returns_window[0] / self.returns_window[1]) - 1.0
-                        ret = max(-0.5, min(0.5, ret))
-                        self.std20.Update(time, ret)
-                        self.std5.Update(time, ret)
-                        
-                        # Update Vol History (Annualized)
-                        vol_raw = self.std20.Current.Value * np.sqrt(252)
-                        self.vol_history.Add(vol_raw)
-                        
-                    self.sma50.Update(time, close)
-                    self.sma200.Update(time, close)
-                    self.close_window.Add(close)
-                except Exception as e:
-                    if "Decimal" in str(e) or "too large" in str(e):
-                        # Final Suppression for unexpected overflows
-                        pass
-                    else:
-                        raise e
-            elif close > 0:
-                # Log only true outliers to avoid noise
-                pass
-
-    def UpdateSpy(self, spy_bar):
-        if spy_bar:
-            self.spy_window.Add(spy_bar.Close)
-
-    def GetFullFeatures(self):
-        """Calculates 14 of 15 features (excluding earnings_surprise which needs fundamental feed)."""
-        if not (self.rsi.IsReady and self.close_window.IsReady and self.spy_window.IsReady):
-            return None
-            
-        close = self.close_window[0]
-        ret_1d = (close / self.close_window[1]) - 1.0
-        ret_5d = (close / self.close_window[5]) - 1.0
-        ret_10d = (close / self.close_window[10]) - 1.0
-        ret_20d = (close / self.close_window[20]) - 1.0
-        
-        mom3m = (close / self.close_window[63]) - 1.0
-        mom6m = (close / self.close_window[126]) - 1.0
-        
-        # MA Crossover
-        ma50_ratio = (self.sma50.Current.Value / close) - 1.0
-        ma200_ratio = (self.sma200.Current.Value / close) - 1.0
-        ma_cross = 1.0 if ma50_ratio > ma200_ratio else -1.0
-        
-        # CAPM Residual Vol (Simplified Local Regression)
+        if bar is None:
+            return
+        close = float(bar.Close) if hasattr(bar, 'Close') else float(bar['close'])
+        close = max(0.01, min(20000.0, round(close, 4)))
+        if not np.isfinite(close):
+            return
+        time = bar.EndTime if hasattr(bar, 'EndTime') else None
+        if time is None:
+            return
         try:
-            # Safe slice: Ensure we have enough data for the regression
-            win_size = min(60, self.close_window.Count - 1)
-            if win_size < 10: 
-                capm_res_vol = 0.05
-            else:
-                stock_rets = np.array([(self.close_window[i]/self.close_window[i+1])-1 for i in range(win_size)])
-                spy_rets = np.array([(self.spy_window[i]/self.spy_window[i+1])-1 for i in range(win_size)])
-                var_spy = np.var(spy_rets)
-                beta = np.cov(stock_rets, spy_rets)[0][1] / var_spy if var_spy > 1e-9 else 1.0
-                capm_res_vol = np.std(stock_rets - beta * spy_rets)
-        except:
-            capm_res_vol = 0.05
-
-            
-        # Pillar 22: Volatility Percentile (Logic Alignment)
-        # We compute the percentile rank of CURRENT volatility relative to a 252-day window.
-        vol_current = self.std20.Current.Value * np.sqrt(252)
-        vol_perc = 0.5 # Neutral fallback
-        if self.vol_history.Count > 20: 
-            history_list = [x for x in self.vol_history]
-            rank_count = sum(1 for v in history_list if v < vol_current)
-            vol_perc = rank_count / float(len(history_list))
-        
-        # Vol Expansion & Ratios (Pillar 22: Return-Based)
-        vol_exp = self.std5.Current.Value / self.std20.Current.Value if self.std20.Current.Value != 0 else 1.0
-        
-        # All-weather features (value, quality, low-vol, mean-reversion)
-        # short_term_reversal: contrarian — stocks that fell tend to bounce
-        short_term_reversal = -max(-0.5, min(0.5, ret_5d))
-
-        # nearness_52w_low: value proxy — 1.0 = at 52w low, ~0 = far above
-        try:
-            win_size_52 = min(252, self.close_window.Count - 1)
-            min_52w = min(self.close_window[i] for i in range(win_size_52)) if win_size_52 > 0 else close
-            dist_low = (close - min_52w) / max(min_52w, 1e-6)
-            nearness_52w_low = 1.0 / (1.0 + max(0.0, dist_low))
+            self.close_window.Add(close)
+            self.rsi.Update(time, close)
+            self.sma50.Update(time, close)
+            self.sma200.Update(time, close)
+            self.returns_window.Add(close)
+            if self.returns_window.Count >= 2:
+                ret = max(-0.5, min(0.5, (self.returns_window[0] / self.returns_window[1]) - 1.0))
+                self.std20.Update(time, ret)
+                self.std5.Update(time, ret)
+                self.vol_history.Add(self.std20.Current.Value * np.sqrt(252))
         except Exception:
-            nearness_52w_low = 0.5
-
-        # low_vol_score: low volatility anomaly (1 - vol_percentile)
-        low_vol_score = 1.0 - vol_perc
-
-        # quality_score: 60d rolling Sharpe proxy
-        try:
-            win_q = min(60, self.close_window.Count - 1)
-            if win_q >= 20:
-                rets_q = np.array([(self.close_window[i] / self.close_window[i + 1]) - 1.0
-                                   for i in range(win_q)])
-                mean_q = float(np.mean(rets_q))
-                std_q = float(np.std(rets_q))
-                quality_score = max(-5.0, min(5.0, (mean_q / std_q * (252 ** 0.5)) if std_q > 1e-9 else 0.0))
-            else:
-                quality_score = 0.0
-        except Exception:
-            quality_score = 0.0
-
-        return {
-            "f_trend": (0.30 * mom3m * 10.0 + 0.25 * mom6m * 10.0 + 0.25 * ma_cross + 0.20 * ret_1d * 10.0),
-            "ret_1d": ret_1d,
-            "ret_5d": ret_5d,
-            "ret_10d": ret_10d,
-            "ret_20d": ret_20d,
-            "rolling_vol_20": vol_current,
-            "rsi_14": self.rsi.Current.Value,
-            "rsi_overbought": 1.0 if self.rsi.Current.Value > 70 else 0.0,
-            "vol_ratio_5_20": vol_exp,
-            "vol_expansion": vol_exp,
-            "volatility_percentile": vol_perc,
-            "momentum_acceleration": (ret_5d - ret_20d),
-            "capm_residual_vol": capm_res_vol,
-            "dist_from_52w_high": (close / max(self.close_window)) - 1.0,
-            "momentum_6m": mom6m,
-            "down_up_vol_ratio": 1.0,
-            # All-weather features
-            "short_term_reversal": short_term_reversal,
-            "nearness_52w_low": nearness_52w_low,
-            "low_vol_score": low_vol_score,
-            "quality_score": quality_score,
-        }
-
-class SimpleModel:
-    """Fallback model when pickle fails - returns neutral predictions."""
-    def predict_proba(self, X):
-        import numpy as np
-        return np.array([[0.5, 0.5]] * len(X))
-
-def LoadProductionModel(algorithm, model_path="best_long_model.pkl"):
-    """
-    Helper to load the local .pkl or .joblib model into the Lean environment.
-    Prioritizes local project files over Object Store to ensure 'lean cloud push' 
-    updates take effect immediately.
-    """
-    import joblib
-    import io
-    import pickle
-    import os
-    
-    model = None
-    feature_names = None
-    source = "UNKNOWN"
-
-    # Use absolute path relative to this script's location
-    # This is more robust in cloud environments than relative paths
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    full_local_path = os.path.join(base_dir, model_path)
-
-    try:
-        # 0. Diagnostic: Log environment structure
-        try:
-            algorithm.Log(f"DEBUG: Current Directory: {os.getcwd()}")
-            algorithm.Log(f"DEBUG: Script Directory: {base_dir}")
-            algorithm.Log(f"DEBUG: Directory Contents: {', '.join(os.listdir(base_dir))}")
-        except:
             pass
 
-        # 1. Attempt to load from Local Project File First (Pillar 7 Deployment)
-        algorithm.Log(f"Attempting to load model from local project path: {full_local_path}")
-        if os.path.isfile(full_local_path):
-            try:
-                # Try joblib first (modern scikit-learn standard)
-                obj = joblib.load(full_local_path)
-                source = "LOCAL_PROJECT"
-            except Exception as e:
-                # Fallback to standard pickle
-                try:
-                    with open(full_local_path, 'rb') as f:
-                        obj = pickle.load(f)
-                        source = "LOCAL_PROJECT"
-                except Exception as ex:
-                    algorithm.Log(f"Local file found but failed to load: {str(ex)}")
-                    obj = None
+    def GetFullFeatures(self):
+        """Build the 24-feature vector matching best_long_model.pkl training."""
+        if not self.IsReady:
+            return None
+
+        close = self.close_window[0]
+        ret_1d  = (close / self.close_window[1])  - 1.0 if self.close_window.Count > 1  else 0.0
+        ret_5d  = (close / self.close_window[5])  - 1.0 if self.close_window.Count > 5  else 0.0
+        ret_10d = (close / self.close_window[10]) - 1.0 if self.close_window.Count > 10 else 0.0
+        ret_20d = (close / self.close_window[20]) - 1.0 if self.close_window.Count > 20 else 0.0
+        ret_60d = (close / self.close_window[60]) - 1.0 if self.close_window.Count > 60 else 0.0
+        mom3m   = (close / self.close_window[63]) - 1.0 if self.close_window.Count > 63 else 0.0
+        mom6m   = (close / self.close_window[126])- 1.0 if self.close_window.Count > 126 else 0.0
+
+        # Trend composite
+        ma50  = self.sma50.Current.Value
+        ma200 = self.sma200.Current.Value
+        ma_cross = 1.0 if ma50 > ma200 else -1.0
+        f_trend = 0.30 * mom3m * 10.0 + 0.25 * mom6m * 10.0 + 0.25 * ma_cross + 0.20 * ret_1d * 10.0
+
+        # Volatility
+        vol_current = self.std20.Current.Value * np.sqrt(252)
+        vol_5d = self.std5.Current.Value * np.sqrt(252)
+        vol_ratio_5_20 = vol_5d / vol_current if vol_current > 1e-9 else 1.0
+        vol_expansion = vol_ratio_5_20
+
+        # Vol percentile for low_vol_score
+        vol_perc = 0.5
+        if self.vol_history.Count > 20:
+            hist = [self.vol_history[i] for i in range(self.vol_history.Count)]
+            vol_perc = sum(1 for v in hist if v < vol_current) / float(len(hist))
+
+        # RSI
+        rsi_val = self.rsi.Current.Value
+        rsi_overbought = 1.0 if rsi_val > 70 else 0.0
+
+        # 52-week high/low
+        win52 = min(252, self.close_window.Count - 1)
+        prices_52 = [self.close_window[i] for i in range(win52)]
+        high_52w = max(prices_52) if prices_52 else close
+        low_52w  = min(prices_52) if prices_52 else close
+        dist_from_52w_high = (close / high_52w) - 1.0
+        nearness_52w_high  = float(np.clip(close / max(high_52w, 1e-6), 0.0, 1.0))
+        dist_low = (close - low_52w) / max(low_52w, 1e-6)
+        nearness_52w_low = 1.0 / (1.0 + max(0.0, dist_low))
+
+        # CAPM alpha & residual vol (60d rolling regression vs SPY)
+        capm_alpha = 0.0
+        capm_res_vol = 0.05
+        try:
+            win_c = min(60, self.close_window.Count - 1, self.spy_close_window.Count - 1)
+            if win_c >= 20:
+                stock_rets = np.array([(self.close_window[i] / self.close_window[i+1]) - 1.0
+                                       for i in range(win_c)], dtype=float)
+                spy_rets   = np.array([(self.spy_close_window[i] / self.spy_close_window[i+1]) - 1.0
+                                       for i in range(win_c)], dtype=float)
+                var_spy = float(np.var(spy_rets))
+                beta = float(np.cov(stock_rets, spy_rets)[0][1] / var_spy) if var_spy > 1e-9 else 1.0
+                residuals = stock_rets - beta * spy_rets
+                capm_res_vol = float(np.std(residuals))
+                capm_alpha = float(np.mean(residuals) * 252)  # annualized
+        except Exception:
+            pass
+
+        # All-weather features
+        short_term_reversal = float(np.clip(-ret_5d, -0.5, 0.5))
+        low_vol_score = 1.0 - vol_perc
+        win_q = min(60, self.close_window.Count - 1)
+        if win_q >= 20:
+            rets_q = np.array([(self.close_window[i] / self.close_window[i+1]) - 1.0
+                               for i in range(win_q)], dtype=float)
+            std_q = float(np.std(rets_q))
+            quality_score = float(np.clip(np.mean(rets_q) / std_q * np.sqrt(252)
+                                          if std_q > 1e-9 else 0.0, -5.0, 5.0))
         else:
-            algorithm.Log(f"Local project file not found at {full_local_path}. Checking Object Store...")
-            obj = None
+            quality_score = 0.0
 
-        # 2. Fallback to Object Store (Recommended only for large persistent caches)
-        if obj is None:
-            algorithm.Log(f"Locating model in Object Store: {model_path}")
-            if algorithm.ObjectStore.ContainsKey(model_path):
-                model_bytes = algorithm.ObjectStore.ReadBytes(model_path)
-                try:
-                    obj = joblib.load(io.BytesIO(model_bytes))
-                    source = "OBJECT_STORE"
-                except:
-                    obj = pickle.loads(bytes(model_bytes))
-                    source = "OBJECT_STORE"
-            else:
-                algorithm.Error(f"CRITICAL: Model '{model_path}' not found in local project or Object Store.")
-                return (SimpleModel(), None)
+        # down_up_vol_ratio: proxy using return sign (rolling 20-day)
+        # (proper version needs per-day volume — approximate as 1.0)
+        down_up_vol_ratio = 1.0
 
-        # 3. Unpack Estimator and Features (Artifact Dictionary Support)
-        if isinstance(obj, dict) and "estimator" in obj:
-            algorithm.Log(f"Successfully unpacked estimator and metadata from {source} artifact.")
-            feature_names = obj.get("feature_columns")
-            model = obj["estimator"]
-        else:
-            algorithm.Log(f"Loaded raw model (no metadata) from {source}.")
-            model = obj
-            feature_names = None
-        
-        # 4. Final Validation
-        if model is not None:
-            if hasattr(model, "predict_proba") or hasattr(model, "predict"):
-                feat_count = len(feature_names) if feature_names else "UNKNOWN"
-                algorithm.Log(f"PRODUCTION MODEL READY: Type={type(model).__name__} | Features={feat_count} | Source={source}")
-                return (model, feature_names)
-            else:
-                algorithm.Error(f"Loaded object from {source} is not a valid predictor: {type(model)}")
-                return (SimpleModel(), None)
-        
-        return (SimpleModel(), None)
-            
-    except Exception as e:
-        algorithm.Error(f"UNEXPECTED ERROR in LoadProductionModel: {str(e)}")
-        import traceback
-        algorithm.Log(traceback.format_exc())
-        return (SimpleModel(), None)
+        # momentum_acceleration
+        momentum_acceleration = ret_5d - ret_10d
 
-
-
+        return {
+            # Core momentum & trend
+            "f_trend":                f_trend,
+            "ret_1d":                 ret_1d,
+            "ret_5d":                 ret_5d,
+            "ret_10d":                ret_10d,
+            "ret_20d":                ret_20d,
+            "momentum_6m":            mom6m,           # used for cs_momentum_percentile
+            "ret_60d":                ret_60d,          # used for sector_relative_60d
+            # Volatility
+            "rolling_vol_20":         vol_current,
+            "vol_ratio_5_20":         vol_ratio_5_20,
+            "vol_expansion":          vol_expansion,
+            # RSI & mean-reversion
+            "rsi_14":                 rsi_val,
+            "rsi_overbought":         rsi_overbought,
+            "momentum_acceleration":  momentum_acceleration,
+            "down_up_vol_ratio":      down_up_vol_ratio,
+            # 52-week proximity
+            "dist_from_52w_high":     dist_from_52w_high,
+            "nearness_52w_high":      nearness_52w_high,
+            "nearness_52w_low":       nearness_52w_low,
+            # CAPM
+            "capm_residual_vol":      capm_res_vol,
+            "capm_alpha":             capm_alpha,
+            # All-weather
+            "short_term_reversal":    short_term_reversal,
+            "low_vol_score":          low_vol_score,
+            "quality_score":          quality_score,
+            # Sector relative (computed in Update from panel)
+            "sector_relative_20d":    0.0,  # overwritten in Update()
+            "sector_relative_60d":    0.0,  # overwritten in Update()
+            # cs_momentum_percentile overwritten in Update()
+            "cs_momentum_percentile": 0.5,
+        }
