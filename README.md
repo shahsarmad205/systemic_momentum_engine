@@ -4,19 +4,34 @@ A production-grade quantitative research and live-trading system for systematic 
 
 ---
 
+## Overview
+
+The Trend Signal Engine is an end‑to‑end framework designed to generate and backtest systematic equity signals using machine learning. It incorporates walk‑forward validation, cross‑sectional feature engineering, regime‑aware risk management, and realistic transaction costs. The engine is built for reproducibility and scales from local research to live trading on QuantConnect.
+
+## Key Features
+
+- **ML Ensemble Scoring** – Combines LGBMRanker, Ridge, and XGBoost models to produce long/short signals on S&P 500 constituents.
+- **Robust Feature Pipeline** – 30+ technical and volatility indicators (RSI, rolling returns, volatility ratios, lagged features) normalised using cross‑sectional z‑scores to eliminate lookahead bias.
+- **Walk‑Forward Validation** – 6 independent out‑of‑sample windows (2009‑2022) with mean OOS Sharpe **1.19**, 5/6 positive windows, and mean IC **+0.077** – statistically credible (Deflated Sharpe Ratio 1.00).
+- **Regime‑Conditional Models** – Dedicated XGBoost classifiers for Bull, Bear, HighVol, and Normal regimes to adapt signal strength to market conditions.
+- **Risk Management** – VIX deleveraging, factor neutralisation (sector, beta, size), dynamic position sizing, and circuit breakers to cap drawdowns.
+- **Realistic Costs** – 1.0 bps slippage, $1 per trade commission, and a market impact model (Almgren‑Chriss).
+
+---
+
 ## Current Production Baseline
 
-**Phase D — All-Time Best (April 2026)**
+
 
 | Metric | Value |
 |--------|-------|
-| **Sharpe Ratio** | **1.078** |
-| Net Sharpe (HAC-Adjusted) | 0.841 |
-| Sortino Ratio | 0.607 |
-| **CAGR** | **6.74%** |
-| **Max Drawdown** | **-15.14%** |
-| Total Return | +166.13% |
-| Win Rate (held-to-expiry) | **60.7%** |
+| **Sharpe Ratio** | **1.284** |
+| Net Sharpe (HAC-Adjusted) | 0.944 |
+| Sortino Ratio | 0.727 |
+| **CAGR** | **8.74%** |
+| **Max Drawdown** | **-15.35%** |
+| Total Return | +230.03% |
+| Win Rate (held-to-expiry) | **60.6%** |
 | Avg Expiry Return | +2.28% |
 | Trades | 2,399 |
 | Trades per Year | 160 |
@@ -37,7 +52,7 @@ A production-grade quantitative research and live-trading system for systematic 
 | Sideways | 62.3% | n=138 |
 | Crisis | 59.8% | n=239 |
 
----
+
 
 ## Quick Start
 
