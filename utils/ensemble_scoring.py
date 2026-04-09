@@ -103,7 +103,7 @@ def load_ensemble_models(ensemble_cfg: dict[str, Any]) -> list[LoadedEnsembleMod
             continue
         w = float(m.get("weight", 0.0) or 0.0)
         t = str(m.get("type") or "classifier").strip().lower()
-        if t not in ("classifier", "regressor", "short_classifier"):
+        if t not in ("classifier", "regressor", "short_classifier", "short_regressor"):
             t = "classifier"
         pp = Path(p)
         if not pp.is_absolute():
@@ -183,7 +183,26 @@ def _predict_model(model: LoadedEnsembleModel, features_df: pd.DataFrame, clip: 
             if clip:
                 s = s.clip(-1.0, 1.0)
             return s
-            
+
+        if model.model_type == "short_regressor":
+            # Regressor predicts expected forward_return directly.
+            # Negative predicted return = expected price decline = strong short candidate.
+            # No negation: cross_sectional.py selects lowest score (most negative) first.
+            #
+            # Backward-compat: if the saved artifact is still the old XGBClassifier
+            # (has predict_proba), convert p_down to a negative score so ascending sort
+            # in cross_sectional.py still picks the strongest short candidates.
+            if hasattr(est, "predict_proba"):
+                proba = est.predict_proba(X)
+                p_down = np.asarray(proba)[:, 1] if np.asarray(proba).ndim == 2 else np.asarray(proba)
+                y = -(2.0 * p_down - 1.0)   # p_down=0.9 → -0.8 (most negative = best short)
+            else:
+                y = np.asarray(est.predict(X), dtype=float)
+            s = pd.Series(y, index=features_df.index, dtype=float)
+            if clip:
+                s = s.clip(-0.3, 0.3)
+            return s
+
         # Auto-detect classifiers passed with type="regressor".
         # RandomForestClassifier / GradientBoostingClassifier etc. expose
         # predict_proba; calling .predict() returns binary {0,1} labels which

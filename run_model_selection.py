@@ -1835,6 +1835,22 @@ def main() -> None:
             ic_floor = full_pool["oos_ic_chained"].apply(lambda x: float(x) if np.isfinite(float(x)) else -999)
             full_pool = full_pool[ic_floor >= 0.0].copy()
         if full_pool.empty: return full_pool
+        # Dir acc guard: discard models with directional accuracy < 0.5.
+        # Dir acc < 0.5 means the model is inversely correlated with actual returns —
+        # averaging its raw predictions in a VotingRegressor corrupts the ensemble signal.
+        if "oos_dir_acc_mean" in full_pool.columns:
+            dir_acc = full_pool["oos_dir_acc_mean"].apply(lambda x: float(x) if np.isfinite(float(x)) else 0.0)
+            full_pool = full_pool[dir_acc >= 0.50].copy()
+        if full_pool.empty: return full_pool
+        # Stability guard: require mean(Sharpe) - std(Sharpe) > 0.
+        # A model that crashes in any single window (std > mean) is too volatile for production.
+        # This exposes models with one lucky window (e.g. Sharpe=3.8 in 2021 bull + 1.0 in 2020)
+        # and favors models with consistent performance across diverse regimes.
+        if "oos_sharpe_mean" in full_pool.columns and "oos_sharpe_std" in full_pool.columns:
+            s_mean = full_pool["oos_sharpe_mean"].apply(lambda x: float(x) if np.isfinite(float(x)) else -999)
+            s_std = full_pool["oos_sharpe_std"].apply(lambda x: float(x) if np.isfinite(float(x)) else 999)
+            full_pool = full_pool[(s_mean - s_std) > 0.0].copy()
+        if full_pool.empty: return full_pool
         # Type-Consistency Lockdown: Anchor to the #1 winner's type
         anchor_kind = full_pool.iloc[0]["model_kind"]
         consistent = full_pool[full_pool["model_kind"] == anchor_kind].head(size)
