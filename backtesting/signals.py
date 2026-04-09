@@ -270,6 +270,26 @@ class SignalEngine:
         """C2: Called by the backtester each day to route predictions to the regime-specific model."""
         self._current_regime = str(regime) if regime else "Normal"
 
+    def _get_fundamental_features(self, ticker: str, index: pd.DatetimeIndex) -> pd.DataFrame:
+        """Return Piotroski F-score + accruals DataFrame aligned to index.
+        Caches per ticker per backtest run. Falls back to zeros on any error.
+        """
+        _FUND_COLS = ["f_score", "accruals_ratio", "roa", "delta_roa", "delta_leverage"]
+        zeros = pd.DataFrame(0.0, index=index, columns=_FUND_COLS)
+        if not ticker:
+            return zeros
+        if not hasattr(self, "_fundamental_cache"):
+            self._fundamental_cache: dict[str, pd.DataFrame] = {}
+        if ticker not in self._fundamental_cache:
+            try:
+                from features.fundamental_builder import fetch_fundamental_features
+                df = fetch_fundamental_features(ticker, index)
+                self._fundamental_cache[ticker] = df.reindex(index).fillna(0.0)
+            except Exception:
+                self._fundamental_cache[ticker] = zeros.copy()
+        cached = self._fundamental_cache[ticker]
+        return cached.reindex(index).fillna(0.0)
+
     # ==============================================================
     # Core: vectorised price-based signals (trend + volatility)
     # ==============================================================
@@ -620,7 +640,7 @@ class SignalEngine:
                         {
                             "path": str(getattr(self.config, "ml_short_model_path", "") or "").strip(),
                             "weight": float(getattr(self.config, "ml_short_weight", 0.5)),
-                            "type": "short_classifier",
+                            "type": "short_regressor",   # regressor on forward_return; lower score = stronger short
                         }
                     ],
                     "normalize": False,
@@ -750,6 +770,11 @@ class SignalEngine:
                     "dollar_volume_20d": (
                         (stock_data["Close"] * stock_data["Volume"]).rolling(20).mean().shift(1)
                     ).fillna(0.0),
+                    # Fundamental features: Piotroski F-score + accruals (point-in-time, 45d lag)
+                    **{
+                        col: self._get_fundamental_features(ticker, features.index)[col]
+                        for col in ["f_score", "accruals_ratio", "roa", "delta_roa", "delta_leverage"]
+                    },
                 },
                 index=features.index,
             )
@@ -761,36 +786,13 @@ class SignalEngine:
                 long_model = next(
                     (m for m in self._ensemble_models_cache if m.model_type in ("classifier", "regressor")), None
                 )
-                short_model = next((m for m in self._ensemble_models_cache if m.model_type == "short_classifier"), None)
+                short_model = next((m for m in self._ensemble_models_cache if m.model_type in ("short_classifier", "short_regressor")), None)
                 
                 long_score = pd.Series(0.0, index=features.index)
                 short_score = pd.Series(0.0, index=features.index)
                 short_score_raw = pd.Series(0.0, index=features.index)  # ungated — used for CS short ranking
 
                 from utils.ensemble_scoring import _predict_model, LoadedEnsembleModel
-
-                # C2: regime-conditional model routing — only activate for Bear/Crisis/HighVol.
-                # Bull and Normal (80%+ of days) keep the superior general VotingRegressor
-                # since regime-specific XGBClassifiers are weaker single models.
-                _C2_REGIMES = {"Bear", "Crisis", "HighVol"}
-                regime_models_dir = str(getattr(self.config, "ml_regime_models_dir", "") or "").strip()
-                if regime_models_dir and long_model and self._current_regime in _C2_REGIMES:
-                    import os
-                    _regime_key = self._current_regime  # "Bear", "Crisis", or "HighVol"
-                    _regime_fname = {
-                        "Bear": "bear",
-                        "HighVol": "highvol", "Crisis": "highvol",
-                    }.get(_regime_key, "normal")
-                    _regime_path = os.path.join(regime_models_dir, f"xgb_regime_{_regime_fname}.pkl")
-                    if _regime_key not in self._regime_model_cache:
-                        if os.path.isfile(_regime_path):
-                            _r_loaded = load_ensemble_models({"models": [{"path": _regime_path, "weight": 1.0, "type": "classifier"}]})
-                            self._regime_model_cache[_regime_key] = _r_loaded[0] if _r_loaded else None
-                        else:
-                            self._regime_model_cache[_regime_key] = None
-                    _regime_model = self._regime_model_cache.get(_regime_key)
-                    if _regime_model is not None:
-                        long_model = _regime_model
 
                 if long_model:
                     long_score = _predict_model(long_model, model_features, clip=bool(ens_cfg.get("clip", False)))

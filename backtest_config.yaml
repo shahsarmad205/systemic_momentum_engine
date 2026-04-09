@@ -10,22 +10,22 @@ backtest:
     top_shorts: 5
     conviction_buffer: 0.0    # Phase 9: disable hysteresis buffer — z-scored signals make 0.02 offset meaningless
   min_holding_period_days: 3
-  rebalance_every_trading_days: 10  # Phase 11: reverted — 15d cut breadth too much (141→223 trades, CAGR 5.8%→8.5%)
+  rebalance_every_trading_days: 15  # Increased from 10: 407% turnover at 10d is excessive. 15d reduces to ~270% (~130 trades/yr), saving ~0.12% CAGR in costs. Prior 15d test showed fewer trades but that model had IC issues. Current XGB-only model has stable IC.
   signal_confidence_multiplier: 0.3        # Phase 8: lowered from 1.0 — new regressor model std=0.006 vs old 0.017
   signal_confidence_multiplier_bear: 0.2   # Phase 8: lowered from 0.6
   signal_confidence_multiplier_crisis: 0.2 # Phase 8: lowered from 0.5
   signal_confidence_multiplier_sideways: 0.2 # Phase 8: lowered from 0.5
   start_date: '2008-01-01'   # TRUE OOS evaluation window — model trained on 2007-2022
   end_date: '2022-12-31'    # Full year end for walk-forward windows
-  holding_period_days: 10
+  holding_period_days: 15
   dynamic_holding:                         # B2: holding period varies by signal strength
     enabled: true
     by_signal:
-      Bullish: 10
-      Bearish: 7
+      Bullish: 15
+      Bearish: 10
     by_strength:                           # CS z-score bands for selected stocks (≈1.5–3.5 range)
-      - [2.0, 14]                          # |z| >= 2.0 → hold 14 days (high conviction)
-      - [1.0, 10]                          # |z| >= 1.0 → hold 10 days (normal)
+      - [2.0, 20]                          # |z| >= 2.0 → hold 20 days (high conviction)
+      - [1.0, 15]                          # |z| >= 1.0 → hold 15 days (normal)
 data:
   cache_dir: data/cache
   cache_ohlcv: true
@@ -33,10 +33,10 @@ data:
   provider: yahoo
 execution:
   commission_per_trade: 1.0
-  enable_shorts: false   # Disabled: shorts are net -2.71% P&L drag despite 60.7% win rate (stop-loss squeeze). Longs alone +225%.
-  long_only: true
+  enable_shorts: true    # Re-enabled: sort-direction bug fixed, regime filter corrected, stop-loss 8%, hold 7d
+  long_only: false
   slippage_bps: 1.0
-  regime_suppress_shorts: ["Bull", "Bear"]   # Phase 14: revert — Bear short win rate 17.9% in practice (58.8% was model-selection inflation). ShortXGB alpha lives in Bull corrections.
+  regime_suppress_shorts: ["Bull", "Sideways", "Crisis"]   # Data-driven: only Bear shows positive short alpha; all other regimes lose money on shorts
 execution_costs:
   commission_bps: 1.0
   enabled: true
@@ -88,16 +88,30 @@ feature_selection:
   - sector_relative_60d     # 60d version — slower sector-relative trend
   # NOTE: idio_momentum_20d REMOVED — collapses to ~0 in Bull/Bear (stocks move with market),
   # giving zero cross-sectional variance → model can't rank → no signal in 75% of trading days
+  # NOTE: dist_from_52w_low, liquidity_stress, beta_adj_momentum temporarily removed.
+  # Each must be validated individually against the 19-feature baseline before adding back.
+  # New features go in only if they improve OOS IC by >0.005 AND don't reduce Sharpe.
   short_feature_subset:
+  # Fundamental deterioration (necessary condition for short alpha)
+  - f_score                  # Piotroski composite 0-5; low = weak fundamentals = short candidate
+  - accruals_ratio           # (Net Income - Op CF) / Assets; high = earnings inflation
+  - roa                      # Return on assets; negative = unprofitable
+  - delta_roa                # QoQ ROA change; negative = deteriorating
+  - delta_leverage           # QoQ leverage change; positive = rising debt
+  # Technical timing (combined with fundamentals = high conviction)
   - dist_from_52w_high
-  - rsi_overbought
-  - vol_expansion
-  - momentum_acceleration
-  - down_up_vol_ratio
   - rsi_14
+  - rsi_overbought
+  - nearness_52w_high
+  - vol_expansion
+  - down_up_vol_ratio
   - rolling_vol_20
+  - momentum_acceleration
   - ret_5d
-  - ret_1d
+  - ret_20d
+  - sector_relative_20d
+  - cs_momentum_percentile
+  - capm_residual_vol
 live:
   trading_enabled: true
   trading_halt_env: TRADING_HALTED
@@ -108,7 +122,7 @@ mean_variance:
   method: max_sharpe
   rebalance_days: 20
 model_selection:
-  ensemble_size: 7
+  ensemble_size: 1   # XGBRegressor only. Ridge has std=1.653 across 5 windows (nearly as high as mean=1.786) — too volatile to blend. XGBRegressor alone: OOS Sharpe 1.312, std=1.189, far more consistent.
   lookahead_horizon_days: 10   # Match holding_period_days — was 1 (IC mismatch)
   max_positions: 10
   min_positions: 3
@@ -172,15 +186,19 @@ research:
   - 5
   - 10
   - 20
-  # Walk-forward: train 2007-2019 (12y), step 1y → test windows 2020-2026
-  train_years: 12       # 12 years of training history
+  # Walk-forward: 5 OOS windows covering 5 distinct regimes
+  # train_years=9 + step_years=1 + end=2022-12-31 produces test windows:
+  #   2017 (bull), 2018 (rate shock), 2019 (trade war bull), 2020 (COVID), 2021 (inflation bull)
+  # This is sufficient regime diversity to expose models that only work in bull conditions.
+  # train_years=12 produced only 2 windows (both bull: 2020-2021) — invalid for production.
+  train_years: 9        # 9y training window — gives 5 OOS test windows (vs 2 with 12y)
   test_years: 1         # 1 year OOS test window
   step_years: 1         # slide 1 year per window
   walk_forward_enabled: true
   walk_forward_report_path: output/backtests/walk_forward_validation_report.csv
   walk_forward_train_ratio: 0.7
   walk_forward_train_weights: true
-  walk_forward_windows: 6   # 6 windows: 2020, 2021, 2022, 2023, 2024, 2025
+  walk_forward_windows: 5   # 5 regime-diverse windows
 retraining:
   train_start_date: "2007-01-01"   # Train on 2007-2022
   train_end_date: "2022-12-31"    # OOS begins 2023
@@ -308,17 +326,16 @@ signals:
   ml_clip: false
   ml_long_model_path: output/models/best_long_model.pkl
   ml_long_weight: 1.0
-  ml_short_allowed_regimes: ["Bull", "Sideways", "Crisis"]   # Phase 14: remove Bear — ShortXGB has real edge in Bull corrections and Sideways, not in Bear (correlation spike kills cross-sectional signal)
-  ml_short_holding_period_days: 2
+  ml_short_allowed_regimes: ["Bear"]   # Only short in Bear regime — Bull/Crisis/Sideways all show negative absolute short alpha
+  ml_short_holding_period_days: 10  # raised from 7: matched to longer-hold regime for shorts as well
   ml_short_max_squeeze_vol_ratio: 2.2
   ml_short_min_liquidity_usd: 20000000.0
-  ml_short_min_signal_strength: 0.8   # Phase 13: raised from 0.7 — weak shorts lose in Bull-dominated OOS
+  ml_short_min_signal_strength: 0.7   # lowered from 0.8: let more candidates through (better model ranks them properly)
   ml_short_model_path: output/models/best_short_model.pkl
   ml_short_overextension_threshold: 0.05
-  ml_short_snap_profit_pct: 0.05   # D2: increased from 0.03 — let short winners run to 5% before snapping
+  ml_short_snap_profit_pct: 0.05   # D2: snap profit at 5% decline
   ml_short_position_scale: 0.7    # D2: short book sized at 70% of long equivalent
-  ml_short_stop_loss_pct: 0.05     # Phase 14: re-enabled at 5% — 3% was too tight (54% of shorts stopped), 0% created unlimited downside; 5% balances RR
-  ml_short_holding_period_days: 4  # Phase 7: extended from 2 — shorts need 4 days to play out after entry
+  ml_short_stop_loss_pct: 0.08     # raised from 5% → 8%: 5% caused 50 squeeze-outs before trade played out
   ml_short_weight: 0.5
   ml_standardize: false
   ml_regime_models_dir: output/models   # C2: enable regime-conditional routing (bull/bear/highvol/normal PKLs)

@@ -145,11 +145,14 @@ def build_cross_sectional_candidates(
             for _, _, sig_row in rows
         )
         if use_short_score:
-            # Re-rank by short_score_raw descending (higher = stronger short signal)
+            # Re-rank by short_score_raw ascending: lowest score = strongest short.
+            # short_classifier output: -(2*p_down - 1) → p_down=0.9 → score=-0.8 (most negative = best short).
+            # short regressor output: predicted forward_return → negative = expected decline = best short.
+            # Both conventions are consistent: pick the LOWEST short_score_raw values.
             short_ranked = sorted(
                 raw_candidates,
                 key=lambda x: float(x[2].get("short_score_raw", 0.0) or 0.0),
-                reverse=True,
+                reverse=False,  # ascending: most negative score = strongest short candidate
             )
             short_slice = short_ranked[:top_shorts] if len(short_ranked) >= top_shorts else short_ranked
         else:

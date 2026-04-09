@@ -57,6 +57,26 @@ HISTORY_BUFFER_DAYS = 400
 MARKET_TICKER = "SPY"  # for rolling correlation feature
 
 
+def _fetch_fundamental_cols(ticker: str, dates: pd.DatetimeIndex) -> dict:
+    """
+    Return a dict of fundamental feature Series for the given ticker and dates.
+    Keys: f_score, accruals_ratio, roa, delta_roa, delta_leverage
+    Falls back to 0.0 on any error — never blocks training.
+    """
+    try:
+        from features.fundamental_builder import fetch_fundamental_features
+        fund_df = fetch_fundamental_features(ticker, dates)
+        return {col: fund_df[col] for col in fund_df.columns}
+    except Exception:
+        return {
+            "f_score": pd.Series(0.0, index=dates),
+            "accruals_ratio": pd.Series(0.0, index=dates),
+            "roa": pd.Series(0.0, index=dates),
+            "delta_roa": pd.Series(0.0, index=dates),
+            "delta_leverage": pd.Series(0.0, index=dates),
+        }
+
+
 def _fetch_earnings_surprise(ticker: str, dates: pd.DatetimeIndex) -> pd.Series:
     """
     C1: Pull quarterly EPS surprise from yfinance and forward-fill within each quarter.
@@ -557,8 +577,23 @@ def _build_features_for_ticker(
 
         # 52w low proximity (value proxy: 1.0 = at 52w low, ~0 = far above)
         min_52w = close.rolling(252, min_periods=60).min().replace(0, np.nan)
-        dist_from_52w_low = ((close - min_52w) / min_52w.clip(lower=1e-6)).clip(0, 10)
+        dist_from_52w_low = ((close - min_52w) / min_52w.clip(lower=1e-6)).clip(0, 10).shift(1)
         nearness_52w_low = 1.0 / (1.0 + dist_from_52w_low)
+
+        # Liquidity stress: Parkinson intraday range estimator (Bear/Crisis regime feature)
+        # (High - Low) / Close z-scored vs own 252d history. Spikes in bear/crisis when
+        # market makers widen spreads and intraday swings increase.
+        high = data["High"].reindex(features.index)
+        low = data["Low"].reindex(features.index)
+        parkinson_raw = ((high - low) / close.replace(0, np.nan)).clip(0, 0.25)
+        pk_mean = parkinson_raw.rolling(252, min_periods=60).mean()
+        pk_std = parkinson_raw.rolling(252, min_periods=60).std(ddof=0).replace(0, np.nan).fillna(1e-6)
+        liquidity_stress = ((parkinson_raw - pk_mean) / pk_std).clip(-4, 4).shift(1)
+
+        # Beta-adjusted momentum: rewards low-beta stocks that hold up in bear regimes.
+        # ret_20d divided by capm_beta — defensive names (beta < 1) get a higher score.
+        beta_safe = capm_beta.clip(lower=0.3, upper=3.0)
+        beta_adj_momentum = (ret_20d / beta_safe).clip(-2, 2).shift(1)
 
         # 52w high proximity (momentum signal: George & Hwang 2004).
         # 1.0 = stock AT 52w high (strong trend continuation signal for longs).
@@ -625,13 +660,19 @@ def _build_features_for_ticker(
                 "vol_expansion": vol_expansion,
                 "momentum_acceleration": momentum_acceleration,
                 "down_up_vol_ratio": down_up_vol_ratio,
+                # Fundamental features (Piotroski F-score + accruals) — point-in-time lagged 45d
+                **_fetch_fundamental_cols(ticker, features.index),
                 # All-weather features (value, quality, low-vol, mean-reversion)
                 "short_term_reversal": short_term_reversal,
                 "nearness_52w_low": nearness_52w_low,
+                "dist_from_52w_low": dist_from_52w_low,
                 "nearness_52w_high": nearness_52w_high,
                 "idio_momentum_20d": idio_momentum_20d,
                 "low_vol_score": low_vol_score,
                 "quality_score": quality_score,
+                # Bear/Crisis regime-specific features
+                "liquidity_stress": liquidity_stress,
+                "beta_adj_momentum": beta_adj_momentum,
                 "forward_return": forward_ret,
                 "forward_return_risk_adj": forward_ret_risk_adj,  # C3: risk-adjusted target
             },
@@ -705,6 +746,43 @@ def build_feature_matrix(
     except Exception:
         spy = None
         market_ret = None
+
+    # Regime-specific macro features — date-level, identical across tickers per date.
+    # Point-in-time safe: all shift(1) before attaching to result.
+    credit_spread_proxy = pd.Series(dtype=float)   # HYG vs IEF: widening = risk-off
+    yield_curve_slope   = pd.Series(dtype=float)   # 10y - 3m yield: inverted = recession
+    try:
+        hyg = _download("HYG", dl_start, dl_end)   # iShares High Yield Corp Bond ETF
+        ief = _download("IEF", dl_start, dl_end)   # iShares 7-10y Treasury ETF
+        if not hyg.empty and not ief.empty:
+            hyg_ret = hyg["Close"].pct_change()
+            ief_ret = ief["Close"].pct_change()
+            # IEF outperforming HYG = credit spreads widening = bear/crisis signal
+            spread = (ief_ret - hyg_ret).reindex(hyg_ret.index.union(ief_ret.index)).ffill()
+            cs_m = spread.rolling(60, min_periods=20).mean()
+            cs_s = spread.rolling(60, min_periods=20).std(ddof=0).replace(0, np.nan).fillna(1e-6)
+            credit_spread_proxy = ((spread - cs_m) / cs_s).clip(-4, 4).shift(1)
+    except Exception:
+        pass
+
+    try:
+        tnx_raw = get_ohlcv(
+            "^TNX", dl_start.strftime("%Y-%m-%d"), dl_end.strftime("%Y-%m-%d"),
+            provider="yahoo", use_cache=True, cache_ttl_days=1,
+        )
+        irx_raw = get_ohlcv(
+            "^IRX", dl_start.strftime("%Y-%m-%d"), dl_end.strftime("%Y-%m-%d"),
+            provider="yahoo", use_cache=True, cache_ttl_days=1,
+        )
+        if tnx_raw is not None and irx_raw is not None and not tnx_raw.empty and not irx_raw.empty:
+            tnx = pd.to_numeric(tnx_raw["Close"], errors="coerce").dropna()
+            irx = pd.to_numeric(irx_raw["Close"], errors="coerce").dropna()
+            slope_raw = (tnx - irx.reindex(tnx.index).ffill())  # 10y minus 3m (pct)
+            yc_m = slope_raw.rolling(252, min_periods=60).mean()
+            yc_s = slope_raw.rolling(252, min_periods=60).std(ddof=0).replace(0, np.nan).fillna(1e-6)
+            yield_curve_slope = ((slope_raw - yc_m) / yc_s).clip(-4, 4).shift(1)
+    except Exception:
+        pass
 
     # Macro inputs (VIX + SPY realised vol ratios) for learned-weight GBR.
     # These are shifted by 1 to avoid look-ahead (values for date t
@@ -838,6 +916,21 @@ def build_feature_matrix(
             )
         else:
             result["vix_term_zscore"] = 0.0
+
+        # Bear/Crisis regime macro features — date-level, same value for all tickers on a date.
+        if not credit_spread_proxy.empty:
+            result["credit_spread_proxy"] = (
+                result["date"].map(credit_spread_proxy.to_dict()).astype(float).fillna(0.0)
+            )
+        else:
+            result["credit_spread_proxy"] = 0.0
+
+        if not yield_curve_slope.empty:
+            result["yield_curve_slope"] = (
+                result["date"].map(yield_curve_slope.to_dict()).astype(float).fillna(0.0)
+            )
+        else:
+            result["yield_curve_slope"] = 0.0
 
         # Macro levels are identical across tickers per date; CS z collapses to ~0 — kept for spec / symmetry.
         result = _apply_cross_sectional_zscore_columns(result, ["vix_zscore", "vol_spike"])
