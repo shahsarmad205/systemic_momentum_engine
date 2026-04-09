@@ -25,13 +25,13 @@ The Trend Signal Engine is an end‑to‑end framework designed to generate and 
 
 | Metric | Value |
 |--------|-------|
-| **Sharpe Ratio** | **1.284** |
+| **Sharpe Ratio** | **1.252** |
 | Net Sharpe (HAC-Adjusted) | 0.944 |
-| Sortino Ratio | 0.727 |
-| **CAGR** | **8.74%** |
-| **Max Drawdown** | **-15.35%** |
+| Sortino Ratio | 0.905 |
+| **CAGR** | **11.55%** |
+| **Max Drawdown** | **-17.88%** |
 | Total Return | +230.03% |
-| Win Rate (held-to-expiry) | **60.6%** |
+| Win Rate (held-to-expiry) | **58.7%** |
 | Avg Expiry Return | +2.28% |
 | Trades | 2,399 |
 | Trades per Year | 160 |
@@ -47,10 +47,10 @@ The Trend Signal Engine is an end‑to‑end framework designed to generate and 
 
 | Regime | Win Rate | Sample |
 |--------|----------|--------|
-| Bull | 60.6% | n=1,663 |
-| Bear | 70.0% | n=10 |
-| Sideways | 62.3% | n=138 |
-| Crisis | 59.8% | n=239 |
+| Bull | 65.6% | n=1019 |
+| Bear | 40.9%  | n=44 |
+| Sideways | 68.8% | n=77 |
+| Crisis | 56.4% | n=165 |
 
 
 
