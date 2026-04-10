@@ -1,14 +1,14 @@
 # ============================================================
 # QuantConnect (Lean SDK) — Main Algorithm
 # ============================================================
-# Synced with trend_signal_engine Phase A-D improvements.
-# Phases implemented:
-#   A1: Cross-sectional z-scores in qc_alpha_model.py
-#   A3: 24-feature alignment with best_long_model.pkl
-#   C2: Regime-conditional routing (Bear → xgb_regime_bear.pkl,
-#       Crisis/HighVol → xgb_regime_highvol.pkl)
-#   D1: Continuous regime score → linear gross cap scaling
-#   D3: Sharpe circuit breaker (60d rolling Sharpe)
+# Synced with trend_signal_engine local backtest state.
+#
+# Key alignment with local system:
+#   - Global model only (no regime routing — was proven to hurt Sharpe)
+#   - InsightWeighting for signal-strength based sizing (not equal weight)
+#   - 21 calendar days rebalance (~15 trading days, matches local config)
+#   - 12 long positions (matches top_longs: 12)
+#   - D3: Sharpe circuit breaker preserved
 # ============================================================
 
 try:
@@ -30,34 +30,36 @@ class TrendSignalAlgorithm(QCAlgorithm):
         self.SetCash(100000)
         self.SetWarmUp(0)
 
-        # 2. Universe Selection
+        # 2. Universe Selection — top 500 by dollar volume, price > $10, ADV > $100M
         self.UniverseSettings.Resolution = Resolution.Daily
         self.AddUniverse(self.CoarseSelectionFunction)
 
         # 3. Benchmark
         self.spy = self.AddEquity("SPY", Resolution.Daily).Symbol
 
-        # 4. Load Models
-        long_model    = LoadProductionModel(self, "best_long_model.pkl")
-        bear_model    = LoadProductionModel(self, "xgb_regime_bear.pkl")
-        highvol_model = LoadProductionModel(self, "xgb_regime_highvol.pkl")
+        # 4. Load Global Model Only
+        # NOTE: Regime-conditional routing (Bear/HighVol models) was disabled after
+        # local experiments showed it degrades Sharpe from 1.234 → 0.730.
+        # Bull model IC=0.049 << global IC=0.106 — do NOT re-enable without validated
+        # regime-specific FEATURES (credit_spread × beta interactions), not just weights.
+        long_model = LoadProductionModel(self, "best_long_model.pkl")
 
         # 5. Alpha Model
         self.alpha_model = TrendSignalAlphaModel(
             self,
             long_model,
-            short_model=None,       # long-only for QC deployment
             spy_symbol=self.spy,
-            bear_model_data=bear_model,
-            highvol_model_data=highvol_model,
         )
         self.AddAlpha(self.alpha_model)
 
-        # 6. Portfolio Construction: weekly rebalance
+        # 6. Portfolio Construction
+        # InsightWeighting sizes positions proportional to insight magnitude (ML score),
+        # matching local signal_strength position sizing. Rebalances every ~15 trading
+        # days (21 calendar days).
         self.Settings.RebalancePortfolioOnInsightChanges = False
         self.Settings.RebalancePortfolioOnSecurityChanges = False
-        self.SetPortfolioConstruction(EqualWeightingPortfolioConstructionModel(
-            timedelta(days=7)
+        self.SetPortfolioConstruction(InsightWeightingPortfolioConstructionModel(
+            timedelta(days=21)   # ~15 trading days, matches local rebalance_every_trading_days: 15
         ))
 
         # 7. Execution
@@ -95,21 +97,21 @@ class TrendSignalAlgorithm(QCAlgorithm):
                 if not self._sharpe_cb_active and roll_sharpe < self._sharpe_cb_threshold:
                     self._sharpe_cb_active = True
                     self.Log(f"SHARPE_CB ACTIVATE: 60d Sharpe={roll_sharpe:.2f} < {self._sharpe_cb_threshold:.2f} — "
-                             f"reducing gross cap by {self._sharpe_cb_scale:.0%}")
-                    # Apply CB: reduce top_n in alpha model proportionally
-                    self.alpha_model.top_n = max(1, int(10 * self._sharpe_cb_scale))
+                             f"reducing position count by {1 - self._sharpe_cb_scale:.0%}")
+                    self.alpha_model.top_n = max(1, int(12 * self._sharpe_cb_scale))
 
                 elif self._sharpe_cb_active and roll_sharpe > self._sharpe_cb_recovery:
                     self._sharpe_cb_active = False
                     self.Log(f"SHARPE_CB DEACTIVATE: 60d Sharpe={roll_sharpe:.2f} > {self._sharpe_cb_recovery:.2f} — "
-                             "restoring normal position count")
-                    self.alpha_model.top_n = 10
+                             "restoring 12 positions")
+                    self.alpha_model.top_n = 12
 
     # ----------------------------------------------------------
     def CoarseSelectionFunction(self, coarse):
         """Top-500 liquid universe: Price > $10, DollarVolume > $100M."""
         coarse_list = list(coarse)
         filtered = [x for x in coarse_list if x.Price > 10 and x.DollarVolume > 1e8]
-        self.Log(f"UNIVERSE: Total={len(coarse_list)} | Filtered={len(filtered)}")
         sorted_by_vol = sorted(filtered, key=lambda x: x.DollarVolume, reverse=True)
-        return [x.Symbol for x in sorted_by_vol[:500]]
+        selected = [x.Symbol for x in sorted_by_vol[:500]]
+        self.Log(f"UNIVERSE: Total={len(coarse_list)} | Filtered={len(filtered)} | Selected={len(selected)}")
+        return selected

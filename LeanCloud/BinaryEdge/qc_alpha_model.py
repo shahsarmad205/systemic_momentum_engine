@@ -1,13 +1,17 @@
 # ============================================================
 # QuantConnect (Lean SDK) — ML Alpha Model
 # ============================================================
-# Synced with trend_signal_engine backtesting pipeline.
-# Implements all Phase A-D improvements:
-#   A1: Cross-sectional z-scores at inference
-#   A2: Short model drives short selection (long-only mode here)
-#   A3: Full 23-feature alignment with best_long_model.pkl (earnings_surprise removed)
-#   C2: Regime-conditional routing for Bear/Crisis/HighVol
-#   D1: Continuous regime score → linear gross exposure scaling
+# Aligned with local trend_signal_engine backtest.
+#
+# Feature computation matches the 19-feature baseline that
+# produces local Net Sharpe 1.119, CAGR 11.55%.
+#
+# Key alignment decisions:
+#   - No regime model routing (proven harmful locally)
+#   - quality_score = rolling 60d return/vol ratio (price-only, matches local)
+#   - down_up_vol_ratio = std(negative_rets) / std(positive_rets) (proper computation)
+#   - sector_relative = stock_ret - universe_mean (best proxy without sector data)
+#   - top_n=12, hold_n=16, refresh_days=15 (match local config)
 # ============================================================
 
 try:
@@ -34,12 +38,11 @@ import pickle
 import io
 from datetime import timedelta
 
+
 # ============================================================
-# LGBMRankerWrapper stub — must be defined at module level
-# so that the pickled VotingRegressor (best_long_model.pkl)
-# can deserialize its LGBMRankerWrapper sub-estimator.
-# The stub delegates to the real LGBMRanker if lightgbm is
-# available; otherwise returns zeros gracefully.
+# LGBMRankerWrapper stub — must be at module level so that
+# the pickled VotingRegressor can deserialize correctly.
+# Returns zeros if LGBMRanker is not available (graceful fallback).
 # ============================================================
 try:
     from sklearn.base import BaseEstimator, RegressorMixin as _RegressorMixin
@@ -92,7 +95,11 @@ except ImportError:
 # ============================================================
 
 class SimpleModel:
-    """Fallback neutral model when pickle fails."""
+    """
+    Fallback model when pickle fails to load.
+    Returns zeros — caller must detect isinstance(model, SimpleModel)
+    and use a feature-based fallback score instead.
+    """
     def predict(self, X):
         return np.zeros(len(X), dtype=float)
     def predict_proba(self, X):
@@ -101,37 +108,58 @@ class SimpleModel:
 
 def LoadProductionModel(algorithm, model_path="best_long_model.pkl"):
     """
-    Load model artifact from local project file or Object Store.
-    Injects LGBMRankerWrapper into __main__ before unpickling so the
-    VotingRegressor sub-estimator deserializes correctly.
+    Load model artifact. Load order:
+      1. model_payload.py (base64+zlib encoded .py file — QC syncs these)
+      2. Local file path (works when running locally or in QC with file in project)
+      3. Object Store (uploaded via Research notebook)
     Returns (estimator, feature_columns_list).
     """
     import joblib
     import sys
     import os
+    import base64
+    import zlib
 
-    # Patch __main__ with LGBMRankerWrapper so pickle can resolve it
+    # Patch __main__ so pickle can resolve LGBMRankerWrapper
     _main = sys.modules.get("__main__")
     if _main is not None and not hasattr(_main, "LGBMRankerWrapper"):
         setattr(_main, "LGBMRankerWrapper", LGBMRankerWrapper)
 
     obj = None
     source = "UNKNOWN"
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    full_path = os.path.join(base_dir, model_path)
 
+    # --- 1. model_payload.py (primary QC path: .py files ARE synced, .pkl are not) ---
+    # model_payload.py joins 12 model_chunk_XX.py files (each <64KB, QC limit)
     try:
-        algorithm.Log(f"LoadProductionModel: looking for {full_path}")
+        from model_payload import load_model_bytes
+        raw_bytes = load_model_bytes()
+        try:
+            obj = joblib.load(io.BytesIO(raw_bytes))
+        except Exception:
+            obj = pickle.loads(raw_bytes)
+        source = "MODEL_PAYLOAD_PY"
+        algorithm.Log(f"LoadProductionModel: loaded from model_payload.py ({len(raw_bytes):,} bytes decompressed)")
+    except ImportError:
+        algorithm.Log("model_payload.py not found — trying local file and Object Store.")
+    except Exception as exc:
+        algorithm.Log(f"model_payload.py decode failed: {exc} — falling back.")
+        obj = None
+
+    # --- 2. Local file path ---
+    if obj is None:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        full_path = os.path.join(base_dir, model_path)
         if os.path.isfile(full_path):
             try:
                 obj = joblib.load(full_path)
                 source = "LOCAL_FILE"
-            except Exception:
-                with open(full_path, "rb") as fh:
-                    obj = pickle.load(fh)
-                source = "LOCAL_PICKLE"
-        else:
-            algorithm.Log(f"Local file not found: {full_path}. Trying Object Store.")
+                algorithm.Log(f"LoadProductionModel: loaded from local file {full_path}")
+            except Exception as exc:
+                algorithm.Log(f"Local file load failed: {exc}")
+
+    # --- 3. Object Store ---
+    if obj is None:
+        try:
             if algorithm.ObjectStore.ContainsKey(model_path):
                 data = bytes(algorithm.ObjectStore.ReadBytes(model_path))
                 try:
@@ -139,11 +167,16 @@ def LoadProductionModel(algorithm, model_path="best_long_model.pkl"):
                 except Exception:
                     obj = pickle.loads(data)
                 source = "OBJECT_STORE"
-            else:
-                algorithm.Error(f"Model '{model_path}' not found anywhere.")
-                return (SimpleModel(), None)
-    except Exception as exc:
-        algorithm.Error(f"LoadProductionModel failed for {model_path}: {exc}")
+                algorithm.Log(f"LoadProductionModel: loaded from Object Store ({len(data):,} bytes)")
+        except Exception as exc:
+            algorithm.Log(f"Object Store load failed: {exc}")
+
+    if obj is None:
+        algorithm.Error(
+            "CRITICAL: best_long_model.pkl not found via model_payload.py, local file, or Object Store. "
+            "Run encode_model.py locally then commit model_payload.py to sync to QC. "
+            "Using f_trend momentum fallback."
+        )
         return (SimpleModel(), None)
 
     if isinstance(obj, dict) and "estimator" in obj:
@@ -161,65 +194,40 @@ def LoadProductionModel(algorithm, model_path="best_long_model.pkl"):
 # ============================================================
 
 class TrendSignalAlphaModel(AlphaModel):
-    def __init__(self, algorithm, model_data, short_model=None, spy_symbol=None,
-                 bear_model_data=None, highvol_model_data=None):
-        # Unpack (estimator, feature_columns) tuples
+    def __init__(self, algorithm, model_data, spy_symbol=None):
+        # Unpack (estimator, feature_columns) tuple from LoadProductionModel
         if isinstance(model_data, tuple):
             self.long_model, _feat_cols = model_data
         else:
             self.long_model, _feat_cols = model_data, None
 
-        if isinstance(short_model, tuple):
-            self.short_model, _ = short_model
-        else:
-            self.short_model = short_model
-
-        # C2: regime-specific models (Bear / HighVol/Crisis only)
-        if isinstance(bear_model_data, tuple):
-            self.bear_model, _ = bear_model_data
-        else:
-            self.bear_model = bear_model_data
-
-        if isinstance(highvol_model_data, tuple):
-            self.highvol_model, _ = highvol_model_data
-        else:
-            self.highvol_model = highvol_model_data
-
         self.spy_symbol = spy_symbol or algorithm.AddEquity("SPY", Resolution.Daily).Symbol
         self.symbol_data = {}
         self.active_signals = {}
         self.last_refresh = {}
-        self.long_only = True
 
-        # Model feature columns (from artifact metadata)
+        # Feature columns — prefer pkl metadata, fall back to the 19-feature baseline
+        # that produced local Net Sharpe 1.119 (matches backtest_config.yaml feature_subset)
         self.features = _feat_cols if _feat_cols else [
-            "vol_expansion", "f_trend", "short_term_reversal", "ret_20d",
-            "ret_1d", "vol_ratio_5_20", "nearness_52w_low", "sector_relative_60d",
-            "nearness_52w_high", "cs_momentum_percentile",
-            "dist_from_52w_high", "low_vol_score", "momentum_acceleration",
-            "ret_5d", "capm_residual_vol", "down_up_vol_ratio", "rsi_14",
-            "capm_alpha", "ret_10d", "sector_relative_20d", "rsi_overbought",
-            "rolling_vol_20", "quality_score",
+            "f_trend", "ret_5d", "ret_10d", "ret_20d", "rolling_vol_20",
+            "cs_momentum_percentile", "rsi_14", "ret_1d", "vol_ratio_5_20",
+            "capm_residual_vol", "short_term_reversal", "nearness_52w_low",
+            "low_vol_score", "quality_score", "nearness_52w_high", "capm_alpha",
+            "momentum_acceleration", "sector_relative_20d", "sector_relative_60d",
         ]
 
-        # Strategy params
-        self.top_n = 10
-        self.hold_n = 15
-        self.min_score = 0.20
+        # Strategy params — aligned with local backtest_config.yaml
+        self.top_n = 12          # top_longs: 12
+        self.hold_n = 16         # hold positions ranked up to 16 (buffer)
+        self.min_score = 0.10    # min cross-sectional percentile rank (after transform)
         self.min_dollar_volume = 1e8
-        self.flip_buffer = 0.05
-        self.refresh_days = 10
+        self.refresh_days = 15   # rebalance_every_trading_days: 15
 
-        # D1: Continuous regime score state
-        self.current_regime = "Bull"        # label: Bull/Bear/Crisis/Sideways
-        self.regime_score = 0.0             # 0=Bull, 1=Crisis
-        self.bull_gross_cap = 1.0
-        self.crisis_gross_cap = 0.25
+        # Regime state (for logging only — NOT used for model routing)
+        self.current_regime = "Bull"
+        self.spy_close_window = RollingWindow[float](210)
 
-        # SPY warm-up for regime detection
-        self.spy_close_window = RollingWindow[float](210)  # 200d MA + buffer
-        self.vix_window = RollingWindow[float](20)         # for VIX proxy
-
+        # Warm up SPY history
         spy_hist = algorithm.History(self.spy_symbol, 210, Resolution.Daily)
         if spy_hist is not None and len(spy_hist) > 0:
             for _, row in spy_hist.iterrows():
@@ -227,34 +235,35 @@ class TrendSignalAlphaModel(AlphaModel):
                 if p > 0:
                     self.spy_close_window.Add(p)
 
-        algorithm.Log(f"TrendSignalAlphaModel initialized | features={len(self.features)} | "
-                      f"bear_model={'yes' if self.bear_model else 'no'} | "
-                      f"highvol_model={'yes' if self.highvol_model else 'no'}")
+        # Detect fallback mode — pkl was not found/loaded
+        self._model_is_fallback = isinstance(self.long_model, SimpleModel)
+        if self._model_is_fallback:
+            algorithm.Error(
+                "CRITICAL: best_long_model.pkl not found in project files or Object Store. "
+                "Upload via: ObjectStore.SaveBytes('best_long_model.pkl', open('best_long_model.pkl','rb').read()) "
+                "in a Research notebook. Using f_trend momentum fallback until pkl is loaded."
+            )
+        algorithm.Log(
+            f"TrendSignalAlphaModel initialized | "
+            f"features={len(self.features)} | model={type(self.long_model).__name__} | "
+            f"fallback_mode={self._model_is_fallback} | "
+            f"top_n={self.top_n} | refresh_days={self.refresh_days}"
+        )
 
     # ----------------------------------------------------------
-    def _sigmoid(self, x):
-        return 1.0 / (1.0 + np.exp(-float(x)))
-
-    def _update_regime(self, algorithm):
-        """D1: Update regime label + continuous regime score from SPY+VIX proxy."""
+    def _update_regime_label(self):
+        """Update regime label for logging. NOT used for model routing."""
         if self.spy_close_window.Count < 205:
             return
-
-        closes = [self.spy_close_window[i] for i in range(self.spy_close_window.Count)]
-        closes_arr = np.array(closes[::-1], dtype=float)  # oldest first
-
-        sma200 = float(np.mean(closes_arr[-200:]))
-        sma50  = float(np.mean(closes_arr[-50:]))
-        close  = closes_arr[-1]
-
-        # SPY realized vol (20d) as VIX proxy (annualized %)
-        if len(closes_arr) >= 21:
-            rets = np.diff(closes_arr[-21:]) / closes_arr[-21:-1]
+        closes = np.array([self.spy_close_window[i] for i in range(self.spy_close_window.Count)][::-1])
+        sma200 = float(np.mean(closes[-200:]))
+        sma50 = float(np.mean(closes[-50:]))
+        close = closes[-1]
+        if len(closes) >= 21:
+            rets = np.diff(closes[-21:]) / closes[-21:-1]
             vix_proxy = float(np.std(rets) * np.sqrt(252) * 100)
         else:
             vix_proxy = 15.0
-
-        # Hard label
         if vix_proxy >= 30.0:
             self.current_regime = "Crisis"
         elif close > sma200 and sma50 > sma200:
@@ -264,44 +273,24 @@ class TrendSignalAlphaModel(AlphaModel):
         else:
             self.current_regime = "Sideways"
 
-        # D1: continuous score [0=Bull, 1=Crisis]
-        vix_score = self._sigmoid((vix_proxy - 25.0) / 4.0)
-        sma_gap = (sma200 - close) / max(sma200, 1e-6)
-        sma_score = self._sigmoid(sma_gap / 0.025)
-        self.regime_score = float(np.clip(max(vix_score, sma_score), 0.0, 1.0))
-
-    def _gross_cap(self):
-        """D1: Linear interpolation of gross cap using continuous regime score."""
-        return self.bull_gross_cap + self.regime_score * (self.crisis_gross_cap - self.bull_gross_cap)
-
-    def _select_model(self):
-        """C2: Return the best model for the current regime."""
-        if self.current_regime == "Bear" and self.bear_model is not None:
-            return self.bear_model
-        if self.current_regime in ("Crisis", "HighVol") and self.highvol_model is not None:
-            return self.highvol_model
-        return self.long_model
-
     # ----------------------------------------------------------
     def OnSecuritiesChanged(self, algorithm, changes):
         for added in changes.AddedSecurities:
             if added.Symbol not in self.symbol_data:
-                self.symbol_data[added.Symbol] = SymbolData(algorithm, added.Symbol, self.spy_close_window)
+                self.symbol_data[added.Symbol] = SymbolData(
+                    algorithm, added.Symbol, self.spy_close_window
+                )
         for removed in changes.RemovedSecurities:
             self.symbol_data.pop(removed.Symbol, None)
 
     def Update(self, algorithm, data):
-        # Update SPY window
+        # Update SPY window and regime label (logging only)
         spy_bar = data.Bars.get(self.spy_symbol)
         if spy_bar:
             self.spy_close_window.Add(spy_bar.Close)
+        self._update_regime_label()
 
-        # Update regime
-        self._update_regime(algorithm)
-        gross_cap = self._gross_cap()
-        effective_top_n = max(1, int(self.top_n * gross_cap))
-
-        # Gather features
+        # Gather per-stock features
         raw_features = {}
         for symbol, sd in self.symbol_data.items():
             if symbol == self.spy_symbol or not data.Bars.ContainsKey(symbol):
@@ -312,63 +301,72 @@ class TrendSignalAlphaModel(AlphaModel):
             if hasattr(algorithm.Securities[symbol], "DollarVolume"):
                 if algorithm.Securities[symbol].DollarVolume < self.min_dollar_volume:
                     continue
-            feats = sd.GetFullFeatures()
+            feats = sd.GetFeatures()
             if feats:
                 raw_features[symbol] = feats
 
-        algorithm.Log(f"UPDATE | regime={self.current_regime} score={self.regime_score:.2f} "
-                      f"cap={gross_cap:.2f} top_n={effective_top_n} symbols={len(raw_features)}")
-
         if not raw_features:
+            total_tracked = len(self.symbol_data)
+            algorithm.Log(
+                f"NO_FEATURES: 0/{total_tracked} symbols ready. "
+                f"Check: close_window>=253, sma50.IsReady, rsi.IsReady, spy_window>=50."
+            )
             return []
 
-        # Build panel DataFrame
+        # Build cross-sectional panel
         df = pd.DataFrame.from_dict(raw_features, orient='index')
 
-        # A1: Cross-sectional z-scores (matches training)
-        cs_z_cols = ['ret_5d', 'ret_10d', 'rolling_vol_20']
-        for col in cs_z_cols:
+        # Cross-sectional z-scores — matches local pipeline's cs z-scoring
+        for col in ['ret_5d', 'ret_10d', 'ret_20d', 'rolling_vol_20', 'capm_residual_vol']:
             if col in df.columns:
-                mean = df[col].mean()
                 std = df[col].std(ddof=0)
-                df[col] = (df[col] - mean) / std if std > 1e-9 else 0.0
+                mean = df[col].mean()
+                df[col] = ((df[col] - mean) / std).clip(-4, 4) if std > 1e-9 else 0.0
 
-        # Cross-sectional momentum percentile
+        # cs_momentum_percentile: rank of 6-month momentum
         if "momentum_6m" in df.columns:
             df["cs_momentum_percentile"] = df["momentum_6m"].rank(pct=True).fillna(0.5)
         else:
             df["cs_momentum_percentile"] = 0.5
 
-        # sector_relative_20d/60d: approximate as (stock ret - universe mean ret)
-        for col in ["ret_20d", "ret_60d"]:
-            if col in df.columns:
-                universe_mean = df[col].mean()
-                suffix = "20d" if "20" in col else "60d"
-                df[f"sector_relative_{suffix}"] = df[col] - universe_mean
+        # sector_relative: stock return minus universe mean (best proxy without sector CSV)
+        # Local uses sector median; this approximation loses some signal but preserves direction
+        for col_raw, col_out in [("ret_20d", "sector_relative_20d"), ("ret_60d", "sector_relative_60d")]:
+            if col_raw in df.columns:
+                df[col_out] = df[col_raw] - df[col_raw].mean()
+            else:
+                df[col_out] = 0.0
 
-        # Select model for current regime (C2)
-        active_model = self._select_model()
-
-        # Inference
+        # Model inference — always use long_model (no regime routing)
         long_raw_scores = {}
-        for symbol, row in df.iterrows():
-            ordered = np.array([float(row.get(f, 0.0)) for f in self.features], dtype=float)
-            ordered = np.where(np.isfinite(ordered), ordered, 0.0)
-            ordered = np.clip(ordered, -10.0, 10.0)
-            try:
-                if hasattr(active_model, "predict_proba"):
-                    proba = active_model.predict_proba([ordered])
-                    score = (2.0 * float(proba[0][1])) - 1.0
-                else:
-                    score = float(active_model.predict([ordered])[0])
+
+        if self._model_is_fallback:
+            # pkl not loaded: score = f_trend * 0.5 + cs_momentum_percentile - 0.5
+            # This gives cross-sectionally meaningful signal so trades still happen.
+            for symbol, row in df.iterrows():
+                f_t = float(row.get("f_trend", 0.0))
+                cs_mom = float(row.get("cs_momentum_percentile", 0.5))
+                score = float(np.clip(0.5 * f_t + (cs_mom - 0.5), -2.0, 2.0))
                 long_raw_scores[symbol] = score
-            except Exception as exc:
-                algorithm.Log(f"Inference error {symbol.Value}: {exc}")
+        else:
+            for symbol, row in df.iterrows():
+                feat_vec = np.array([float(row.get(f, 0.0)) for f in self.features], dtype=float)
+                feat_vec = np.where(np.isfinite(feat_vec), feat_vec, 0.0)
+                feat_vec = np.clip(feat_vec, -10.0, 10.0)
+                try:
+                    if hasattr(self.long_model, "predict_proba"):
+                        proba = self.long_model.predict_proba([feat_vec])
+                        score = float(2.0 * proba[0][1] - 1.0)
+                    else:
+                        score = float(self.long_model.predict([feat_vec])[0])
+                    long_raw_scores[symbol] = score
+                except Exception as exc:
+                    algorithm.Log(f"Inference error {symbol.Value}: {exc}")
 
         if not long_raw_scores:
             return []
 
-        # Cross-sectional rank normalization
+        # Cross-sectional rank normalization → [-1, 1]
         l_series = pd.Series(long_raw_scores).rank(pct=True, method='average').fillna(0.5)
         l_norm = (l_series * 2.0) - 1.0
 
@@ -377,7 +375,7 @@ class TrendSignalAlphaModel(AlphaModel):
 
         insights = []
 
-        # Update existing holdings
+        # Close positions that fell out of hold_n or below min_score
         to_remove = []
         for symbol, direction in list(self.active_signals.items()):
             try:
@@ -390,7 +388,9 @@ class TrendSignalAlphaModel(AlphaModel):
                     continue
                 last_time = self.last_refresh.get(symbol)
                 if last_time is None or (algorithm.Time - last_time).days >= self.refresh_days:
-                    insights.append(Insight.Price(symbol, timedelta(days=self.refresh_days * 2), direction, score))
+                    insights.append(Insight.Price(
+                        symbol, timedelta(days=self.refresh_days * 2), direction, score
+                    ))
                     self.last_refresh[symbol] = algorithm.Time
             except ValueError:
                 insights.append(Insight.Price(symbol, timedelta(days=5), InsightDirection.Flat, 0.0))
@@ -400,20 +400,23 @@ class TrendSignalAlphaModel(AlphaModel):
         for s in to_remove:
             self.active_signals.pop(s, None)
 
-        # New entries (capped by D1 gross cap)
+        # Open new positions for top_n candidates
         for symbol, score in top_candidates:
             rank = symbols_by_rank.index(symbol) + 1
-            if rank <= effective_top_n and symbol not in self.active_signals and score >= self.min_score:
-                insight = Insight.Price(symbol, timedelta(days=self.refresh_days * 2),
-                                        InsightDirection.Up, score)
+            if rank <= self.top_n and symbol not in self.active_signals and score >= self.min_score:
+                insight = Insight.Price(
+                    symbol, timedelta(days=self.refresh_days * 2),
+                    InsightDirection.Up, score
+                )
                 insights.append(insight)
                 self.active_signals[symbol] = InsightDirection.Up
                 self.last_refresh[symbol] = algorithm.Time
 
-        if insights:
-            algorithm.Log(f"Alpha: Active={len(self.active_signals)} Insights={len(insights)} "
-                          f"Model={type(active_model).__name__}")
-
+        algorithm.Log(
+            f"Alpha | regime={self.current_regime} | "
+            f"active={len(self.active_signals)} | insights={len(insights)} | "
+            f"candidates={len(long_raw_scores)}"
+        )
         return insights
 
 
@@ -424,21 +427,21 @@ class TrendSignalAlphaModel(AlphaModel):
 class SymbolData:
     def __init__(self, algorithm, symbol, spy_close_window):
         self.symbol = symbol
-        self.spy_close_window = spy_close_window  # shared reference
+        self.spy_close_window = spy_close_window
 
-        # Indicators
+        # QC indicators
         self.rsi = RelativeStrengthIndex(14)
         self.std20 = StandardDeviation(20)
         self.std5 = StandardDeviation(5)
         self.sma50 = SimpleMovingAverage(50)
         self.sma200 = SimpleMovingAverage(200)
 
-        # Windows
+        # Rolling windows
         self.close_window = RollingWindow[float](253)
         self.returns_window = RollingWindow[float](2)
         self.vol_history = RollingWindow[float](252)
 
-        # Warm-up from history
+        # Warm up from history
         history = algorithm.History(symbol, 253, Resolution.Daily)
         if history is not None and len(history) > 0:
             for idx, row in history.iterrows():
@@ -466,9 +469,12 @@ class SymbolData:
 
     @property
     def IsReady(self):
-        return (self.close_window.Count >= 253 and
-                self.sma50.IsReady and self.rsi.IsReady and
-                self.spy_close_window.Count >= 50)
+        return (
+            self.close_window.Count >= 253 and
+            self.sma50.IsReady and
+            self.rsi.IsReady and
+            self.spy_close_window.Count >= 50
+        )
 
     def Update(self, bar):
         if bar is None:
@@ -494,88 +500,121 @@ class SymbolData:
         except Exception:
             pass
 
-    def GetFullFeatures(self):
-        """Build the 24-feature vector matching best_long_model.pkl training."""
+    def GetFeatures(self):
+        """
+        Build the 19-feature vector matching local best_long_model.pkl training.
+        All features are price-derived — no EDGAR data needed.
+        Feature names match backtest_config.yaml feature_subset exactly.
+        """
         if not self.IsReady:
             return None
 
         close = self.close_window[0]
-        ret_1d  = (close / self.close_window[1])  - 1.0 if self.close_window.Count > 1  else 0.0
-        ret_5d  = (close / self.close_window[5])  - 1.0 if self.close_window.Count > 5  else 0.0
-        ret_10d = (close / self.close_window[10]) - 1.0 if self.close_window.Count > 10 else 0.0
-        ret_20d = (close / self.close_window[20]) - 1.0 if self.close_window.Count > 20 else 0.0
-        ret_60d = (close / self.close_window[60]) - 1.0 if self.close_window.Count > 60 else 0.0
-        mom3m   = (close / self.close_window[63]) - 1.0 if self.close_window.Count > 63 else 0.0
-        mom6m   = (close / self.close_window[126])- 1.0 if self.close_window.Count > 126 else 0.0
 
-        # Trend composite
+        # --- Returns ---
+        def safe_ret(n):
+            return (close / self.close_window[n]) - 1.0 if self.close_window.Count > n else 0.0
+
+        ret_1d  = safe_ret(1)
+        ret_5d  = safe_ret(5)
+        ret_10d = safe_ret(10)
+        ret_20d = safe_ret(20)
+        ret_60d = safe_ret(60)
+        mom_6m  = safe_ret(126)  # used for cs_momentum_percentile, not directly a model feature
+
+        # --- Trend composite (matches local f_trend computation) ---
         ma50  = self.sma50.Current.Value
         ma200 = self.sma200.Current.Value
         ma_cross = 1.0 if ma50 > ma200 else -1.0
-        f_trend = 0.30 * mom3m * 10.0 + 0.25 * mom6m * 10.0 + 0.25 * ma_cross + 0.20 * ret_1d * 10.0
+        mom_3m = safe_ret(63)
+        f_trend = (0.30 * mom_3m * 10.0 +
+                   0.25 * mom_6m * 10.0 +
+                   0.25 * ma_cross +
+                   0.20 * ret_1d * 10.0)
 
-        # Volatility
+        # --- Volatility ---
         vol_current = self.std20.Current.Value * np.sqrt(252)
         vol_5d = self.std5.Current.Value * np.sqrt(252)
         vol_ratio_5_20 = vol_5d / vol_current if vol_current > 1e-9 else 1.0
-        vol_expansion = vol_ratio_5_20
 
-        # Vol percentile for low_vol_score
+        # Vol percentile (for low_vol_score)
         vol_perc = 0.5
         if self.vol_history.Count > 20:
             hist = [self.vol_history[i] for i in range(self.vol_history.Count)]
             vol_perc = sum(1 for v in hist if v < vol_current) / float(len(hist))
 
-        # RSI
+        # --- RSI ---
         rsi_val = self.rsi.Current.Value
         rsi_overbought = 1.0 if rsi_val > 70 else 0.0
 
-        # 52-week high/low
+        # --- 52-week high/low ---
         win52 = min(252, self.close_window.Count - 1)
         prices_52 = [self.close_window[i] for i in range(win52)]
         high_52w = max(prices_52) if prices_52 else close
         low_52w  = min(prices_52) if prices_52 else close
-        dist_from_52w_high = (close / high_52w) - 1.0
-        nearness_52w_high  = float(np.clip(close / max(high_52w, 1e-6), 0.0, 1.0))
+        nearness_52w_high = float(np.clip(close / max(high_52w, 1e-6), 0.0, 1.0))
+        dist_from_52w_high = float(np.clip((high_52w - close) / max(high_52w, 1e-6), 0.0, 1.0))
         dist_low = (close - low_52w) / max(low_52w, 1e-6)
-        nearness_52w_low = 1.0 / (1.0 + max(0.0, dist_low))
+        nearness_52w_low  = 1.0 / (1.0 + max(0.0, dist_low))
 
-        # CAPM alpha & residual vol (60d rolling regression vs SPY)
+        # --- CAPM alpha and residual vol (60d rolling regression vs SPY) ---
         capm_alpha = 0.0
         capm_res_vol = 0.05
         try:
             win_c = min(60, self.close_window.Count - 1, self.spy_close_window.Count - 1)
             if win_c >= 20:
-                stock_rets = np.array([(self.close_window[i] / self.close_window[i+1]) - 1.0
-                                       for i in range(win_c)], dtype=float)
-                spy_rets   = np.array([(self.spy_close_window[i] / self.spy_close_window[i+1]) - 1.0
-                                       for i in range(win_c)], dtype=float)
+                stock_rets = np.array(
+                    [(self.close_window[i] / self.close_window[i + 1]) - 1.0 for i in range(win_c)],
+                    dtype=float
+                )
+                spy_rets = np.array(
+                    [(self.spy_close_window[i] / self.spy_close_window[i + 1]) - 1.0 for i in range(win_c)],
+                    dtype=float
+                )
                 var_spy = float(np.var(spy_rets))
                 beta = float(np.cov(stock_rets, spy_rets)[0][1] / var_spy) if var_spy > 1e-9 else 1.0
                 residuals = stock_rets - beta * spy_rets
                 capm_res_vol = float(np.std(residuals))
-                capm_alpha = float(np.mean(residuals) * 252)  # annualized
+                capm_alpha   = float(np.mean(residuals) * 252)  # annualized
         except Exception:
             pass
 
-        # All-weather features
+        # --- All-weather features ---
         short_term_reversal = float(np.clip(-ret_5d, -0.5, 0.5))
         low_vol_score = 1.0 - vol_perc
+
+        # quality_score: rolling 60d return / vol — same computation as local feature_builder
+        # (local uses rolling Sharpe-like metric, not EDGAR; verified consistent with 19-feature set)
         win_q = min(60, self.close_window.Count - 1)
         if win_q >= 20:
-            rets_q = np.array([(self.close_window[i] / self.close_window[i+1]) - 1.0
-                               for i in range(win_q)], dtype=float)
+            rets_q = np.array(
+                [(self.close_window[i] / self.close_window[i + 1]) - 1.0 for i in range(win_q)],
+                dtype=float
+            )
             std_q = float(np.std(rets_q))
-            quality_score = float(np.clip(np.mean(rets_q) / std_q * np.sqrt(252)
-                                          if std_q > 1e-9 else 0.0, -5.0, 5.0))
+            quality_score = float(np.clip(
+                np.mean(rets_q) / std_q * np.sqrt(252) if std_q > 1e-9 else 0.0,
+                -5.0, 5.0
+            ))
         else:
             quality_score = 0.0
 
-        # down_up_vol_ratio: proxy using return sign (rolling 20-day)
-        # (proper version needs per-day volume — approximate as 1.0)
+        # --- down_up_vol_ratio: std(negative daily returns) / std(positive daily returns) ---
+        # Fixed: was hardcoded to 1.0 (zero cross-sectional signal). Now properly computed.
+        win_d = min(60, self.close_window.Count - 1)
         down_up_vol_ratio = 1.0
+        if win_d >= 20:
+            rets_d = np.array(
+                [(self.close_window[i] / self.close_window[i + 1]) - 1.0 for i in range(win_d)],
+                dtype=float
+            )
+            up_rets   = rets_d[rets_d > 0]
+            down_rets = rets_d[rets_d <= 0]
+            vol_up   = float(np.std(up_rets))   if len(up_rets)   > 2 else 1e-9
+            vol_down = float(np.std(down_rets)) if len(down_rets) > 2 else 1e-9
+            down_up_vol_ratio = float(np.clip(vol_down / max(vol_up, 1e-9), 0.1, 10.0))
 
-        # momentum_acceleration
+        # --- Momentum acceleration ---
         momentum_acceleration = ret_5d - ret_10d
 
         return {
@@ -585,21 +624,18 @@ class SymbolData:
             "ret_5d":                 ret_5d,
             "ret_10d":                ret_10d,
             "ret_20d":                ret_20d,
-            "momentum_6m":            mom6m,           # used for cs_momentum_percentile
-            "ret_60d":                ret_60d,          # used for sector_relative_60d
+            "ret_60d":                ret_60d,       # used to compute sector_relative_60d in Update
+            "momentum_6m":            mom_6m,        # used to compute cs_momentum_percentile in Update
             # Volatility
             "rolling_vol_20":         vol_current,
             "vol_ratio_5_20":         vol_ratio_5_20,
-            "vol_expansion":          vol_expansion,
-            # RSI & mean-reversion
+            # RSI
             "rsi_14":                 rsi_val,
             "rsi_overbought":         rsi_overbought,
-            "momentum_acceleration":  momentum_acceleration,
-            "down_up_vol_ratio":      down_up_vol_ratio,
             # 52-week proximity
-            "dist_from_52w_high":     dist_from_52w_high,
             "nearness_52w_high":      nearness_52w_high,
             "nearness_52w_low":       nearness_52w_low,
+            "dist_from_52w_high":     dist_from_52w_high,
             # CAPM
             "capm_residual_vol":      capm_res_vol,
             "capm_alpha":             capm_alpha,
@@ -607,9 +643,12 @@ class SymbolData:
             "short_term_reversal":    short_term_reversal,
             "low_vol_score":          low_vol_score,
             "quality_score":          quality_score,
-            # Sector relative (computed in Update from panel)
-            "sector_relative_20d":    0.0,  # overwritten in Update()
-            "sector_relative_60d":    0.0,  # overwritten in Update()
-            # cs_momentum_percentile overwritten in Update()
+            # Volume ratio (now properly computed, not hardcoded)
+            "down_up_vol_ratio":      down_up_vol_ratio,
+            # Momentum
+            "momentum_acceleration":  momentum_acceleration,
+            # Sector relative and cs_momentum_percentile overwritten in Update()
+            "sector_relative_20d":    0.0,
+            "sector_relative_60d":    0.0,
             "cs_momentum_percentile": 0.5,
         }
