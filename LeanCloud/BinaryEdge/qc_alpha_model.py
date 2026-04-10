@@ -128,24 +128,53 @@ def LoadProductionModel(algorithm, model_path="best_long_model.pkl"):
     obj = None
     source = "UNKNOWN"
 
-    # --- 1. model_payload.py (primary QC path: .py files ARE synced, .pkl are not) ---
-    # model_payload.py joins 12 model_chunk_XX.py files (each <64KB, QC limit)
+    # --- 1. Object Store (fastest path after first run) ---
+    # The Object Store is shared across the whole QC organization — set once, use everywhere.
+    # On first run the model is loaded from the synced .py chunks and cached here automatically.
     try:
-        from model_payload import load_model_bytes
-        raw_bytes = load_model_bytes()
-        try:
-            obj = joblib.load(io.BytesIO(raw_bytes))
-        except Exception:
-            obj = pickle.loads(raw_bytes)
-        source = "MODEL_PAYLOAD_PY"
-        algorithm.Log(f"LoadProductionModel: loaded from model_payload.py ({len(raw_bytes):,} bytes decompressed)")
-    except ImportError:
-        algorithm.Log("model_payload.py not found — trying local file and Object Store.")
+        if algorithm.ObjectStore.ContainsKey(model_path):
+            data = bytes(algorithm.ObjectStore.ReadBytes(model_path))
+            try:
+                obj = joblib.load(io.BytesIO(data))
+            except Exception:
+                obj = pickle.loads(data)
+            source = "OBJECT_STORE"
+            algorithm.Log(f"LoadProductionModel: loaded from Object Store ({len(data):,} bytes)")
     except Exception as exc:
-        algorithm.Log(f"model_payload.py decode failed: {exc} — falling back.")
-        obj = None
+        algorithm.Log(f"Object Store load failed: {exc}")
 
-    # --- 2. Local file path ---
+    # --- 2. model_chunk_XX.py files (bootstrap path: synced by git, each <64KB) ---
+    # After loading, the model is saved to Object Store so future runs skip this step.
+    if obj is None:
+        try:
+            from model_payload import load_model_bytes
+            raw_bytes = load_model_bytes()
+            try:
+                obj = joblib.load(io.BytesIO(raw_bytes))
+            except Exception:
+                obj = pickle.loads(raw_bytes)
+            source = "MODEL_CHUNK_PY"
+            algorithm.Log(
+                f"LoadProductionModel: loaded from model_chunk_XX.py files "
+                f"({len(raw_bytes):,} bytes decompressed). "
+                f"Saving to Object Store for future runs..."
+            )
+            # Cache raw pkl bytes to Object Store — next run loads directly, skipping 12-file import
+            try:
+                algorithm.ObjectStore.SaveBytes(model_path, bytearray(raw_bytes))
+                algorithm.Log(
+                    f"Model cached to Object Store as '{model_path}' "
+                    f"({len(raw_bytes):,} bytes). Future runs load from Object Store directly."
+                )
+            except Exception as exc:
+                algorithm.Log(f"Object Store save failed (non-fatal): {exc}")
+        except ImportError:
+            algorithm.Log("model_payload.py not found.")
+        except Exception as exc:
+            algorithm.Log(f"model_chunk_XX.py decode failed: {exc}")
+            obj = None
+
+    # --- 3. Local file (fallback for local testing) ---
     if obj is None:
         base_dir = os.path.dirname(os.path.abspath(__file__))
         full_path = os.path.join(base_dir, model_path)
@@ -157,25 +186,11 @@ def LoadProductionModel(algorithm, model_path="best_long_model.pkl"):
             except Exception as exc:
                 algorithm.Log(f"Local file load failed: {exc}")
 
-    # --- 3. Object Store ---
-    if obj is None:
-        try:
-            if algorithm.ObjectStore.ContainsKey(model_path):
-                data = bytes(algorithm.ObjectStore.ReadBytes(model_path))
-                try:
-                    obj = joblib.load(io.BytesIO(data))
-                except Exception:
-                    obj = pickle.loads(data)
-                source = "OBJECT_STORE"
-                algorithm.Log(f"LoadProductionModel: loaded from Object Store ({len(data):,} bytes)")
-        except Exception as exc:
-            algorithm.Log(f"Object Store load failed: {exc}")
-
     if obj is None:
         algorithm.Error(
-            "CRITICAL: best_long_model.pkl not found via model_payload.py, local file, or Object Store. "
-            "Run encode_model.py locally then commit model_payload.py to sync to QC. "
-            "Using f_trend momentum fallback."
+            "CRITICAL: Model not found via Object Store, model_chunk_XX.py, or local file. "
+            "Run encode_model.py locally, commit all model_chunk_*.py + model_payload.py, "
+            "then push to QC. Using f_trend momentum fallback."
         )
         return (SimpleModel(), None)
 
