@@ -1,5 +1,5 @@
-# AUTO-GENERATED - do not edit by hand.
-# Joins all model_chunk_XX.py files into the full base64+zlib payload.
+# AUTO-GENERATED - do not edit.
+# Joins model_chunk_XX.py files into the full base64+zlib payload.
 import base64, zlib, io
 from model_chunk_00 import DATA as _c00
 from model_chunk_01 import DATA as _c01
