@@ -359,24 +359,28 @@ class TrendSignalAlphaModel(AlphaModel):
             if s.Symbol not in self.symbol_data
         ]
         if new_symbols:
-            all_history = None
+            # Pre-build dict keyed by Symbol to avoid QC's PandasMapper KeyError
+            # (.loc[symbol] raises a non-catchable C#-wrapped exception for missing symbols)
+            hist_by_symbol = {}
             try:
                 all_history = algorithm.History(new_symbols, 253, Resolution.Daily)
-                if algorithm.Time.day == 1:
-                    algorithm.Log(
-                        f"BATCH_HISTORY: {len(new_symbols)} symbols → "
-                        f"{len(all_history)} rows"
-                    )
+                if all_history is not None and len(all_history) > 0:
+                    if algorithm.Time.day == 1:
+                        algorithm.Log(
+                            f"BATCH_HISTORY: {len(new_symbols)} symbols → "
+                            f"{len(all_history)} rows"
+                        )
+                    try:
+                        # groupby level=0 splits MultiIndex DataFrame into per-symbol slices
+                        # .get() on a plain dict never raises — safe for missing symbols
+                        hist_by_symbol = dict(tuple(all_history.groupby(level=0)))
+                    except Exception as exc:
+                        algorithm.Log(f"History groupby failed ({exc}) — individual fallback")
             except Exception as exc:
                 algorithm.Log(f"Batch History failed ({exc}) — warming up from live bars")
 
             for symbol in new_symbols:
-                sym_hist = None
-                if all_history is not None and len(all_history) > 0:
-                    try:
-                        sym_hist = all_history.loc[symbol]
-                    except Exception:
-                        pass
+                sym_hist = hist_by_symbol.get(symbol, None)
                 self.symbol_data[symbol] = SymbolData(
                     algorithm, symbol, self.spy_close_window, sym_hist
                 )
