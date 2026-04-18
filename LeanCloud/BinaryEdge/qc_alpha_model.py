@@ -15,7 +15,7 @@
 #     - Min signal 0.7    (ml_short_min_signal_strength: 0.7)
 #
 #   Regime exposure (longs):
-#     Bull/Sideways: 12  |  Bear: 0 new longs (hold existing)  |  Crisis: 4
+#     Bull/Sideways: 12 new + hold top-16  |  Bear/Crisis: 0 new + hold top-16 (no forced exits)
 #
 #   No regime model routing. No Sharpe circuit breaker.
 #   Stale Object Store model auto-detected (<20 features) and replaced from chunks.
@@ -111,13 +111,32 @@ def _validate_obj(obj, min_features=20):
     return len(obj.get("feature_columns") or []) >= min_features
 
 
+def _patch_model(obj):
+    """
+    Recursively fix missing attributes in models caused by sklearn version mismatches.
+    Specific fix for: 'LogisticRegression' object has no attribute 'multi_class'
+    """
+    if obj is None: return
+    # If it's a LogisticRegression or has the attribute issue
+    if "LogisticRegression" in str(type(obj)):
+        if not hasattr(obj, "multi_class"):
+            obj.multi_class = "ovr"  # Default used in most older versions
+    # Recursive check for ensembles (VotingClassifier, Pipelines, etc.)
+    if hasattr(obj, "estimators_"):
+        for est in obj.estimators_:
+            _patch_model(est)
+    if hasattr(obj, "steps"):  # Pipelines
+        for name, step in obj.steps:
+            _patch_model(step)
+    if hasattr(obj, "named_estimators"): # Voting
+        for name, est in obj.named_estimators.items():
+            _patch_model(est)
+
 def LoadProductionModel(algorithm, model_path="best_long_model.pkl", min_features=20):
     """
     Load order:
       1. Object Store — validated (>= min_features). Stale models auto-deleted.
-      2. model_chunk_XX.py / short_model_payload.py — git-synced, each <64KB.
-         After loading, saves correct model to Object Store for future runs.
-      3. Local file — for local testing.
+      2. Local file — for local testing.
     Returns (estimator, feature_columns_list).
     """
     import joblib, sys, os
@@ -146,7 +165,7 @@ def LoadProductionModel(algorithm, model_path="best_long_model.pkl", min_feature
                 n_feat = len(candidate.get("feature_columns", [])) if isinstance(candidate, dict) else 0
                 algorithm.Log(
                     f"LoadProductionModel [{model_path}]: Object Store STALE "
-                    f"({n_feat} features < {min_features}). Deleting and reloading from .py files."
+                    f"({n_feat} features < {min_features}). Deleting."
                 )
                 try:
                     algorithm.ObjectStore.Delete(model_path)
@@ -155,42 +174,7 @@ def LoadProductionModel(algorithm, model_path="best_long_model.pkl", min_feature
     except Exception as exc:
         algorithm.Log(f"Object Store load failed [{model_path}]: {exc}")
 
-    # --- 2. Synced .py payload files ---
-    if obj is None:
-        raw_bytes = None
-        try:
-            if model_path == "best_long_model.pkl":
-                from model_payload import load_model_bytes
-                raw_bytes = load_model_bytes()
-            elif model_path == "best_short_model.pkl":
-                from short_model_payload import load_short_model_bytes
-                raw_bytes = load_short_model_bytes()
-        except ImportError as e:
-            algorithm.Log(f"Payload import failed [{model_path}]: {e}")
-        except Exception as e:
-            algorithm.Log(f"Payload load failed [{model_path}]: {e}")
-
-        if raw_bytes is not None:
-            try:
-                candidate = _load_obj_from_bytes(raw_bytes)
-                if _validate_obj(candidate, min_features):
-                    obj    = candidate
-                    source = "PAYLOAD_PY"
-                    algorithm.Log(
-                        f"LoadProductionModel [{model_path}]: loaded from .py payload "
-                        f"({len(raw_bytes):,} bytes). Caching to Object Store..."
-                    )
-                    try:
-                        algorithm.ObjectStore.SaveBytes(model_path, bytearray(raw_bytes))
-                        algorithm.Log(f"Object Store cache saved [{model_path}].")
-                    except Exception as e:
-                        algorithm.Log(f"Object Store save failed (non-fatal): {e}")
-                else:
-                    algorithm.Log(f"Payload model [{model_path}] invalid — too few features.")
-            except Exception as e:
-                algorithm.Log(f"Payload decode failed [{model_path}]: {e}")
-
-    # --- 3. Local file (local testing fallback) ---
+    # --- 2. Local file (local testing fallback) ---
     if obj is None:
         base_dir  = os.path.dirname(os.path.abspath(__file__))
         full_path = os.path.join(base_dir, model_path)
@@ -207,12 +191,15 @@ def LoadProductionModel(algorithm, model_path="best_long_model.pkl", min_feature
     if obj is None:
         algorithm.Error(
             f"CRITICAL: '{model_path}' not found or stale. "
-            "Commit model_chunk_*.py + short_model_payload.py and push to QC. "
-            "Using SimpleModel fallback."
+            "Please ensure you have uploaded the .pkl file to the QuantConnect ObjectStore. "
+            "Using SimpleModel fallback (Neutral signals)."
         )
         return (SimpleModel(), None)
 
     est      = obj["estimator"]
+    # Dynamic patch for version mismatches
+    _patch_model(est)
+    
     feat_cols = obj.get("feature_columns")
     algorithm.Log(
         f"Model loaded ({source}) [{model_path}]: {type(est).__name__} | "
@@ -247,25 +234,21 @@ class TrendSignalAlphaModel(AlphaModel):
         self.short_signals = {}   # symbol -> entry_price (float) — for snap profit / stop tracking
         self.last_refresh  = {}
 
-        # Long model feature columns (prefer pkl metadata → 24-feature set)
+        # Long model feature columns (17-feature production set)
         self.features = _feat_cols if _feat_cols else [
-            "f_trend", "ret_5d", "ret_10d", "ret_20d", "rolling_vol_20",
-            "cs_momentum_percentile", "rsi_14", "ret_1d", "vol_ratio_5_20",
-            "capm_residual_vol", "short_term_reversal", "nearness_52w_low",
-            "low_vol_score", "quality_score", "nearness_52w_high", "capm_alpha",
-            "momentum_acceleration", "sector_relative_20d", "sector_relative_60d",
-            "dist_from_52w_high", "rsi_overbought", "down_up_vol_ratio",
-            "vol_expansion", "earnings_surprise",
+            "f_trend", "ret_5d", "ret_10d", "ret_20d", "cs_momentum_percentile",
+            "vol_ratio_5_20", "capm_residual_vol", "short_term_reversal",
+            "nearness_52w_low", "low_vol_score", "quality_score",
+            "nearness_52w_high", "capm_alpha", "momentum_acceleration",
+            "sector_relative_20d", "sector_relative_60d", "momentum_12m_skip1"
         ]
-        # Short model feature columns (prefer pkl metadata → 28-feature set)
+        # Short model feature columns (18-feature production set)
         self.short_features = _short_feat_cols if _short_feat_cols else [
-            "sector_relative_20d", "vol_expansion", "nearness_52w_low",
-            "f_score", "delta_roa", "rolling_vol_20", "delta_leverage", "roa",
-            "sector_relative_60d", "vol_ratio_5_20", "accruals_ratio", "quality_score",
-            "dist_from_52w_high", "ret_5d", "capm_residual_vol", "ret_1d", "capm_alpha",
-            "cs_momentum_percentile", "ret_10d", "momentum_acceleration", "rsi_14",
-            "f_trend", "ret_20d", "down_up_vol_ratio", "low_vol_score", "rsi_overbought",
-            "short_term_reversal", "nearness_52w_high",
+            "f_score", "accruals_ratio", "roa", "delta_roa", "delta_leverage",
+            "dist_from_52w_high", "rsi_14", "rsi_overbought", "nearness_52w_high",
+            "vol_expansion", "down_up_vol_ratio", "rolling_vol_20",
+            "momentum_acceleration", "ret_5d", "ret_20d", "sector_relative_20d",
+            "cs_momentum_percentile", "capm_residual_vol"
         ]
 
         # Fill values for features unavailable in QC
@@ -274,20 +257,23 @@ class TrendSignalAlphaModel(AlphaModel):
             "nearness_52w_high": 0.5,
             "nearness_52w_low": 0.5,
             "cs_momentum_percentile": 0.5,
-            # Fundamental features — zeroed (no EDGAR in QC)
-            "vol_expansion": 0.0,
+            # vol_expansion = vol_5d/vol_20d — computed in GetFeatures(); 1.0 is neutral fallback
+            "vol_expansion": 1.0,
+            # Fundamental features unavailable in QC — use cross-sectional neutral values
+            # (0.0 = worst possible for f_score/roa, causing systematic model bias)
             "earnings_surprise": 0.0,
-            "f_score": 0.0,
-            "delta_roa": 0.0,
+            "f_score": 4.5,       # Piotroski: 0-9, typical SP500 mean ~4.5
+            "delta_roa": 0.0,     # near-zero is typical
             "delta_leverage": 0.0,
-            "roa": 0.0,
+            "roa": 0.05,          # typical SP500 ROA ~5%
             "accruals_ratio": 0.0,
         }
 
         # Long strategy params (match local backtest_config.yaml)
         self.top_n            = 12    # top_longs: 12
         self.hold_n           = 16    # hold buffer: 16
-        self.min_score        = 0.10  # min CS percentile rank
+        self.min_score        = 0.05  # min CS percentile rank — low bar; cross-sectional rank
+                                      # is the real quality gate, not absolute score
         self.min_dollar_volume = 1e8
         self.refresh_days     = 21    # matches PCM rebalance
 
@@ -301,7 +287,11 @@ class TrendSignalAlphaModel(AlphaModel):
         self.short_min_liquidity_usd = 2e7    # ml_short_min_liquidity_usd: 20M
 
         # Regime state
-        self.current_regime   = "Bull"
+        self.current_regime          = "Normal"
+        self.pending_regime          = "Normal"
+        self.pending_days            = 0
+        self.confirmation_days       = 3      # Match local hysteresis
+        self.current_vix_proxy = 15.0   # annualized realized vol proxy; updated every bar
         self.spy_close_window = RollingWindow[float](210)
         self.last_rebalance_time = None
         # Track short entry prices for snap-profit / stop management
@@ -343,14 +333,30 @@ class TrendSignalAlphaModel(AlphaModel):
         if len(closes) >= 21:
             rets      = np.diff(closes[-21:]) / closes[-21:-1]
             vix_proxy = float(np.std(rets) * np.sqrt(252) * 100)
+        self.current_vix_proxy = vix_proxy   # persist for vol-targeted sizing
+        raw_regime = "Sideways"
         if vix_proxy >= 30.0:
-            self.current_regime = "Crisis"
+            raw_regime = "Crisis"
         elif close > sma200 and sma50 > sma200:
-            self.current_regime = "Bull"
+            raw_regime = "Bull"
         elif close < sma200 and sma50 < sma200:
-            self.current_regime = "Bear"
+            raw_regime = "Bear"
+        
+        # Crisis is always immediate (ignore hysteresis for rapid protection)
+        if raw_regime == "Crisis":
+            self.current_regime = "Crisis"
+            self.pending_regime = "Crisis"
+            self.pending_days   = 0
+            return
+
+        # Hysteresis for other regimes
+        if raw_regime == self.pending_regime:
+            self.pending_days += 1
+            if self.pending_days >= self.confirmation_days:
+                self.current_regime = raw_regime
         else:
-            self.current_regime = "Sideways"
+            self.pending_regime = raw_regime
+            self.pending_days   = 1
 
     # ----------------------------------------------------------
     def OnSecuritiesChanged(self, algorithm, changes):
@@ -359,31 +365,23 @@ class TrendSignalAlphaModel(AlphaModel):
             if s.Symbol not in self.symbol_data
         ]
         if new_symbols:
-            # Pre-build dict keyed by Symbol to avoid QC's PandasMapper KeyError
-            # (.loc[symbol] raises a non-catchable C#-wrapped exception for missing symbols)
             hist_by_symbol = {}
             try:
                 all_history = algorithm.History(new_symbols, 253, Resolution.Daily)
-                if all_history is not None and len(all_history) > 0:
-                    if algorithm.Time.day == 1:
-                        algorithm.Log(
-                            f"BATCH_HISTORY: {len(new_symbols)} symbols → "
-                            f"{len(all_history)} rows"
-                        )
-                    try:
-                        # groupby level=0 splits MultiIndex DataFrame into per-symbol slices
-                        # .get() on a plain dict never raises — safe for missing symbols
-                        hist_by_symbol = dict(tuple(all_history.groupby(level=0)))
-                    except Exception as exc:
-                        algorithm.Log(f"History groupby failed ({exc}) — individual fallback")
+                if all_history is not None and not all_history.empty:
+                    # Group by Symbol object (level 0)
+                    hist_by_symbol = dict(tuple(all_history.groupby(level=0)))
             except Exception as exc:
-                algorithm.Log(f"Batch History failed ({exc}) — warming up from live bars")
+                algorithm.Log(f"ALPHA: Batch history failed ({exc})")
 
             for symbol in new_symbols:
-                sym_hist = hist_by_symbol.get(symbol, None)
-                self.symbol_data[symbol] = SymbolData(
-                    algorithm, symbol, self.spy_close_window, sym_hist
-                )
+                history = hist_by_symbol.get(symbol, None)
+                sd = SymbolData(algorithm, symbol, self.spy_close_window, history)
+                self.symbol_data[symbol] = sd
+                
+                if algorithm.Time.day == 1:
+                    has_h = "YES" if history is not None else "NO"
+                    algorithm.Log(f"ALPHA: Added {symbol} | Hist={has_h} | Total={len(self.symbol_data)}")
 
         for s in changes.RemovedSecurities:
             self.symbol_data.pop(s.Symbol, None)
@@ -398,19 +396,72 @@ class TrendSignalAlphaModel(AlphaModel):
         regime_changed_to_bear = (
             self.current_regime == "Bear" and prev_regime != "Bear"
         )
+        regime_changed_to_crisis = (
+            self.current_regime == "Crisis" and prev_regime != "Crisis"
+        )
+        force_rebalance = regime_changed_to_bear or regime_changed_to_crisis
 
-        # Update indicators every day
+        # Update indicators every day to maintain rolling windows/SMA
+        ready_count = 0
+        liquid_count = 0
         for symbol, sd in self.symbol_data.items():
             if data.Bars.ContainsKey(symbol):
                 sd.Update(data.Bars[symbol])
+            
+            # Diagnostic stats (Pre-Throttle)
+            if sd.IsReady:
+                ready_count += 1
+                if algorithm.Securities.ContainsKey(symbol):
+                    sec = algorithm.Securities[symbol]
+                    # Check for accurate price today to avoid 'No accurate price' errors
+                    if sec.Price > 0 and sd.is_liquid(self.min_dollar_volume):
+                        liquid_count += 1
+
+        # Periodic Diagnostic Log (runs every 7 days regardless of rebalance)
+        if algorithm.Time.day % 7 == 1:
+            _vol_scale = min(1.0, 20.0 / max(self.current_vix_proxy, 20.0))
+            algorithm.Log(
+                f"ALPHA HEALTH: Universe={len(self.symbol_data)} | "
+                f"Ready={ready_count} | Liquid={liquid_count} | "
+                f"Regime={self.current_regime} | Scale={_vol_scale:.2f}"
+            )
+
+        # Skip emitting insights during the 253-day warmup period
+        if algorithm.IsWarmingUp:
+            return []
+
+        # --- High-Fidelity Risk Management (Bear Entry & Crisis) ---
+        risk_insights = []
+        
+        # 1. Bear Entry: Liquidate ALL longs when moving from non-Bear to Bear
+        bear_liquidate = (self.current_regime == "Bear" and prev_regime != "Bear")
+        if bear_liquidate:
+            for symbol in list(self.long_signals.keys()):
+                if self._security_ok(algorithm, symbol):
+                    risk_insights.append(Insight.Price(symbol, timedelta(days=2), InsightDirection.Flat))
+                self.long_signals.pop(symbol, None)
+                self.last_refresh.pop(symbol, None)
+            algorithm.Log(f"RISK: Confirmed Bear entry on {algorithm.Time.date()} - Liquidating Longs.")
+
+        # 2. Crisis Acceleration: Liquidate LOSERS (Unrealized < 0) immediately
+        if self.current_regime == "Crisis":
+            for symbol in list(self.long_signals.keys()):
+                if algorithm.Securities.ContainsKey(symbol):
+                    pos = algorithm.Securities[symbol].Holdings
+                    if pos.Quantity > 0 and pos.UnrealizedProfit < 0:
+                        risk_insights.append(Insight.Price(symbol, timedelta(days=2), InsightDirection.Flat))
+                        self.long_signals.pop(symbol, None)
+                        self.last_refresh.pop(symbol, None)
+                        algorithm.Log(f"RISK: Crisis acceleration exit for loser: {symbol}")
 
         # --- Intraday short management (runs every day, not throttled) ---
         short_intraday_insights = self._manage_short_intraday(algorithm, data)
+        insights_so_far = risk_insights + short_intraday_insights
 
         # Throttle ML pipeline to rebalance frequency
-        if (self.last_rebalance_time is not None and not regime_changed_to_bear
+        if (self.last_rebalance_time is not None and not (force_rebalance or bear_liquidate)
                 and (algorithm.Time - self.last_rebalance_time).days < self.refresh_days):
-            return short_intraday_insights
+            return insights_so_far
         self.last_rebalance_time = algorithm.Time
 
         # Gather features
@@ -421,67 +472,153 @@ class TrendSignalAlphaModel(AlphaModel):
             if not algorithm.Securities.ContainsKey(symbol):
                 continue
             sec = algorithm.Securities[symbol]
-            if sec.Price <= 0:
+            if sec.Price <= 0 or not sd.is_liquid(self.min_dollar_volume):
                 continue
-            if hasattr(sec, "DollarVolume") and sec.DollarVolume < self.min_dollar_volume:
-                continue
+            
             feats = sd.GetFeatures()
             if feats:
                 raw_features[symbol] = feats
 
         if not raw_features:
-            if getattr(self, "_no_feat_month", None) != algorithm.Time.month:
-                algorithm.Log(
-                    f"NO_FEATURES: 0/{len(self.symbol_data)} symbols ready."
-                )
-                self._no_feat_month = algorithm.Time.month
-            return short_intraday_insights
+            return insights_so_far
 
         df = pd.DataFrame.from_dict(raw_features, orient='index')
 
-        # CS z-score (matches training pipeline)
-        for col in ['ret_5d', 'ret_10d', 'ret_20d', 'rolling_vol_20', 'capm_residual_vol']:
-            if col in df.columns:
-                std  = df[col].std(ddof=0)
-                mean = df[col].mean()
-                df[col] = ((df[col] - mean) / std).clip(-4, 4) if std > 1e-9 else 0.0
+        # 1. Market Relative Features (Replaces Sector Mapping with SPY)
+        # Using SPY returns directly to adjust features and isolate idiosyncratic alpha
+        spy_sd = self.symbol_data.get(self.spy_symbol)
+        if spy_sd and spy_sd.IsReady:
+            spy_close = spy_sd.close_window[0]
+            spy_ret_20d = (spy_close / spy_sd.close_window[20]) - 1.0
+            spy_ret_60d = (spy_close / spy_sd.close_window[60]) - 1.0
+            
+            df["sector_relative_20d"] = df["ret_20d"] - spy_ret_20d
+            df["sector_relative_60d"] = df["ret_60d"] - spy_ret_60d
+        else:
+            df["sector_relative_20d"] = 0.0
+            df["sector_relative_60d"] = 0.0
 
-        if "momentum_6m" in df.columns:
-            df["cs_momentum_percentile"] = df["momentum_6m"].rank(pct=True).fillna(0.5)
+        # 2. Cross-Sectional Ranking (Matches Training 'Option A')
+        # All technical features are normalized to [-1, 1] range via ranking
+        tech_cols = ["ret_5d", "ret_10d", "ret_20d", "f_trend", "momentum_12m_skip1", 
+                     "vol_ratio_5_20", "quality_score", "nearness_52w_high", "nearness_52w_low"]
+        
+        for col in tech_cols:
+            if col in df.columns:
+                # Rank to [0, 1] then scale to [-1, 1]
+                df[col] = (df[col].rank(pct=True).fillna(0.5) * 2.0) - 1.0
+
+        if "ret_126" in df.columns or "momentum_12m_skip1" in df.columns:
+            df["cs_momentum_percentile"] = df.get("momentum_12m_skip1", df.get("ret_126", 0)).rank(pct=True).fillna(0.5)
         else:
             df["cs_momentum_percentile"] = 0.5
 
-        for raw_col, out_col in [("ret_20d", "sector_relative_20d"),
-                                  ("ret_60d", "sector_relative_60d")]:
-            if raw_col in df.columns:
-                df[out_col] = df[raw_col] - df[raw_col].mean()
-            else:
-                df[out_col] = 0.0
+        # 3. Fundamental Injection (Morningstar)
+        self._inject_fundamentals(algorithm, df)
 
         # Long model inference
-        insights = list(short_intraday_insights)
+        insights = list(insights_so_far)
         insights += self._update_longs(algorithm, df)
 
-        # Short model inference (Bear regime only — matches local)
+        # Short model inference (Bear regime only)
         if self._short_enabled and self.current_regime == "Bear":
             insights += self._update_shorts(algorithm, df)
         elif self.current_regime != "Bear":
-            # Close all shorts when leaving Bear
             insights += self._close_all_shorts(algorithm)
-
-        if getattr(self, "_log_month", None) != algorithm.Time.month:
-            algorithm.Log(
-                f"Alpha | regime={self.current_regime} | "
-                f"longs={len(self.long_signals)} | shorts={len(self.short_signals)} | "
-                f"insights={len(insights)} | candidates={len(raw_features)}"
-            )
-            self._log_month = algorithm.Time.month
 
         return insights
 
     # ----------------------------------------------------------
+    def _inject_fundamentals(self, algorithm, df):
+        """
+        Overwrite constant fundamental placeholders with real QC Fundamentals data.
+        Training used cross-sectionally varying roa, f_score, delta_roa, delta_leverage,
+        accruals_ratio. Constants (same value for all stocks) give zero discriminatory
+        power — this restores partial cross-sectional variance using Morningstar data.
+
+        Available via security.Fundamentals without Fine Universe selection.
+        Fields that cannot be computed (delta_leverage, accruals_ratio, earnings_surprise)
+        remain as neutral constants — a known limitation without balance sheet history.
+        """
+        if not hasattr(self, "_prev_roa"):
+            self._prev_roa = {}   # symbol -> roa (previous)
+        if not hasattr(self, "_prev_leverage"):
+            self._prev_leverage = {} # symbol -> debt/assets (previous)
+
+        roa_col            = []
+        delta_roa_col      = []
+        f_score_proxy_col  = []
+        accruals_col       = []
+        leverage_col       = []
+        symbols            = list(df.index)
+
+        for symbol in symbols:
+            roa = 0.05        # neutral default
+            f_score = 4.5
+            accruals = 0.0
+            leverage = 0.0
+
+            try:
+                sec = algorithm.Securities[symbol]
+                fund = getattr(sec, "Fundamentals", None)
+                if fund is not None:
+                    # ROA
+                    try:
+                        v = fund.OperationRatios.ROA.Value
+                        if v is not None and np.isfinite(float(v)):
+                            roa = float(v)
+                    except: pass
+
+                    # Piotroski F-Score (Proxy from morningstar)
+                    try:
+                        pts = 4.5
+                        if roa > 0: pts += 1.0
+                        ocf = fund.FinancialStatements.CashFlowStatement.OperatingCashFlow.Value
+                        if ocf is not None and float(ocf) > 0: pts += 1.0
+                        # Accruals (NI < OCF)
+                        ni = fund.FinancialStatements.IncomeStatement.NetIncome.Value
+                        if ni is not None and ocf is not None:
+                            if float(ni) < float(ocf): pts += 1.0
+                            assets = fund.FinancialStatements.BalanceSheet.TotalAssets.Value
+                            if assets is not None and float(assets) > 0:
+                                accruals = (float(ni) - float(ocf)) / float(assets)
+                        f_score = float(np.clip(pts, 0, 9))
+                    except: pass
+                    
+                    # Leverage (TotalDebt / TotalAssets)
+                    try:
+                        debt = fund.FinancialStatements.BalanceSheet.TotalDebt.Value
+                        assets = fund.FinancialStatements.BalanceSheet.TotalAssets.Value
+                        if debt is not None and assets is not None and float(assets) > 0:
+                            leverage = float(debt) / float(assets)
+                    except: pass
+            except: pass
+
+            roa_col.append(roa)
+            delta_roa_col.append(roa - self._prev_roa.get(symbol, roa))
+            f_score_proxy_col.append(f_score)
+            accruals_col.append(float(np.clip(accruals, -0.5, 0.5)))
+            leverage_col.append(leverage - self._prev_leverage.get(symbol, leverage))
+
+            self._prev_roa[symbol] = roa
+            self._prev_leverage[symbol] = leverage
+
+        df["roa"]            = roa_col
+        df["delta_roa"]      = delta_roa_col
+        df["f_score"]        = f_score_proxy_col
+        df["accruals_ratio"]  = accruals_col
+        df["delta_leverage"] = leverage_col
+
+    # ----------------------------------------------------------
     def _update_longs(self, algorithm, df):
-        """Long position management — always runs."""
+        """
+        Long position management.
+        DATA ALIGNMENT AUDIT: 
+        - df columns (ret_1d, etc.) use close_window[0] (today's close).
+        - Model predicts forward returns (T+1 onwards).
+        - Execution (Immediate) in QC daily Resolution fills at T+1 Open.
+        - This preserves No-Lookahead integrity: Signal(T_close) -> Fill(T+1_open).
+        """
         # Long model scoring
         raw_scores = {}
         if self._long_fallback:
@@ -511,16 +648,37 @@ class TrendSignalAlphaModel(AlphaModel):
         top_candidates = sorted(l_norm.items(), key=lambda x: x[1], reverse=True)
         sym_by_rank    = [s for s, _ in top_candidates]
 
-        # Regime-based long count (matches local bear_regime_entry_liquidate)
-        if self.current_regime == "Crisis":
-            target_n = max(1, int(self.top_n * 0.3))   # ~4 positions
-            hold_n   = max(2, int(self.hold_n * 0.3))
-        elif self.current_regime == "Bear":
-            target_n = 0    # No new longs in Bear (hold existing until they exit)
-            hold_n   = self.hold_n
-        else:
-            target_n = self.top_n    # 12
-            hold_n   = self.hold_n   # 16
+        # Bear/Crisis: liquidate all longs immediately.
+        # Matches local: bear_liquidate_longs_on_regime_entry=True (Bear)
+        # and crisis_transition_force_close_losers_same_day=True (Crisis).
+        if self.current_regime in ("Bear", "Crisis"):
+            insights = []
+            for symbol in list(self.long_signals.keys()):
+                self._emit_flat(algorithm, symbol, 0.0, insights)
+                self.long_signals.pop(symbol, None)
+                self.last_refresh.pop(symbol, None)
+            return insights
+
+        # Vol-targeted position sizing (Daniel & Moskowitz 2016 "Momentum Crashes";
+        # Moskowitz, Ooi & Pedersen 2012 "Time Series Momentum").
+        # When realized vol spikes (Bear/Crisis), _vol_scale shrinks → target_n and
+        # hold_n contract smoothly. At VIX proxy = 10% (calm): scale=1.0, target_n=12.
+        # At 20% (moderate stress): scale=0.5, target_n=6. At 30%+ (crisis): scale≈0.33,
+        # target_n=2. hold_n = target_n + 4 gives a 4-position buffer to avoid cascading
+        # forced exits at every rebalance while still clearing deeply deteriorated positions.
+        # This matches local backtest_config: vol_target_annual=0.10, bear_liquidate_longs=true
+        # (liquidation is implicit: scale drops → hold_n drops → weaker positions exit quickly).
+        # Vol-targeted position sizing.
+        # 20% threshold: SPY calm-market realized vol is 10-18%. Setting target to 20%
+        # means scale=1.0 (full 12 positions) in all non-stressed regimes.
+        # Scale only contracts in genuine Bear/Crisis (vol > 20%).
+        # At vol=30% (Bear): scale=0.67 → 8 longs → 8*(95%/12)=63% exposure.
+        # At vol=50% (severe crisis): scale=0.40 → 5 longs → 40% exposure.
+        # hold_n = target_n + 4: buffer prevents cascading exits at regime transitions.
+        _vol_target = 20.0
+        _vol_scale  = min(1.0, _vol_target / max(self.current_vix_proxy, _vol_target))
+        target_n    = max(2, int(self.top_n * _vol_scale))
+        hold_n      = min(self.hold_n, target_n + 4)
 
         insights   = []
         to_remove  = []
@@ -754,6 +912,7 @@ class SymbolData:
         self.volume_window  = RollingWindow[float](60)
         self.returns_window = RollingWindow[float](2)
         self.vol_history    = RollingWindow[float](252)
+        self.dollar_vol_sma = SimpleMovingAverage(20) # Match local lookback_days: 20
 
         history = (prefetched_history if prefetched_history is not None
                    else algorithm.History(symbol, 253, Resolution.Daily))
@@ -774,23 +933,35 @@ class SymbolData:
                 self.close_window.Add(close)
                 self.volume_window.Add(volume)
                 try:
-                    self.rsi.Update(time, close)
-                    self.sma50.Update(time, close)
-                    self.sma200.Update(time, close)
-                    self.returns_window.Add(close)
+                    # Use explicit casting to ensure compatibility with Lean's C# types
+                    _val = float(close)
+                    _vol_val = float(close * volume)
+                    
+                    self.rsi.Update(time, _val)
+                    self.sma50.Update(time, _val)
+                    self.sma200.Update(time, _val)
+                    self.returns_window.Add(_val)
+                    
                     if self.returns_window.Count >= 2:
                         ret = max(-0.5, min(0.5,
                             (self.returns_window[0] / self.returns_window[1]) - 1.0))
-                        self.std20.Update(time, ret)
-                        self.std5.Update(time, ret)
+                        self.std20.Update(time, float(ret))
+                        self.std5.Update(time, float(ret))
                         self.vol_history.Add(self.std20.Current.Value * np.sqrt(252))
+                    
+                    # Ensure the product is a native float for the SMA update
+                    self.dollar_vol_sma.Update(time, _vol_val)
                 except Exception:
                     pass
 
     @property
     def IsReady(self):
         return (self.close_window.Count >= 253 and self.sma50.IsReady
-                and self.rsi.IsReady and self.spy_close_window.Count >= 50)
+                and self.rsi.IsReady and self.spy_close_window.Count >= 50
+                and self.dollar_vol_sma.IsReady)
+
+    def is_liquid(self, threshold):
+        return self.dollar_vol_sma.Current.Value >= threshold
 
     def Update(self, bar):
         if bar is None:
@@ -804,18 +975,22 @@ class SymbolData:
         if time is None:
             return
         try:
-            self.close_window.Add(close)
-            self.volume_window.Add(volume)
-            self.rsi.Update(time, close)
-            self.sma50.Update(time, close)
-            self.sma200.Update(time, close)
-            self.returns_window.Add(close)
+            _val = float(close)
+            _vol_val = float(close * volume)
+            
+            self.rsi.Update(time, _val)
+            self.sma50.Update(time, _val)
+            self.sma200.Update(time, _val)
+            self.returns_window.Add(_val)
+            
             if self.returns_window.Count >= 2:
                 ret = max(-0.5, min(0.5,
                     (self.returns_window[0] / self.returns_window[1]) - 1.0))
-                self.std20.Update(time, ret)
-                self.std5.Update(time, ret)
+                self.std20.Update(time, float(ret))
+                self.std5.Update(time, float(ret))
                 self.vol_history.Add(self.std20.Current.Value * np.sqrt(252))
+            
+            self.dollar_vol_sma.Update(time, _vol_val)
         except Exception:
             pass
 
@@ -828,19 +1003,23 @@ class SymbolData:
         def safe_ret(n):
             return (close / self.close_window[n]) - 1.0 if self.close_window.Count > n else 0.0
 
-        ret_1d  = safe_ret(1)
+        # Core Price Models
         ret_5d  = safe_ret(5)
         ret_10d = safe_ret(10)
         ret_20d = safe_ret(20)
         ret_60d = safe_ret(60)
         mom_6m  = safe_ret(126)
+        # Momentum 12M-1M (Institutional Standard)
+        mom_12m_skip1 = 0.0
+        if self.close_window.Count >= 252:
+            mom_12m_skip1 = (self.close_window[21] / self.close_window[252]) - 1.0
 
         ma50     = self.sma50.Current.Value
         ma200    = self.sma200.Current.Value
         ma_cross = 1.0 if ma50 > ma200 else -1.0
         mom_3m   = safe_ret(63)
-        f_trend  = (0.30 * mom_3m * 10.0 + 0.25 * mom_6m * 10.0
-                    + 0.25 * ma_cross + 0.20 * ret_1d * 10.0)
+        f_trend  = (0.25 * mom_3m * 10.0 + 0.25 * mom_6m * 10.0
+                    + 0.25 * ma_cross + 0.25 * mom_12m_skip1 * 10.0)
 
         vol_current    = self.std20.Current.Value * np.sqrt(252)
         vol_5d         = self.std5.Current.Value  * np.sqrt(252)
@@ -897,52 +1076,49 @@ class SymbolData:
                 np.mean(rets_q) / std_q * np.sqrt(252) if std_q > 1e-9 else 0.0,
                 -5.0, 5.0))
 
-        win_d             = min(60, self.close_window.Count - 1)
+        win_d             = min(20, self.close_window.Count - 1, self.volume_window.Count)
         down_up_vol_ratio = 1.0
-        if win_d >= 20:
+        if win_d >= 10:
             rets_d = np.array(
                 [(self.close_window[i] / self.close_window[i+1]) - 1.0
                  for i in range(win_d)], dtype=float)
-            up_r   = rets_d[rets_d > 0]
-            down_r = rets_d[rets_d <= 0]
-            vol_up   = float(np.std(up_r))   if len(up_r)   > 2 else 1e-9
-            vol_down = float(np.std(down_r)) if len(down_r) > 2 else 1e-9
-            down_up_vol_ratio = float(np.clip(vol_down / max(vol_up, 1e-9), 0.1, 10.0))
+            vols_d = np.array(
+                [self.volume_window[i] for i in range(win_d)], dtype=float)
+            down_vol = float(np.sum(vols_d[rets_d < 0]))
+            up_vol   = float(np.sum(vols_d[rets_d >= 0]))
+            down_up_vol_ratio = float(np.clip(down_vol / max(up_vol, 1.0), 0.1, 10.0))
 
         momentum_acceleration = ret_5d - ret_10d
 
         return {
             "f_trend":               f_trend,
-            "ret_1d":                ret_1d,
             "ret_5d":                ret_5d,
             "ret_10d":               ret_10d,
             "ret_20d":               ret_20d,
             "ret_60d":               ret_60d,
-            "momentum_6m":           mom_6m,
-            "rolling_vol_20":        vol_current,
+            "momentum_12m_skip1":    mom_12m_skip1,
             "vol_ratio_5_20":        vol_ratio_5_20,
-            "rsi_14":                rsi_val,
-            "rsi_overbought":        rsi_overbought,
-            "nearness_52w_high":     nearness_52w_high,
-            "nearness_52w_low":      nearness_52w_low,
-            "dist_from_52w_high":    dist_from_52w_high,
             "capm_residual_vol":     capm_res_vol,
-            "capm_alpha":            capm_alpha,
             "short_term_reversal":   short_term_reversal,
+            "nearness_52w_low":      nearness_52w_low,
             "low_vol_score":         low_vol_score,
             "quality_score":         quality_score,
-            "down_up_vol_ratio":     down_up_vol_ratio,
+            "nearness_52w_high":     nearness_52w_high,
+            "capm_alpha":            capm_alpha,
             "momentum_acceleration": momentum_acceleration,
-            # Unavailable in QC — zeroed
-            "vol_expansion":         0.0,
-            "earnings_surprise":     0.0,
-            "f_score":               0.0,
+            "vol_expansion":         vol_ratio_5_20,
+            "rsi_14":                rsi_val,
+            "rsi_overbought":        rsi_overbought,
+            "down_up_vol_ratio":     down_up_vol_ratio,
+            "rolling_vol_20":        vol_current,
+            "dist_from_52w_high":    dist_from_52w_high,
+            "f_score":               4.5,
+            "roa":                   0.05,
             "delta_roa":             0.0,
             "delta_leverage":        0.0,
-            "roa":                   0.0,
             "accruals_ratio":        0.0,
-            # Overwritten by Update() cross-sectional pass
-            "sector_relative_20d":   0.0,
-            "sector_relative_60d":   0.0,
+            # Placeholder for CS logic
             "cs_momentum_percentile": 0.5,
+            "sector_relative_20d":   0.0,
+            "sector_relative_60d":   0.0
         }

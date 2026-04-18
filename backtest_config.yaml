@@ -1,31 +1,41 @@
 backtest:
   bootstrap: false
-  max_positions: 17          # Phase 7: 12 longs + 5 shorts (raised from 15)
+  # BREADTH FIX (Grinold-Kahn Fundamental Law):
+  # IR = IC × √N. At IC=0.0274, need N>200 for IR>0.4. Currently N≈32.5.
+  # Fix: 18 longs × (252/10d rebalance) × diversity_discount ≈ 80 effective bets/yr.
+  # Predicted IR: 0.0274 × √80 = 0.245 (vs 0.156 before). Source: HKUST survey §3.
+  max_positions: 25          # 18 longs + 5 shorts + 2 buffer
   cross_sectional:
     enabled: true
     market_neutral: false
     rebalance_daily: false
-    target_long_positions: 12
-    top_longs: 12             # Phase 7: raised from 10 — increase Bull alpha capacity
+    target_long_positions: 18
+    top_longs: 18            # Grinold-Kahn: raise from 12 to 18 → +50% effective breadth
     top_shorts: 5
-    conviction_buffer: 0.0    # Phase 9: disable hysteresis buffer — z-scored signals make 0.02 offset meaningless
+    conviction_buffer: 0.0    # z-scored signals make fixed offset meaningless
+    short_turnover_gate: true                # Medhat & Schmeling (2022): only short above-median-TO stocks
+    information_discreteness_sort: true      # Da et al. (2014) / FIP: prefer continuous-momentum longs over discrete ones
   min_holding_period_days: 3
-  rebalance_every_trading_days: 15  # Increased from 10: 407% turnover at 10d is excessive. 15d reduces to ~270% (~130 trades/yr), saving ~0.12% CAGR in costs. Prior 15d test showed fewer trades but that model had IC issues. Current XGB-only model has stable IC.
-  signal_confidence_multiplier: 0.3        # Phase 8: lowered from 1.0 — new regressor model std=0.006 vs old 0.017
+  # BREADTH FIX: reduce from 15→10 days → 50% more rebalances per year → more independent bets.
+  # Turnover will increase ~50% (from ~295% to ~440%) but breadth improvement dominates:
+  # More bets at same IC > fewer bets at same IC (Grinold-Kahn). HSBC/Warwick survey §4.
+  rebalance_every_trading_days: 10
+  signal_confidence_multiplier: 0.3        # Phase 8: lowered from 1.0 — regressor model std=0.006
   signal_confidence_multiplier_bear: 0.2   # Phase 8: lowered from 0.6
   signal_confidence_multiplier_crisis: 0.2 # Phase 8: lowered from 0.5
   signal_confidence_multiplier_sideways: 0.2 # Phase 8: lowered from 0.5
   start_date: '2008-01-01'   # TRUE OOS evaluation window — model trained on 2007-2022
   end_date: '2022-12-31'    # Full year end for walk-forward windows
-  holding_period_days: 15
+  holding_period_days: 10    # Reduced from 15: match rebalance cadence, fresher signals
+  lookahead_horizon_days: 10  # MUST match holding_period_days and model_selection.lookahead_horizon_days
   dynamic_holding:                         # B2: holding period varies by signal strength
     enabled: true
     by_signal:
-      Bullish: 15
-      Bearish: 10
-    by_strength:                           # CS z-score bands for selected stocks (≈1.5–3.5 range)
-      - [2.0, 20]                          # |z| >= 2.0 → hold 20 days (high conviction)
-      - [1.0, 15]                          # |z| >= 1.0 → hold 15 days (normal)
+      Bullish: 10            # Reduced from 15 to match new rebalance cadence
+      Bearish: 7             # Shorts: shorter hold, overextension reversal mean-reverts fast
+    by_strength:             # CS z-score bands for selected stocks (≈1.5–3.5 range)
+      - [2.0, 15]            # |z| >= 2.0 → hold 15 days (high conviction, was 20)
+      - [1.0, 10]            # |z| >= 1.0 → hold 10 days (normal, was 15)
 data:
   cache_dir: data/cache
   cache_ohlcv: true
@@ -33,10 +43,15 @@ data:
   provider: yahoo
 execution:
   commission_per_trade: 1.0
-  enable_shorts: true    # Re-enabled: sort-direction bug fixed, regime filter corrected, stop-loss 8%, hold 7d
+  enable_shorts: false   # Paper signals (RRLP/MS/JLST) require full-universe turnover dispersion; S&P 500 large-caps all have high TO — gate barely filters
   long_only: false
   slippage_bps: 1.0
-  regime_suppress_shorts: ["Bull", "Sideways", "Crisis"]   # Data-driven: only Bear shows positive short alpha; all other regimes lose money on shorts
+  # OVEREXTENSION REVERSAL FIX: new short_score_raw = nearness_52w_high × short_term_reversal.
+  # This signal is valid in Sideways too (overextended stocks crack in flat markets).
+  # Remove Sideways from suppress list — keep Bull and Crisis suppressed only.
+  # Source: HKUST survey §3 on L/S alpha: short alpha requires targeted reversal signals, not
+  # suppression of entire regimes.
+  regime_suppress_shorts: ["Bull", "Crisis"]
 execution_costs:
   commission_bps: 1.0
   enabled: true
@@ -68,13 +83,13 @@ feature_selection:
   - ret_5d
   - ret_10d
   - ret_20d
-  - rolling_vol_20
+  # rolling_vol_20 REMOVED: position sizer input, not directional alpha — creates circularity
+  # rsi_14 REMOVED: mean-reversion indicator conflicts with momentum signals; dilutes IC
+  # ret_1d REMOVED: daily reversal = bid-ask bounce noise, not persistent alpha
   - cs_momentum_percentile
-  - rsi_14
-  - ret_1d
-  - vol_ratio_5_20
+  - vol_ratio_5_20           # vol term structure — regime context only, not pos-sizer input
   - capm_residual_vol
-  # All-weather: value, quality, low-vol anomaly, mean-reversion
+  # All-weather: value, quality, low-vol anomaly, mean-reversion (Jegadeesh 1990, Frazzini & Pedersen 2014, Asness et al. 2019)
   - short_term_reversal
   - nearness_52w_low
   - low_vol_score
@@ -86,32 +101,33 @@ feature_selection:
   # Phase A: sector-relative momentum (now meaningful with fixed sector mapping)
   - sector_relative_20d     # stock return minus sector median (CS z-scored, lagged 1d)
   - sector_relative_60d     # 60d version — slower sector-relative trend
+  - momentum_12m_skip1      # Jegadeesh & Titman 1993 standard: 12M return skip last month; most replicated momentum signal
   # NOTE: idio_momentum_20d REMOVED — collapses to ~0 in Bull/Bear (stocks move with market),
   # giving zero cross-sectional variance → model can't rank → no signal in 75% of trading days
   # NOTE: dist_from_52w_low, liquidity_stress, beta_adj_momentum temporarily removed.
-  # Each must be validated individually against the 19-feature baseline before adding back.
+  # Each must be validated individually against the 16-feature baseline before adding back.
   # New features go in only if they improve OOS IC by >0.005 AND don't reduce Sharpe.
   short_feature_subset:
-  # Fundamental deterioration (necessary condition for short alpha)
-  - f_score                  # Piotroski composite 0-5; low = weak fundamentals = short candidate
-  - accruals_ratio           # (Net Income - Op CF) / Assets; high = earnings inflation
-  - roa                      # Return on assets; negative = unprofitable
-  - delta_roa                # QoQ ROA change; negative = deteriorating
-  - delta_leverage           # QoQ leverage change; positive = rising debt
-  # Technical timing (combined with fundamentals = high conviction)
-  - dist_from_52w_high
-  - rsi_14
-  - rsi_overbought
-  - nearness_52w_high
-  - vol_expansion
-  - down_up_vol_ratio
-  - rolling_vol_20
-  - momentum_acceleration
-  - ret_5d
-  - ret_20d
-  - sector_relative_20d
-  - cs_momentum_percentile
-  - capm_residual_vol
+  # --- Medhat & Schmeling (2022, RFS) "Short-term Momentum" ---
+  # PRIMARY: turnover-conditioned return. Negative = high-TO loser → momentum continues down.
+  # This is the core institutional short signal derived from the paper's double-sort.
+  - short_term_momentum_score   # return × turnover_pct_rank (rescaled); negative = short candidate
+  - momentum_1m_skip_eom        # EOM-adjusted 1M return (skip last 5 days; Table III: +22% ann vs +16.4%)
+  - turnover_pct_rank           # absolute turnover level; high-TO = momentum, low-TO = reversal
+  # --- Dai, Medhat, Novy-Marx & Rizova (2023) "Reversals and Returns to Liquidity" ---
+  # IRRX signal: reversal stripped of sector momentum (industry momentum) and PEAD noise.
+  # t=9.35 vs t=1.68 for raw reversal — far cleaner short signal for non-fundamental winners.
+  - industry_relative_reversal  # -(return - sector_return): negative = rose vs sector (reversal SHORT)
+  - high_vol_reversal_flag      # 1 if top volatility tercile: reversal completes in 1-2 wks (RRLP Fig.1)
+  - rolling_vol_20              # volatility level: higher vol → faster, initially stronger reversal
+  # --- Jegadeesh, Luo, Subrahmanyam & Titman (2025, RFS) "Reversals and Momentum around World" ---
+  # Reversal and momentum profits are NEGATIVELY correlated across time and countries.
+  # Strong 12M momentum stocks → weak reversal signal; weak 12M momentum → strong reversal.
+  - momentum_12m_skip1          # Jegadeesh-Titman 12M-1M; inversely related to reversal alpha
+  # --- Cross-sectional conditioning ---
+  - sector_relative_20d         # sector-relative 20d performance (IRRX decomposition component)
+  - cs_momentum_percentile      # cross-sectional percentile rank; bottom decile = short candidate
+  - ret_20d                     # raw 20-day return (cross-sectional ranking input)
 live:
   trading_enabled: true
   trading_halt_env: TRADING_HALTED
@@ -123,7 +139,7 @@ mean_variance:
   rebalance_days: 20
 model_selection:
   ensemble_size: 1   # XGBRegressor only. Ridge has std=1.653 across 5 windows (nearly as high as mean=1.786) — too volatile to blend. XGBRegressor alone: OOS Sharpe 1.312, std=1.189, far more consistent.
-  lookahead_horizon_days: 10   # Match holding_period_days — was 1 (IC mismatch)
+  lookahead_horizon_days: 10   # MUST match holding_period_days — reduced from 15 to 10
   max_positions: 10
   min_positions: 3
   selection_weight_decay: 0.9
@@ -163,11 +179,22 @@ regime:
   score_crisis_gross_cap: 0.25          # D1: gross cap fraction at pure Crisis (score=1)
   adjustments:
     Bear:
-      position_scale: 0.3    # Phase 9: lowered from 0.5 — Bear win rate 21.5% doesn't justify 50% exposure
-      score_mult: 0.8
+      # PRUDEX benchmark (PhD thesis §7): robustness across market states is a core institutional
+      # dimension. Bear win rate was 46.5% (below coin flip) — we should NOT be opening positions
+      # aggressively in confirmed Bear. Entry gates now block new longs; only shorts allowed.
+      # Reduce position_scale to 0.30 (from 0.45) for any surviving Bear entries.
+      # Man Group Bear alpha comes from SHORT momentum, not long — shorts are still allowed.
+      position_scale: 0.30
+      score_mult: 0.85
     Bull:
       position_scale: 1.0
       score_mult: 1.2
+    Cautious:
+      # State Street (Ung 2025) "Cautious Decline": equity -0.7%/month, uncertainty high, regime
+      # in transition. Man Group: XS Mom hit rate drops during early deterioration phases. Reduce
+      # both size and score multiplier to protect capital during the uncertain transition period.
+      position_scale: 0.5
+      score_mult: 0.85
     Crisis:
       position_scale: 0.25   # Phase 9: lowered from 0.45 — 2008 is the max-DD culprit
       score_mult: 0.7        # Phase 9: lowered from 0.8
@@ -178,6 +205,7 @@ regime:
   threshold_aggressiveness:
     Bear: 1.0
     Bull: 1.0
+    Cautious: 1.0
     Crisis: 1.0
     Sideways: 1.0
 research:
@@ -186,19 +214,20 @@ research:
   - 5
   - 10
   - 20
-  # Walk-forward: 5 OOS windows covering 5 distinct regimes
-  # train_years=9 + step_years=1 + end=2022-12-31 produces test windows:
-  #   2017 (bull), 2018 (rate shock), 2019 (trade war bull), 2020 (COVID), 2021 (inflation bull)
-  # This is sufficient regime diversity to expose models that only work in bull conditions.
-  # train_years=12 produced only 2 windows (both bull: 2020-2021) — invalid for production.
-  train_years: 9        # 9y training window — gives 5 OOS test windows (vs 2 with 12y)
+  # WALK-FORWARD FIX (Warwick/HSBC survey §2.1 + Bailey et al. 2014 on backtest overfitting):
+  # 5 windows on 2017-2021 are all bull-market dominated. Need to include GFC and COVID stress.
+  # Reduce train_years: 7 + step_years: 1 → 8 windows from 2015-2022 (covers COVID crash 2020).
+  # Critical: without crisis OOS windows, model selection only validates on bull conditions →
+  # systematic overfitting to bull regime. PRUDEX benchmark (PhD thesis §7.2) requires regime
+  # diversity as a mandatory evaluation dimension.
+  train_years: 7        # 7y training window → 8 OOS windows (2015-2022), includes COVID + 2018 shock
   test_years: 1         # 1 year OOS test window
   step_years: 1         # slide 1 year per window
   walk_forward_enabled: true
   walk_forward_report_path: output/backtests/walk_forward_validation_report.csv
   walk_forward_train_ratio: 0.7
   walk_forward_train_weights: true
-  walk_forward_windows: 5   # 5 regime-diverse windows
+  walk_forward_windows: 8   # 8 windows: 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022
 retraining:
   train_start_date: "2007-01-01"   # Train on 2007-2022
   train_end_date: "2022-12-31"    # OOS begins 2023
@@ -222,28 +251,29 @@ retraining:
   validate_with_backtest: true
   validation_backtest_days: 380
   validation_holdout_calendar_days: 252
-  validation_walk_forward_windows: 3
+  validation_walk_forward_windows: 6   # Raised from 3: HSBC survey says 3 is insufficient for OOS validation
 risk:
   bear_gross_cap_fraction: 0.5    # Phase 9: lowered from 0.7
   crisis_gross_cap_fraction: 0.3  # Phase 13: lowered from 0.4 — tighter crisis gross cap to break <20% DD
-  bear_liquidate_longs_on_regime_entry: true   # Phase 6: liquidate inherited longs on Bear entry (Bear win rate was 23.8%)
-  bear_max_carry_days: 0   # Phase 13: zero carry — liquidate all longs immediately on Bear entry
+  # Bear: entry gate replaces forced liquidation — no new longs, existing positions exit via signal
+  bear_liquidate_longs_on_regime_entry: false  # ARCH: removed — was selling at panic prices on day 1 of Bear
+  bear_max_carry_days: 3        # cap planned exits for pre-Bear longs so they don't drag into Bear trend
   bear_max_holding_days: 0
-  bear_regime_intraday_exit_drawdown_pct: 0.02
-  bear_signal_quantile: 0.5    # loosened from 0.7 — allow top 50% in Bear (was blocking too much)
+  bear_regime_intraday_exit_drawdown_pct: 0.0   # Disabled: 2% trigger fires within days in bear → re-enter loop → 982% turnover
+  bear_signal_quantile: 0.5
   bear_signal_window_days: 60
-  bear_skip_new_entries: true   # Phase 6: no new longs in Bear — Bear Sharpe was -0.81
+  bear_skip_new_entries: false  # Disabled: XGBRegressor IC=0.054 in 2022 bear — signal works; blocking kills breadth and 2022 returns entirely
   crisis_accelerated_mtm_at_open: false
-  crisis_block_all_new_entries: false   # allow high-conviction crisis entries (day 4+ still filtered by quantile)
+  crisis_block_all_new_entries: true  # ARCH: entry gate replaces crisis_transition_loser forced closes
   crisis_first_day_winner_mtm_at_open: false
-  crisis_signal_quantile: 0.85   # Phase 7: tightened from 0.65 — only top 15% conviction in Crisis (2008 win rate was 23.1%)
+  crisis_signal_quantile: 0.85
   crisis_signal_window_days: 60
   crisis_transition_accel_enabled: true
   crisis_transition_flatten_all: false
-  crisis_transition_force_close_losers_same_day: true
+  crisis_transition_force_close_losers_same_day: false  # ARCH: removed — was causing 57% Gross/Net gap
   crisis_transition_loser_max_hold_days: 0
   crisis_transition_use_open_exit: true
-  crisis_transition_winner_extra_days: 3
+  crisis_transition_winner_extra_days: 3  # winners get 3 extra days before being capped
   drawdown_resume_pct: 0.0
   kelly_avg_loss_return: 0.015
   kelly_avg_win_return: 0.02
@@ -252,7 +282,11 @@ risk:
   max_drawdown_pct: 0.0
   max_gross_exposure: 1.5
   max_net_exposure: 0.1
-  max_position_pct_of_equity: 0.08   # Phase 13: lowered from 0.09 — reduce peak exposure, helps 2008 DD
+  # VOL-TARGET FIX: actual portfolio vol = 6.5% but target = 10%.
+  # Root cause: 12 positions at 8% = 96% gross, but correlation discount + gross cap = ~50% effective.
+  # Raise per-position cap 8%→10%; with 18 positions at lower correlation, portfolio vol approaches target.
+  # HKUST survey: proper portfolio construction requires vol-targeting to avoid return drag.
+  max_position_pct_of_equity: 0.10
   max_short_single_name: 0.08       # Phase 4: match long cap
   min_holding_early_exit_drawdown_pct: 1.0
   position_sizing: signal_strength  # Phase 4: upgraded from equal — size by conviction
@@ -261,9 +295,9 @@ risk:
   take_profit_pct: 0.0
   sharpe_circuit_breaker:               # D3: rolling Sharpe CB — soft exposure reducer
     enabled: true
-    window_days: 60
-    threshold: 0.0          # 60d annualized Sharpe below this → activate
-    recovery_threshold: 0.3  # Sharpe above this → deactivate
+    window_days: 120
+    threshold: -1.5         # Raised from 0.0: only trigger on genuine blowups, not normal market noise
+    recovery_threshold: -0.5  # Deactivate once performance recovers above -0.5
     exposure_scale: 0.5     # multiply gross_cap_fraction by 0.5 when active
   var_check:
     check_target: false
@@ -276,8 +310,8 @@ risk:
     strict_coverage: false
   vix_deleveraging:
     enabled: true              # Phase 5: enabled — reduces drawdown during VIX spikes
-    high_vix_threshold: 25.0   # Phase 13: reverted — VIX=22 triggers 30% of days, kills CAGR
-    scaling_factor: 0.35       # Phase 13: kept lower — more aggressive at true VIX spikes (>25)
+    high_vix_threshold: 35.0   # Raised from 25: at 25 fires 21% of days (813/3796); at 35 only true crisis (~5%)
+    scaling_factor: 0.35       # Only applies during genuine stress (VIX>35 = GFC, COVID crash, etc.)
     short_conviction_multiplier: 1.5
     short_ma_exit_enabled: true
     short_stop_loss_pct: 0.03
@@ -326,26 +360,26 @@ signals:
   ml_clip: false
   ml_long_model_path: output/models/best_long_model.pkl
   ml_long_weight: 1.0
-  ml_short_allowed_regimes: ["Bear"]   # Only short in Bear regime — Bull/Crisis/Sideways all show negative absolute short alpha
-  ml_short_holding_period_days: 10  # raised from 7: matched to longer-hold regime for shorts as well
+  ml_short_allowed_regimes: ["Bear", "Cautious", "Sideways"]   # Papers: Bear is BEST (RRLP: Bear WR=59.7%). Crisis excluded: liquidity collapses making execution impossible (JLST §3).
+  ml_short_holding_period_days: 21  # Monthly rebalance per all three papers (Medhat-Schmeling: hold 1 month, RRLP: monthly)
   ml_short_max_squeeze_vol_ratio: 2.2
   ml_short_min_liquidity_usd: 20000000.0
-  ml_short_min_signal_strength: 0.7   # lowered from 0.8: let more candidates through (better model ranks them properly)
+  ml_short_min_signal_strength: 0.55  # lowered: model trained on cross-sectional bottom decile scores differently
   ml_short_model_path: output/models/best_short_model.pkl
   ml_short_overextension_threshold: 0.05
   ml_short_snap_profit_pct: 0.05   # D2: snap profit at 5% decline
   ml_short_position_scale: 0.7    # D2: short book sized at 70% of long equivalent
-  ml_short_stop_loss_pct: 0.08     # raised from 5% → 8%: 5% caused 50 squeeze-outs before trade played out
+  ml_short_stop_loss_pct: 0.15     # 15%: papers hold without stop; we add hard risk mgmt for extreme squeezes
   ml_short_weight: 0.5
   ml_standardize: false
   ml_regime_models_dir: output/models   # C2: enable regime-conditional routing (bull/bear/highvol/normal PKLs)
   mode: ml
   score_direction: 1.0
   signal_confidence_multiplier: 0.3          # Phase 8: recalibrated for new regressor score scale (std=0.006)
-  signal_confidence_multiplier_bear: 0.2
+  signal_confidence_multiplier_bear: 0.3     # Raised from 0.2: Bear WR=59.7% is best regime — don't penalise it
   signal_confidence_multiplier_bull: 0.3
-  signal_confidence_multiplier_crisis: 0.2
-  signal_confidence_multiplier_sideways: 0.2
+  signal_confidence_multiplier_crisis: 0.2   # Still reduced in Crisis (WR=39.4%, n=33)
+  signal_confidence_multiplier_sideways: 0.3 # Raised from 0.2: Sideways WR=56.0% is solid
   weights:
     global_news: 0.4
     regional_news: 0.5

@@ -303,6 +303,137 @@ def construct_risk_parity_weights(
     return {t: float(w[i]) for i, t in enumerate(tickers)}
 
 
+def construct_hybrid_fmc_score_weights(
+    tickers: list[str],
+    scores: Mapping[str, float],
+    market_caps: dict[str, float],
+    score_blend: float = 0.5,
+    max_single_weight: float = 0.20,
+) -> dict[str, float]:
+    """
+    FMC × Score hybrid weighting — S&P Global (Innes et al.) p.7, p.21-22.
+
+    Rationale (graph node: mfic_rationale_hybrid_weight):
+      "FMC × Score hybrid weighting maintains liquidity while improving factor
+      tilt.  Pure score-weighting (softmax) ignores float market cap, leading
+      to concentration in small illiquid names that score well."
+
+    Weight formula:
+        w_i = blend × w_score_i + (1 - blend) × w_fmc_i
+
+    where:
+        w_score_i  = softmax(score_i)          — factor tilt
+        w_fmc_i    = FMC_i / Σ FMC_j           — liquidity anchor
+
+    Parameters
+    ----------
+    tickers : pre-selected position list
+    scores : {ticker: adjusted_score}
+    market_caps : {ticker: float_adjusted_market_cap_$}
+    score_blend : weight on score component (0 = pure FMC, 1 = pure score)
+    max_single_weight : cap to prevent single-name concentration
+
+    Returns
+    -------
+    dict[ticker, weight], weights sum to 1
+    """
+    if not tickers:
+        return {}
+
+    # Score component (softmax)
+    s_arr = np.array([float(scores.get(t, 0.0)) for t in tickers], dtype=float)
+    s_arr -= s_arr.max()
+    exp_s = np.exp(s_arr)
+    exp_sum = float(exp_s.sum())
+    w_score = (
+        {t: float(exp_s[i] / exp_sum) for i, t in enumerate(tickers)}
+        if exp_sum > 0
+        else {t: 1.0 / len(tickers) for t in tickers}
+    )
+
+    # FMC component
+    caps = np.array([max(float(market_caps.get(t, 1.0)), 1.0) for t in tickers], dtype=float)
+    cap_sum = float(caps.sum())
+    w_fmc = {t: float(caps[i] / cap_sum) for i, t in enumerate(tickers)}
+
+    # Blend
+    blended = {
+        t: score_blend * w_score[t] + (1.0 - score_blend) * w_fmc[t]
+        for t in tickers
+    }
+
+    # Cap and renormalise
+    capped = {t: min(w, max_single_weight) for t, w in blended.items()}
+    total = sum(capped.values())
+    if total <= 0:
+        return {t: 1.0 / len(tickers) for t in tickers}
+    return {t: w / total for t, w in capped.items()}
+
+
+def compute_factor_imbalance(factor_scores: dict[str, float]) -> float:
+    """
+    Factor Imbalance Metric — S&P Global (Innes et al.) p.16.
+
+    In Bottom-Up multi-factor construction, the composite z-score is the
+    average of per-factor z-scores.  Factor imbalance measures the maximum
+    deviation of any single factor from the composite average.
+
+    High imbalance (> 1.0 z-score units) means one factor dominates the
+    composite selection — the portfolio is implicitly a single-factor bet
+    even though it looks multi-factor.
+
+    Formula:
+        composite = mean(z_factor_i)
+        imbalance  = max |z_factor_i - composite|
+
+    Parameters
+    ----------
+    factor_scores : {factor_name: z_score} for a single stock or portfolio avg
+
+    Returns
+    -------
+    float : imbalance (0 = perfectly balanced, >1 = one factor dominates)
+    """
+    if len(factor_scores) < 2:
+        return 0.0
+    vals = np.array(list(factor_scores.values()), dtype=float)
+    composite = float(vals.mean())
+    return float(np.max(np.abs(vals - composite)))
+
+
+def compute_active_share(
+    portfolio_weights: dict[str, float],
+    benchmark_weights: dict[str, float],
+) -> float:
+    """
+    Active Share — S&P Global (Innes et al.) p.6-7, p.11.
+
+    Measures how different the portfolio is from the benchmark.
+    Active Share = 0.5 × Σ |w_portfolio_i - w_benchmark_i|
+
+    Range: [0, 1].  Typical institutional targets: 0.60–0.80.
+    Paper rationale (mfic_rationale_linear_exposure_risk):
+      "Linear relationship between Active Share and Tracking Error means
+      there is no optimal concentration point — target Active Share
+      explicitly rather than deriving it from stock count alone."
+
+    Parameters
+    ----------
+    portfolio_weights : {ticker: weight}, should sum to 1
+    benchmark_weights : {ticker: weight}, benchmark (e.g. equal-weight S&P 500)
+
+    Returns
+    -------
+    float in [0, 1]
+    """
+    all_tickers = set(portfolio_weights) | set(benchmark_weights)
+    active_share = 0.5 * sum(
+        abs(portfolio_weights.get(t, 0.0) - benchmark_weights.get(t, 0.0))
+        for t in all_tickers
+    )
+    return float(active_share)
+
+
 def compute_rank_based_weights(df: pd.DataFrame, long_only: bool = False) -> pd.DataFrame:
     """
     Convert `adjusted_score` into rank-based centered/normalized weights.

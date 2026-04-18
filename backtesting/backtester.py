@@ -61,6 +61,11 @@ except ImportError:  # pragma: no cover
     vol_rank_features_by_ticker = None  # type: ignore[misc,assignment]
 from backtesting.candidates import build_ranked_candidates
 from backtesting.cross_sectional import build_cross_sectional_candidates
+from backtesting.portfolio_construction import (
+    construct_hybrid_fmc_score_weights,
+    compute_active_share,
+    compute_factor_imbalance,
+)
 
 try:
     from backtesting.regime_multipliers import (
@@ -127,6 +132,7 @@ class Backtester:
         self.regime_multipliers: dict[str, float] = {
             "Bull": 1.0,
             "Bear": 1.0,
+            "Cautious": 1.0,    # State Street (Ung 2025) "Cautious Decline" — 5th regime
             "Sideways": 1.0,
             "Crisis": 1.0,
         }
@@ -348,6 +354,36 @@ class Backtester:
                 )
             except Exception:
                 spy_df = None
+        # Active Share vs equal-weight benchmark (S&P Global, Innes et al. p.6-7).
+        # Computed from the final portfolio snapshot (last day of backtest).
+        # Institutional target: 0.60–0.80.
+        try:
+            if not trades.empty and "ticker" in trades.columns:
+                final_positions = (
+                    trades[trades["exit_date"].isna() | (pd.to_datetime(trades["exit_date"]) > pd.Timestamp(self.config.end_date))]
+                    if "exit_date" in trades.columns else trades
+                )
+                # Fallback: use all trades, weight by position_size
+                if final_positions.empty:
+                    final_positions = trades
+                if "position_size" in final_positions.columns and not final_positions.empty:
+                    pos_sizes = final_positions.groupby("ticker")["position_size"].sum()
+                    total_pos = pos_sizes.sum()
+                    if total_pos > 0:
+                        port_weights = (pos_sizes / total_pos).to_dict()
+                        # Equal-weight benchmark over all tickers in the universe
+                        all_tickers_universe = list(price_data.keys())
+                        n_bench = max(len(all_tickers_universe), 1)
+                        bench_weights = {t: 1.0 / n_bench for t in all_tickers_universe}
+                        active_share = compute_active_share(port_weights, bench_weights)
+                        result.metrics["active_share"] = round(active_share, 4)
+                        _as_flag = " ✓ institutional" if 0.60 <= active_share <= 0.80 else (" ↑ high concentration" if active_share > 0.80 else " ↓ index-hugging")
+                        print(f"  Active Share (vs equal-weight): {active_share:.2%}{_as_flag}")
+                        print(f"    (Institutional target: 0.60–0.80)")
+                        print()
+        except Exception as _as_exc:
+            logger.debug("Active share computation failed: %s", _as_exc)
+
         if spy_df is not None and not daily_equity.empty and "Close" in spy_df.columns:
             spy_ret = spy_df["Close"].pct_change()
             capm = compute_capm_metrics(daily_equity, spy_ret, risk_free_rate=risk_free_rate)
@@ -586,8 +622,11 @@ class Backtester:
         avg_pnl_long = float(longs["realized_pnl"].mean()) if not longs.empty else float("nan")
         avg_pnl_short = float(shorts["realized_pnl"].mean()) if not shorts.empty else float("nan")
 
-        # Average transaction cost as % of trade P&L (by absolute P&L to avoid sign issues)
-        cost_pct = df["transaction_cost"] / (df["realized_pnl"].abs() + 1e-8)
+        # Average transaction cost as % of trade P&L (by absolute P&L).
+        # Use a $1 floor so near-zero-P&L trades don't produce absurd ratios (e.g. $6 cost
+        # on a $0.001 P&L = 600,000%). Cap each ratio at 5x (500%) before averaging.
+        pnl_floor = df["realized_pnl"].abs().clip(lower=1.0)
+        cost_pct = (df["transaction_cost"] / pnl_floor).clip(upper=5.0)
         avg_cost_pct = float(cost_pct.mean())
 
         # Approximate % of portfolio that is short on average: fraction of trades that are shorts
@@ -623,7 +662,7 @@ class Backtester:
                 return float((x.mean() / std) * (252 ** 0.5))
 
             print("\nSharpe by regime (daily equity):")
-            for reg in ["Bull", "Bear", "Sideways", "Crisis"]:
+            for reg in ["Bull", "Bear", "Cautious", "Sideways", "Crisis"]:
                 mask = regimes == reg
                 reg_rets = rets[mask]
                 if not reg_rets.empty:
@@ -1230,24 +1269,7 @@ class Backtester:
             if hasattr(self.signal_engine, "set_regime"):
                 self.signal_engine.set_regime(regime_today)
 
-            # First day of Bear spell: exit inherited longs (holdthrough drag on Bear days).
-            # Applies regardless of long_only — in L/S mode we still want to unwind longs on Bear entry.
-            if (
-                bool(getattr(self.config, "bear_liquidate_longs_on_regime_entry", False))
-                and regime_today == "Bear"
-                and prev_reg_before is not None
-                and prev_reg_before != "Bear"
-            ):
-                for pos in list(self.portfolio.positions):
-                    if pos.direction > 0:
-                        self._close_position(
-                            pos,
-                            date,
-                            price_data,
-                            reason="bear_regime_entry_liquidate",
-                        )
-
-            # Bear entry: shorten remaining hold for ANY surviving long that wasn't liquidated above.
+            # Bear entry: shorten remaining hold for longs that entered before the Bear regime.
             # Positions opened before the regime switch survive the one-time liquidation check
             # (e.g. already in the portfolio on a non-entry Bear day, or entered during hysteresis window).
             # Cap their planned_exit to at most bear_max_carry_days ahead so they don't drag for 10 days.
@@ -1271,57 +1293,24 @@ class Backtester:
                 crisis_consecutive_days = 0
             prev_regime = regime_today
 
-            # Crisis transition: accelerate exit for positions entered before Crisis (holdthrough P&L drag).
-            # Losers: optional same-day forced close; winners: cap planned exit up to N days ahead.
+            # Crisis transition: cap exit dates for existing winners so they don't drag into prolonged Crisis.
+            # No forced closes — positions exit via their signal-based planned_exit_date.
+            # Entry gates (crisis_block_all_new_entries) prevent new risk from being opened.
             if (
                 regime_today == "Crisis"
                 and prev_reg_before is not None
                 and prev_reg_before != "Crisis"
                 and bool(getattr(self.config, "crisis_transition_accel_enabled", True))
             ):
-                flatten_all = bool(getattr(self.config, "crisis_transition_flatten_all", False))
-                if flatten_all:
-                    for pos in list(self.portfolio.positions):
-                        px = self._crisis_transition_exit_price(pos, date, price_data)
-                        self._close_position(
-                            pos,
-                            date,
-                            price_data,
-                            exit_price_override=px,
-                            reason="crisis_transition_flatten_all",
-                        )
-                else:
-                    loser_days = int(getattr(self.config, "crisis_transition_loser_max_hold_days", 0) or 0)
-                    winner_extra = int(getattr(self.config, "crisis_transition_winner_extra_days", 3) or 3)
-                    force_loser_same_day = bool(
-                        getattr(self.config, "crisis_transition_force_close_losers_same_day", True)
-                    )
-                    for pos in list(self.portfolio.positions):
-                        tk = pos.ticker
-                        if tk in price_data and date in price_data[tk].index:
-                            bar = price_data[tk].loc[date]
-                            o = float(bar.get("Open", np.nan))
-                            c = float(bar.get("Close", np.nan))
-                            px = o if np.isfinite(o) else c
-                            if np.isfinite(px):
-                                pos.current_price = px
-                        prof = float(pos.unrealized_return) > 0
-                        if (not prof) and force_loser_same_day:
-                            px = self._crisis_transition_exit_price(pos, date, price_data)
-                            self._close_position(
-                                pos,
-                                date,
-                                price_data,
-                                exit_price_override=px,
-                                reason="crisis_transition_loser",
-                            )
-                            continue
-                        extra_idx = winner_extra if prof else loser_days
-                        cap_idx = min(i + extra_idx, len(trading_days) - 1)
+                winner_extra = int(getattr(self.config, "crisis_transition_winner_extra_days", 3) or 3)
+                for pos in list(self.portfolio.positions):
+                    if hasattr(pos, "planned_exit_date"):
+                        cap_idx = min(i + winner_extra, len(trading_days) - 1)
                         forced_cap = pd.Timestamp(trading_days[cap_idx])
                         pe = pd.Timestamp(pos.planned_exit_date)
-                        pos.planned_exit_date = min(pe, forced_cap)
-                        pos.crisis_accelerated_exit = True
+                        if pe > forced_cap:
+                            pos.planned_exit_date = forced_cap
+                            pos.crisis_accelerated_exit = True
 
             # --- 0a. Mean-Variance weights (rebalance every rebalance_days; no lookahead) ---
             method = getattr(self.config, "position_sizing_method", None) or getattr(
@@ -1683,6 +1672,10 @@ class Backtester:
                 if regime_today == "Crisis":
                     # Crisis risk control is handled by the new vol-scaling + gross cap.
                     equal_size *= 1.0
+                elif regime_today == "Cautious":
+                    # State Street (Ung 2025): Cautious Decline has high uncertainty and equity
+                    # returns of -0.7%/month. Cap position size more tightly than Sideways.
+                    equal_size = min(equal_size, self.portfolio.equity * 0.045)
                 elif regime_today == "Sideways":
                     # Cap position size at 5% of portfolio per ticker in Sideways regime.
                     equal_size = min(equal_size, self.portfolio.equity * 0.05)
@@ -1703,6 +1696,38 @@ class Backtester:
                         t: min(_eq_cs * (s / total_abs), _eq_cs * _mxp_cs)
                         for t, s in scores_abs.items()
                     }
+            elif _cs_sizing_method == "fmc_hybrid" and cs_entries:
+                # FMC × Score hybrid weighting — S&P Global (Innes et al.) p.7, p.21-22.
+                # Uses float-adjusted market cap (proxied by 20d avg dollar volume when
+                # true market cap data is unavailable) as the liquidity anchor,
+                # blended with softmax-score tilt at score_blend ratio.
+                _eq_cs = self.portfolio.equity
+                _mxp_cs = float(getattr(self.config, "max_position_pct_of_equity", 0.12))
+                _blend = float(getattr(self.config, "fmc_score_blend", 0.5))
+                tickers_cs = [e["ticker"] for e in cs_entries]
+                scores_cs = {e["ticker"]: float(e.get("adjusted_score", 0.0) or 0.0) for e in cs_entries}
+                # Proxy FMC via 20d avg dollar volume (close × volume) when market cap unavailable
+                market_caps_proxy: dict[str, float] = {}
+                for _t in tickers_cs:
+                    try:
+                        _px = price_data.get(_t)
+                        if _px is not None and not _px.empty:
+                            _hist = _px.loc[_px.index <= date].tail(20)
+                            _close_col = "Close" if "Close" in _hist.columns else "close"
+                            _vol_col = "Volume" if "Volume" in _hist.columns else "volume"
+                            if _close_col in _hist.columns and _vol_col in _hist.columns:
+                                market_caps_proxy[_t] = float(
+                                    (_hist[_close_col] * _hist[_vol_col]).mean()
+                                )
+                    except Exception:
+                        pass
+                    if _t not in market_caps_proxy:
+                        market_caps_proxy[_t] = 1.0
+                weights_fmc = construct_hybrid_fmc_score_weights(
+                    tickers_cs, scores_cs, market_caps_proxy,
+                    score_blend=_blend, max_single_weight=_mxp_cs,
+                )
+                cs_signal_sizes = {t: _eq_cs * w for t, w in weights_fmc.items()}
 
             # If circuit breaker is active, do not open new positions today
             if self._trading_halted and pending_entries:
@@ -1791,6 +1816,11 @@ class Backtester:
                 if regime_today == "Crisis":
                     gross_cap_fraction_today = float(
                         getattr(self.config, "crisis_gross_cap_fraction", 0.6) or 0.6
+                    )
+                elif regime_today == "Cautious":
+                    # State Street "Cautious Decline": between Sideways and Bear
+                    gross_cap_fraction_today = float(
+                        getattr(self.config, "cautious_gross_cap_fraction", 0.65) or 0.65
                     )
                 elif regime_today == "Bear":
                     gross_cap_fraction_today = float(
@@ -1932,19 +1962,21 @@ class Backtester:
                 if regime_today in _suppress and entry.get("signal") == "Bearish":
                     continue
 
-                # Bear regime: optional hard block on NEW LONG entries (no edge in Bear for longs).
-                # Applies regardless of long_only flag — in L/S mode, Bear is where shorts generate
-                # alpha; opening new longs into a Bear trend bleeds P&L.
+                # Bear regime: block NEW LONG entries — no momentum edge in confirmed Bear.
+                # Shorts are still allowed (regime_suppress_shorts controls that separately).
+                # Existing positions run to their signal-based planned_exit_date (no forced close).
                 if (
                     regime_today == "Bear"
                     and entry.get("signal") != "Bearish"
-                    and bool(getattr(self.config, "bear_skip_new_entries", False))
+                    and bool(getattr(self.config, "bear_skip_new_entries", True))
                 ):
                     continue
 
-                # Crisis: optional hard block — no new entries for entire Crisis spell (fixes Crisis Sharpe from day 4+ entries).
+                # Crisis: block all new entries — HMM-assigned Crisis means systemic stress.
+                # The entry gate replaces panic-liquidation: don't open new risk, let existing
+                # positions exit naturally via planned_exit_date (capped by crisis_transition_accel).
                 if regime_today == "Crisis" and bool(
-                    getattr(self.config, "crisis_block_all_new_entries", False)
+                    getattr(self.config, "crisis_block_all_new_entries", True)
                 ):
                     continue
 
@@ -2519,7 +2551,8 @@ class Backtester:
 
             if cross_sectional:
                 new_entries, log_rows = build_cross_sectional_candidates(
-                    date, daily_signals[date_key], self.config, trading_days, i, regime
+                    date, daily_signals[date_key], self.config, trading_days, i, regime,
+                    sector_map=SECTOR_MAP if getattr(self.config, "sector_enabled", False) else None,
                 )
                 n = len(new_entries)
                 eq = self.portfolio.equity
@@ -2527,6 +2560,24 @@ class Backtester:
                 for r in log_rows:
                     r["position_size"] = per
                 daily_allocation_rows.extend(log_rows)
+
+                # Factor Imbalance diagnostic — S&P Global (Innes et al.) p.16.
+                # Measures whether one factor dominates the composite score today.
+                # High imbalance (>1.0) means the portfolio is implicitly single-factor.
+                if new_entries and getattr(self.config, "log_factor_imbalance", True):
+                    _fi_scores: dict[str, float] = {}
+                    for _sig_ticker, _sig_row in daily_signals[date_key]:
+                        _fi_scores["adjusted_score"] = _fi_scores.get("adjusted_score", 0.0) + float(_sig_row.get("adjusted_score", 0.0) or 0.0)
+                        _fi_scores["trend_score"] = _fi_scores.get("trend_score", 0.0) + float(_sig_row.get("trend_score", 0.0) or 0.0)
+                        _fi_scores["short_score"] = _fi_scores.get("short_score", 0.0) + float(_sig_row.get("short_score_raw", 0.0) or 0.0)
+                    n_sigs = max(len(daily_signals[date_key]), 1)
+                    _fi_avg = {k: v / n_sigs for k, v in _fi_scores.items()}
+                    _imbalance = compute_factor_imbalance(_fi_avg)
+                    if _imbalance > 1.0:
+                        logger.warning(
+                            "Factor imbalance %.2f on %s — one factor dominates composite (threshold 1.0).",
+                            _imbalance, date.date(),
+                        )
                 # Always execute cross-sectional entries at the next trading day
                 # (plus any configured execution_delay_days) at that day's open.
                 # Do not schedule new entries for tickers we already hold (re-entry only after expiry).

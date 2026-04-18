@@ -22,7 +22,13 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from features.feature_pipeline import calculate_core_trend_features as build_features
+from features.feature_pipeline import (
+    calculate_core_trend_features as build_features,
+    calculate_short_logic_features,
+    calculate_factor_momentum_consistency,
+    calculate_information_discreteness,
+    calculate_momentum_features,
+)
 from agents.volatility_agent.volatility_model import (
     compute_rolling_confidence,
     compute_vol_term_structure,
@@ -42,12 +48,26 @@ def classify_final_signal(adjusted_trend: float) -> str:
         return "Neutral"
 
 def compute_rolling_trend_scores(features: pd.DataFrame) -> pd.Series:
+    """
+    Composite time-series momentum score per stock.
+
+    Weights follow Bird, Gao & Yeung (2015): 12M-1M momentum is the dominant
+    TS signal; 6M and 3M add recency; MA crossover provides a non-return-based
+    trend confirmation.  daily_return removed — it captures bid-ask bounce at
+    daily resolution and adds noise that hurts 15-day holding IC.
+    """
     scale = 10.0
+    # 12M-1M is the standard Jegadeesh-Titman window; fall back to 6M if not yet computed.
+    mom_12m = (
+        features["momentum_12m_skip1"]
+        if "momentum_12m_skip1" in features.columns
+        else features["momentum_6m"]
+    )
     scores = (
-        0.30 * features["momentum_3m"] * scale
+        0.25 * features["momentum_3m"] * scale
         + 0.25 * features["momentum_6m"] * scale
         + 0.25 * features["ma_crossover_signal"]
-        + 0.20 * features["daily_return"] * scale
+        + 0.25 * mom_12m * scale
     )
     return scores
 
@@ -320,6 +340,44 @@ class SignalEngine:
         if features.empty:
             logger.warning("SignalEngine: build_features returned empty frame; no signals.")
             return pd.DataFrame()
+
+        # ------------------------------------------------------------------
+        # Research-paper routing features — computed once per ticker, used by
+        # cross_sectional.py as tiebreakers (ID sort, consistency) and gates
+        # (turnover gate for shorts).  These are NOT ML model inputs.
+        #
+        # Must be computed here because signals.py calls only
+        # calculate_core_trend_features (6 basic features).  The 4 derived
+        # features live in build_feature_matrix but that function is not
+        # called in the inference path.
+        # ------------------------------------------------------------------
+        _routing_df = stock_data.copy()
+        if "close" not in _routing_df.columns and "Close" in _routing_df.columns:
+            _routing_df["close"] = _routing_df["Close"]
+        if "volume" not in _routing_df.columns and "Volume" in _routing_df.columns:
+            _routing_df["volume"] = _routing_df["Volume"]
+        # Seed momentum columns needed by consistency and ID functions
+        if "close" in _routing_df.columns:
+            _close_r = _routing_df["close"]
+            _routing_df["momentum_3m"] = (_close_r / _close_r.shift(63) - 1).clip(-1.0, 5.0)
+            _routing_df["momentum_6m"] = (_close_r / _close_r.shift(126) - 1).clip(-1.0, 5.0)
+        try:
+            _routing_df = calculate_momentum_features(_routing_df)     # adds momentum_12m_skip1
+        except Exception:
+            pass
+        try:
+            _routing_df = calculate_short_logic_features(_routing_df)  # adds short_term_momentum_score, turnover_pct_rank
+        except Exception:
+            pass
+        try:
+            _routing_df = calculate_factor_momentum_consistency(_routing_df)  # adds momentum_consistency_score
+        except Exception:
+            pass
+        try:
+            _routing_df = calculate_information_discreteness(_routing_df)     # adds information_discreteness
+        except Exception:
+            pass
+        _routing_df = _routing_df.reindex(features.index)
 
         # Diagnostic features for ML/Ensemble analysis (defined later if in ML mode)
         model_features = pd.DataFrame(index=features.index)
@@ -775,6 +833,37 @@ class SignalEngine:
                         col: self._get_fundamental_features(ticker, features.index)[col]
                         for col in ["f_score", "accruals_ratio", "roa", "delta_roa", "delta_leverage"]
                     },
+                    # ShortLogic features — Medhat-Schmeling (2022), RRLP (2023), JLST (2025)
+                    # Computed inline here to match feature_builder.py logic (same formulas).
+                    "momentum_1m_skip_eom": (
+                        (close.shift(5) / close.shift(26).replace(0, np.nan) - 1).clip(-1.0, 4.0).fillna(0.0)
+                    ),
+                    "turnover_pct_rank": (
+                        (stock_data["Volume"] / stock_data["Volume"].rolling(252, min_periods=60).mean().replace(0, np.nan))
+                        .clip(0.0, 20.0)
+                        .rolling(63, min_periods=21).rank(pct=True)
+                        .clip(0.0, 1.0)
+                        .fillna(0.5)
+                    ),
+                    "short_term_momentum_score": (
+                        (close.shift(5) / close.shift(26).replace(0, np.nan) - 1).clip(-1.0, 4.0).fillna(0.0)
+                        * (
+                            (stock_data["Volume"] / stock_data["Volume"].rolling(252, min_periods=60).mean().replace(0, np.nan))
+                            .clip(0.0, 20.0)
+                            .rolling(63, min_periods=21).rank(pct=True)
+                            .fillna(0.5) * 2.0 - 1.0
+                        )
+                    ).clip(-2.0, 2.0).fillna(0.0),
+                    "industry_relative_reversal": (
+                        -(close.pct_change(20).clip(-1.0, 4.0).fillna(0.0) - sr20.fillna(0.0))
+                    ).clip(-2.0, 2.0).fillna(0.0),
+                    "high_vol_reversal_flag": (
+                        daily_ret.rolling(20, min_periods=10).std()
+                        .rolling(252, min_periods=60).rank(pct=True) > 0.67
+                    ).astype(float).fillna(0.0),
+                    "momentum_12m_skip1": (
+                        close.shift(21).pct_change(231).clip(-0.95, 10.0).fillna(0.0)
+                    ),
                 },
                 index=features.index,
             )
@@ -814,11 +903,62 @@ class SignalEngine:
                     allowed = getattr(self.config, "ml_short_allowed_regimes", ["Bear", "Crisis", "Sideways"])
                     gate_mask = panel_regimes.isin(allowed)
                     short_score = raw_short.where(gate_mask, 0.0)
+                else:
+                    # No dedicated ML short model in cache.
+                    # Use paper-derived composite short signal from the ShortLogic research corpus.
+                    #
+                    # Signal 1 — Medhat & Schmeling (2022, RFS) "Short-term Momentum":
+                    #   short_term_momentum_score = momentum_1m_skip_eom × turnover_pct_rank_centered
+                    #   Negative = high-TO loser = momentum CONTINUES DOWN (institutional short).
+                    #   Positive = high-TO winner = momentum CONTINUES UP (long, not short).
+                    #   Weight: 0.60 — primary signal; strongest t-stat of the three papers.
+                    #
+                    # Signal 2 — Dai, Medhat, Novy-Marx & Rizova (2023) "Reversals & Liquidity":
+                    #   industry_relative_reversal = -(ret_20d - sector_relative_20d)
+                    #   Negative value → stock ROSE vs its sector WITHOUT an earnings catalyst
+                    #   (pure liquidity-driven price pressure, not fundamental). IRRX reversal:
+                    #   108 bps/month, t=9.35 (vs 31 bps raw reversal at t=1.68). Short this.
+                    #   Weight: 0.40 — secondary; requires sector data to be non-zero.
+                    #
+                    # Convention: most NEGATIVE composite = strongest short candidate.
+                    # cross_sectional.py ranks ascending and picks the lowest values.
+                    stm_score = model_features.get(
+                        "short_term_momentum_score", pd.Series(0.0, index=model_features.index)
+                    ).fillna(0.0)
+                    irr_score = model_features.get(
+                        "industry_relative_reversal", pd.Series(0.0, index=model_features.index)
+                    ).fillna(0.0)
+                    # Composite: both signals are negative for short candidates.
+                    # high_vol_reversal_flag (RRLP §3.1): scale up IRR signal for fast-reverting stocks
+                    hvr_flag = model_features.get(
+                        "high_vol_reversal_flag", pd.Series(0.0, index=model_features.index)
+                    ).fillna(0.0)
+                    irr_scaled = irr_score * (1.0 + 0.3 * hvr_flag)
+                    short_score_raw = (0.60 * stm_score + 0.40 * irr_scaled).clip(-2.0, 2.0)
+                    # Regime gate: only allow shorts in Bear/Cautious (consistent with suppress_shorts config)
+                    if self.regime_series is not None:
+                        panel_regimes = self.regime_series.reindex(features.index).astype(str).map(_normalise_regime_label).fillna("Sideways")
+                    elif "trend_regime" in features.columns:
+                        panel_regimes = features["trend_regime"].astype(str).map(_normalise_regime_label).fillna("Sideways")
+                    else:
+                        panel_regimes = pd.Series("Sideways", index=features.index)
+                    allowed = getattr(self.config, "ml_short_allowed_regimes", ["Bear", "Crisis", "Sideways"])
+                    gate_mask = panel_regimes.isin(allowed)
+                    short_score = short_score_raw.where(gate_mask, 0.0)
                 
-                # Composite: Additive with multipliers to preserve signal strength
+                # Composite: only blend short_score into the long ranking when shorts
+                # are actually being executed.  Adding the paper-derived short signal to
+                # adjusted when enable_shorts=False contaminates long-side ranking because
+                # short_score is negative for short candidates — stocks that the long model
+                # rates highly but the short signal penalises get demoted in the ranking,
+                # reducing long alpha.  Keep long ranking pure when running long-only.
                 w_long = float(getattr(self.config, "ml_long_weight", 1.0))
                 w_short = float(getattr(self.config, "ml_short_weight", 1.0))
-                adjusted = (w_long * long_score) + (w_short * short_score)
+                _run_shorts = bool(getattr(self.config, "enable_shorts", False))
+                if _run_shorts:
+                    adjusted = (w_long * long_score) + (w_short * short_score)
+                else:
+                    adjusted = w_long * long_score
                 
                 if adjusted.empty or adjusted.isna().all():
                     logger.warning("SignalEngine: %s combined predictions empty; falling back to price trend.", mode)
@@ -907,6 +1047,18 @@ class SignalEngine:
                 "sector_relative_60d": sr60,
                 "rel_ret_5d": model_features["rel_ret_5d"] if "rel_ret_5d" in model_features.columns else 0.0,
                 "avg_dollar_volume_20d": model_features["dollar_volume_20d"] if "dollar_volume_20d" in model_features.columns else 0.0,
+                # Medhat & Schmeling (2022) short-logic features — forwarded to cross-sectional
+                # short ranking so the turnover gate and stmom filter can access them.
+                # Source: _routing_df (computed above from raw OHLCV, works for all signal modes).
+                "short_term_momentum_score": _routing_df["short_term_momentum_score"] if "short_term_momentum_score" in _routing_df.columns else 0.0,
+                "turnover_pct_rank": _routing_df["turnover_pct_rank"] if "turnover_pct_rank" in _routing_df.columns else 0.5,
+                "industry_relative_reversal": _routing_df["industry_relative_reversal"] if "industry_relative_reversal" in _routing_df.columns else 0.0,
+                # Da, Gurun & Warachka (2014) / FIP hypothesis — forwarded to cross-sectional
+                # long selection so continuous-momentum stocks are preferred over discrete ones.
+                "information_discreteness": _routing_df["information_discreteness"] if "information_discreteness" in _routing_df.columns else 0.0,
+                # Gupta & Kelly (AQR/JPM 2019) Factor Momentum proxy — multi-horizon sign agreement.
+                # High score (all horizons agree) = stronger, more persistent signal.
+                "momentum_consistency_score": _routing_df["momentum_consistency_score"] if "momentum_consistency_score" in _routing_df.columns else 0.0,
             },
             index=features.index,
         )

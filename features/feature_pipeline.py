@@ -59,6 +59,318 @@ def sanitize_dataframe(df: pd.DataFrame, clip_val: float = 10.0) -> pd.DataFrame
     return df
 
 
+def flag_feature_anomalies(
+    df: pd.DataFrame,
+    zscore_threshold: float = 5.0,
+    repeated_run_threshold: int = 10,
+    window: int = 252,
+    min_periods: int = 60,
+) -> pd.DataFrame:
+    """
+    BIS ML validation step 2 — anomaly detection for financial time series.
+
+    Erdem & Park (2021) BIS Working Paper 964, §3.2:
+      "Before feeding features to any ML model, detect two classes of anomalies:
+       (a) extreme outliers — rolling z-score exceedances beyond ±5σ indicate
+           data errors, corporate events, or fat-tail shocks that will distort
+           model training if uncorrected.
+       (b) repeated-value runs — N consecutive identical values signal a stale
+           feed, halted trading, or a data vendor fill that will cause spurious
+           feature stability and leak-free look-ahead."
+
+    This function adds a boolean ``anomaly_flag`` column: True when either
+    condition is detected on ANY numeric feature for that row.  Callers should
+    winsorise or drop flagged rows before passing data to the weight learner.
+
+    Parameters
+    ----------
+    df : feature matrix (output of build_feature_matrix)
+    zscore_threshold : flag row if |rolling_z| > threshold on any feature
+    repeated_run_threshold : flag row if same value repeats ≥ N consecutive times
+    window / min_periods : rolling window for z-score computation
+
+    Returns
+    -------
+    df with ``anomaly_flag`` (bool) and ``anomaly_reasons`` (str) columns added.
+    """
+    _log = logging.getLogger(__name__)
+    numeric_cols = [
+        c for c in df.select_dtypes(include=[np.number]).columns
+        if c not in ("anomaly_flag",)
+    ]
+
+    n = len(df)
+    outlier_flag = np.zeros(n, dtype=bool)
+    stale_flag = np.zeros(n, dtype=bool)
+    reason_parts: list[list[str]] = [[] for _ in range(n)]
+
+    for col in numeric_cols:
+        series = df[col].astype(float)
+
+        # (a) Rolling z-score outlier detection
+        roll = series.rolling(window=window, min_periods=min_periods)
+        mu = roll.mean()
+        sigma = roll.std().replace(0.0, np.nan).fillna(1.0).clip(lower=1e-8)
+        z = ((series - mu) / sigma).abs()
+        mask_out = z > zscore_threshold
+        if mask_out.any():
+            idxs = np.where(mask_out.to_numpy())[0]
+            for idx in idxs:
+                outlier_flag[idx] = True
+                reason_parts[idx].append(f"z({col})={z.iloc[idx]:.1f}")
+
+        # (b) Repeated-value stale run detection
+        # Count how many consecutive rows have the same value
+        shifted = series != series.shift(1)
+        run_id = shifted.cumsum()
+        run_lengths = run_id.map(run_id.value_counts())
+        mask_stale = run_lengths >= repeated_run_threshold
+        if mask_stale.any():
+            idxs = np.where(mask_stale.to_numpy())[0]
+            for idx in idxs:
+                stale_flag[idx] = True
+                reason_parts[idx].append(f"stale({col})")
+
+    combined = outlier_flag | stale_flag
+    df = df.copy()
+    df["anomaly_flag"] = combined
+    df["anomaly_reasons"] = ["| ".join(r) if r else "" for r in reason_parts]
+
+    n_flagged = int(combined.sum())
+    if n_flagged > 0:
+        pct = 100.0 * n_flagged / max(n, 1)
+        _log.warning(
+            "BIS anomaly detection: %d/%d rows flagged (%.1f%%) — "
+            "consider winsorising before model training.",
+            n_flagged, n, pct,
+        )
+
+    return df
+
+
+def calculate_factor_momentum_consistency(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Multi-horizon momentum consistency score — stock-level proxy for Factor Momentum.
+
+    Gupta & Kelly (AQR/JPM 2019) "Factor Momentum Everywhere":
+      Individual factors exhibit strong serial correlation (AR(1) avg 0.11, positive
+      for 59 of 65 factors).  Scaling factor exposure by its own past 1-month return
+      (TSFM) earns SR 0.84 standalone, outperforming stock-level UMD (SR 0.56).
+      Key: factor persistence is robust across 1m, 12m, and even 5-year lookbacks.
+
+    Stock-level proxy: rather than timing an abstract factor exposure, we check
+    whether a stock's price momentum is directionally consistent across multiple
+    horizons (1m, 3m, 6m, 12m).  Horizon agreement is the observable analogue of
+    "the factor showed positive returns over multiple look-back periods", the core
+    TSFM signal.
+
+    Formula:
+        momentum_consistency_score = mean(
+            sign(mom_1m_skip_eom),  # 1-month (end-of-month adjusted)
+            sign(mom_3m),           # 3-month
+            sign(mom_6m),           # 6-month
+            sign(mom_12m_skip1),    # 12-month ex last month
+        )
+
+    Range: [-1, +1]
+      +1 = all 4 horizons agree → "factor momentum everywhere" → use as confirming signal
+       0 = mixed → normal
+      -1 = all horizons point down → strong bear signal
+
+    Used in cross_sectional.py as a tertiary tiebreaker for long selection (after
+    adjusted_score and information_discreteness).
+    """
+    required = {"momentum_3m", "momentum_6m", "momentum_12m_skip1"}
+    if not required.issubset(df.columns) or len(df) < 252:
+        df["momentum_consistency_score"] = 0.0
+        return df
+
+    # 1-month momentum: use skip-EOM version if available, else raw pct-change
+    if "momentum_1m_skip_eom" in df.columns:
+        mom_1m = df["momentum_1m_skip_eom"]
+    else:
+        close_col = (
+            "AdjClose" if "AdjClose" in df.columns
+            else ("Close" if "Close" in df.columns else "close")
+        )
+        if close_col in df.columns:
+            mom_1m = df[close_col].pct_change(21)
+        else:
+            mom_1m = pd.Series(0.0, index=df.index)
+
+    signs = (
+        np.sign(mom_1m)
+        + np.sign(df["momentum_3m"])
+        + np.sign(df["momentum_6m"])
+        + np.sign(df["momentum_12m_skip1"])
+    ) / 4.0  # normalised to [-1, 1]
+
+    df["momentum_consistency_score"] = signs.clip(-1.0, 1.0).fillna(0.0)
+    return df
+
+
+def calculate_information_discreteness(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Information Discreteness (Da, Gurun & Warachka 2014, RFS; FIP hypothesis).
+
+    Da et al. (2014) / Skardhamar & Polykarpou (2024):
+      Momentum signal quality filter that separates CONTINUOUS momentum
+      (gradual daily appreciation = limited investor attention = persistent)
+      from DISCRETE momentum (a few large jumps = crowds notice = mean-reverts).
+
+    Formula (Da et al. eq.1):
+        ID = sign(PRET) × [%neg − %pos]
+
+    where:
+      PRET  = 12-month cumulative return excluding the most recent month
+              (= momentum_12m_skip1, the Bird et al. formation period).
+      %neg  = fraction of trading days with negative daily returns in the
+              231-day formation window (252 - 21 = skipping last month).
+      %pos  = fraction of trading days with positive daily returns in the
+              same window.
+
+    Interpretation:
+      LOW  ID → CONTINUOUS winner: many small up-days, market didn't notice.
+                → Under-reaction anomaly: alpha persists LONGER. PREFER for longs.
+      HIGH ID → DISCRETE winner: few big jump days, crowds chased the event.
+                → Information already fully incorporated. Momentum weakens fast.
+                → AVOID or down-weight for longs.
+
+    Result column:
+      information_discreteness : float in approx [-1, 1]
+        Lower = more continuous (better long quality)
+        Higher = more discrete (weaker, mean-reverts sooner)
+    """
+    close_col = (
+        "AdjClose" if "AdjClose" in df.columns
+        else ("Close" if "Close" in df.columns else "close")
+    )
+    if close_col not in df.columns or len(df) < 252:
+        df["information_discreteness"] = 0.0
+        return df
+
+    close = df[close_col]
+    # Formation period: 231 trading days, skipping last 21 (= 12m ex 1m, Jegadeesh 1990)
+    formation = 231
+
+    # Sign of cumulative 12m-ex-1m return
+    pret = close.shift(21) / close.shift(252).replace(0, np.nan) - 1
+    pret_sign = np.sign(pret)
+
+    # Daily returns for %neg / %pos computation
+    daily_ret = close.pct_change()
+    neg_frac = (daily_ret < 0).rolling(formation, min_periods=100).mean()
+    pos_frac = (daily_ret > 0).rolling(formation, min_periods=100).mean()
+
+    id_raw = pret_sign * (neg_frac - pos_frac)
+    df["information_discreteness"] = id_raw.clip(-1.0, 1.0).fillna(0.0)
+
+    return df
+
+
+def calculate_short_logic_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Short-logic features derived from the ShortLogic research paper corpus.
+
+    Paper 1 — Medhat & Schmeling (2022) "Short-term Momentum" (RFS):
+      KEY FINDING: Turnover FLIPS the sign of expected returns at the 1-month horizon.
+      - High-turnover LOSERS exhibit short-term MOMENTUM (continuation DOWN) → SHORT
+      - Low-turnover LOSERS exhibit short-term REVERSAL (bounce UP) → do NOT short
+      - Formula: short_term_momentum_score = momentum_20 × turnover_percentile_rank
+        Positive = high-turnover winner → long momentum
+        Negative = high-turnover loser  → short momentum (best short candidates)
+        Near zero = low-turnover stock  → reversal expected, avoid shorting
+
+      REFINEMENT: Skip last 5 trading days of formation period.
+        Standard 1-month return uses close[t-1]/close[t-21]-1.
+        Skipping the last ~5 days (end-of-month liquidity window) improves alpha
+        from +16.4% to +22.0% annualized (Medhat & Schmeling, Table III).
+        momentum_1m_skip_eom = close[t-5] / close[t-26] - 1
+
+    Paper 2 — Dai, Medhat, Rizova & Novy-Marx (2023) "Reversals and Returns to Liquidity":
+      KEY FINDING: Standard reversals are contaminated by PEAD and industry momentum.
+        REV  = 31 bps/month (t=1.68, barely significant)
+        IRR  = 74 bps/month (t=5.40) — remove industry momentum
+        IRRX = 108 bps/month (t=9.35) — also remove PEAD noise
+      IMPLEMENTATION: industry_relative_reversal = -(momentum_20 - sector_relative_20d)
+        This is the clean liquidity-driven reversal signal, stripped of sector effects.
+        For longs (reversal bounce): high positive irrx = fell vs sector → buy bounce
+        For shorts: do NOT use standard reversal as short signal — it shorts PEAD
+          instead use short_term_momentum_score (turnover-conditioned above)
+
+      PERSISTENCE RULE: Volatility → faster reversals; Turnover → persistent reversals.
+        High-volatility stocks: reversal completes in 1-2 weeks (RRLP Figure 1 left)
+        Low-turnover stocks: reversal persists up to 3 months (RRLP Figure 1 right)
+        high_vol_reversal_flag: marks stocks where reversal will be fast (use short HPs)
+    """
+    close = df["close"].astype(float) if "close" in df.columns else (
+        df["Close"].astype(float) if "Close" in df.columns else None
+    )
+    if close is None:
+        return df
+
+    # ------------------------------------------------------------------
+    # 1. End-of-month-adjusted 1-month momentum (Medhat & Schmeling, §2.1)
+    #    Skip last 5 trading days: close[t-5] / close[t-26] - 1
+    #    Avoids end-of-month liquidity window effects that contaminate
+    #    the standard t-1/t-21 formation period.
+    # ------------------------------------------------------------------
+    momentum_1m_raw = (close.shift(5) / close.shift(26).replace(0, np.nan) - 1)
+    df["momentum_1m_skip_eom"] = momentum_1m_raw.clip(-1.0, 4.0).fillna(0.0)
+
+    # ------------------------------------------------------------------
+    # 2. Short-term momentum score: return × turnover percentile
+    #    (Medhat & Schmeling, Table I — double sort construction)
+    #    turnover_pct_rank: rolling 63-day percentile of 20d avg share turnover
+    #    Rescaled to [-1, 1]: rank=0 → -1 (lowest TO), rank=1 → +1 (highest TO)
+    # ------------------------------------------------------------------
+    vol = pd.to_numeric(df.get("volume", df.get("Volume", pd.Series(dtype=float))), errors="coerce")
+    shrout_proxy = close * vol  # dollar volume as proxy for share turnover
+    to_20d = (vol / vol.rolling(252, min_periods=60).mean().replace(0, np.nan)).clip(0.0, 20.0)
+    to_pct_rank = to_20d.rolling(63, min_periods=21).rank(pct=True).fillna(0.5)
+    to_centered = (to_pct_rank * 2.0 - 1.0)  # rescale to [-1, 1]
+
+    # short_term_momentum_score = last-month-return (skip-EOM) × turnover-rank
+    # Negative value = high-TO loser = best short candidate (momentum continues down)
+    df["short_term_momentum_score"] = (
+        df["momentum_1m_skip_eom"] * to_centered
+    ).clip(-2.0, 2.0).fillna(0.0)
+
+    # turnover_percentile_rank stored for use in cross-sectional short gate
+    df["turnover_pct_rank"] = to_pct_rank.clip(0.0, 1.0).fillna(0.5)
+
+    # ------------------------------------------------------------------
+    # 3. Industry-relative reversal — clean liquidity signal (RRLP §2)
+    #    industry_relative_reversal = -(momentum_20 - sector_relative_20d)
+    #    Removes sector-level price movements (industry momentum + PEAD) so
+    #    the remaining signal reflects pure liquidity-driven price pressure.
+    #    High positive value = stock fell vs its sector → bounce expected (LONG)
+    #    Do NOT use negative values as short signal (use short_term_momentum_score).
+    # ------------------------------------------------------------------
+    mom_20 = close.pct_change(20).clip(-1.0, 4.0).fillna(0.0)
+    sector_rel_20d = df.get("sector_relative_20d", pd.Series(0.0, index=df.index))
+    if not isinstance(sector_rel_20d, pd.Series):
+        sector_rel_20d = pd.Series(0.0, index=df.index)
+    df["industry_relative_reversal"] = (
+        -(mom_20 - sector_rel_20d.reindex(df.index).fillna(0.0))
+    ).clip(-2.0, 2.0).fillna(0.0)
+
+    # ------------------------------------------------------------------
+    # 4. High-volatility reversal flag (RRLP §3.1, Figure 1 left panel)
+    #    High-vol stocks: reversal completes in 1-2 weeks, not 1 month.
+    #    Flag to shorten holding period when using reversal signals on these.
+    # ------------------------------------------------------------------
+    if "volatility_percentile" in df.columns:
+        df["high_vol_reversal_flag"] = (df["volatility_percentile"] > 0.67).astype(float)
+    else:
+        rets = close.pct_change()
+        vol_20 = rets.rolling(20, min_periods=10).std()
+        vol_pct = vol_20.rolling(252, min_periods=60).rank(pct=True)
+        df["high_vol_reversal_flag"] = (vol_pct > 0.67).astype(float).fillna(0.0)
+
+    return df
+
+
 def calculate_core_trend_features(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
@@ -91,7 +403,13 @@ def calculate_momentum_features(df: pd.DataFrame) -> pd.DataFrame:
     df["momentum_20"] = close.pct_change(20).clip(-1.0, 4.0)
     df["momentum_60"] = close.pct_change(60).clip(-1.0, 5.0)
     df["momentum_acceleration"] = (df["momentum_5"] - df["momentum_20"]).clip(-2.0, 2.0)
-    
+
+    # 12M-1M momentum (Jegadeesh & Titman 1993 standard formation window).
+    # Return from 252 days ago to 21 days ago — skips most recent month to avoid
+    # short-term reversal contamination (Jegadeesh 1990, Lehmann 1990).
+    # Bird et al. (2015) confirm this is the core TS momentum signal.
+    df["momentum_12m_skip1"] = close.shift(21).pct_change(231).clip(-0.95, 10.0).fillna(0.0)
+
     ratio = df["momentum_20"] / df["momentum_60"].replace(0.0, np.nan)
     df["trend_strength"] = ratio.rolling(63, min_periods=10).rank(pct=True).fillna(0.5) * 2.0 - 1.0
     return df
@@ -257,6 +575,39 @@ def build_feature_matrix(df: pd.DataFrame, config=None) -> pd.DataFrame:
             UserWarning,
         )
 
+    # Short-logic features: turnover-conditioned short-term momentum, industry-relative
+    # reversal, and end-of-month-adjusted formation return.
+    # Sources: Medhat & Schmeling (2022) RFS; Dai, Medhat, Rizova & Novy-Marx (2023).
+    try:
+        base = calculate_short_logic_features(base)
+    except Exception as exc:
+        warnings.warn(
+            f"calculate_short_logic_features failed with {type(exc).__name__}: {exc}",
+            UserWarning,
+        )
+
+    # Factor Momentum consistency: Gupta & Kelly (AQR/JPM 2019) stock-level proxy.
+    # Multi-horizon momentum sign agreement — all horizons pointing same direction
+    # signals "factor momentum everywhere"; used as confirming tiebreaker for longs.
+    try:
+        base = calculate_factor_momentum_consistency(base)
+    except Exception as exc:
+        warnings.warn(
+            f"calculate_factor_momentum_consistency failed with {type(exc).__name__}: {exc}",
+            UserWarning,
+        )
+
+    # Information Discreteness: Da, Gurun & Warachka (2014) / FIP hypothesis.
+    # Continuous momentum (low ID) persists longer; discrete momentum (high ID) mean-reverts.
+    # Used downstream in cross_sectional.py to quality-filter long candidates.
+    try:
+        base = calculate_information_discreteness(base)
+    except Exception as exc:
+        warnings.warn(
+            f"calculate_information_discreteness failed with {type(exc).__name__}: {exc}",
+            UserWarning,
+        )
+
     try:
         base = detect_market_regime(base)
     except Exception as exc:
@@ -364,6 +715,17 @@ def build_feature_matrix(df: pd.DataFrame, config=None) -> pd.DataFrame:
                 )
         except Exception:
             pass
+
+    # BIS ML validation — anomaly detection (Erdem & Park 2021, §3.2).
+    # Adds anomaly_flag (bool) and anomaly_reasons (str) columns so callers
+    # can winsorise or drop rows before passing features to the weight learner.
+    try:
+        enriched = flag_feature_anomalies(enriched)
+    except Exception as exc:
+        warnings.warn(
+            f"BIS anomaly detection failed with {type(exc).__name__}: {exc}",
+            UserWarning,
+        )
 
     return sanitize_dataframe(enriched)
 

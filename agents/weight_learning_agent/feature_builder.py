@@ -609,6 +609,30 @@ def _build_features_for_ticker(
         roll_std_60 = daily_ret.rolling(60, min_periods=20).std().replace(0, np.nan).fillna(1e-6)
         quality_score = (roll_mean_60 / roll_std_60 * np.sqrt(252)).clip(-5.0, 5.0)
 
+        # ------------------------------------------------------------------
+        # ShortLogic features — Medhat-Schmeling (2022) + RRLP (2023) + JLST (2025)
+        # ------------------------------------------------------------------
+        # 1. EOM-adjusted 1-month return: skip last 5 trading days to reduce
+        #    end-of-month liquidity noise (MS Table III: +22% vs +16.4% annualized)
+        momentum_1m_skip_eom = (close.shift(5) / close.shift(26).replace(0, np.nan) - 1).clip(-1.0, 4.0).fillna(0.0)
+
+        # 2. Turnover percentile rank (63-day rolling; centered to [-1,+1])
+        to_20d = (volume / volume.rolling(252, min_periods=60).mean().replace(0, np.nan)).clip(0.0, 20.0)
+        to_pct_rank = to_20d.rolling(63, min_periods=21).rank(pct=True).fillna(0.5)
+        turnover_pct_rank = to_pct_rank.clip(0.0, 1.0)
+        to_centered = (to_pct_rank * 2.0 - 1.0)  # rescale to [-1, 1]
+
+        # 3. Short-term momentum score: return × turnover (MS double-sort)
+        #    Negative = high-TO loser = strongest short candidate
+        short_term_momentum_score = (momentum_1m_skip_eom * to_centered).clip(-2.0, 2.0).fillna(0.0)
+
+        # 4. High-volatility reversal flag (RRLP Fig.1: top tercile → faster reversal)
+        _vol_pct = vol_20_raw.rolling(252, min_periods=60).rank(pct=True)
+        high_vol_reversal_flag = (_vol_pct > 0.67).astype(float).fillna(0.0)
+
+        # 5. 12M-1M momentum (Jegadeesh-Titman 1993; JLST: inversely related to reversal alpha)
+        momentum_12m_skip1 = close.shift(21).pct_change(231).clip(-0.95, 10.0).fillna(0.0)
+
         chunk = pd.DataFrame(
             {
                 "ticker": ticker,
@@ -673,6 +697,13 @@ def _build_features_for_ticker(
                 # Bear/Crisis regime-specific features
                 "liquidity_stress": liquidity_stress,
                 "beta_adj_momentum": beta_adj_momentum,
+                # ShortLogic features (Medhat-Schmeling 2022, RRLP 2023, JLST 2025)
+                "momentum_1m_skip_eom": momentum_1m_skip_eom,
+                "turnover_pct_rank": turnover_pct_rank,
+                "short_term_momentum_score": short_term_momentum_score,
+                "high_vol_reversal_flag": high_vol_reversal_flag,
+                "momentum_12m_skip1": momentum_12m_skip1,
+                # industry_relative_reversal is added at panel level (requires sector_relative_20d)
                 "forward_return": forward_ret,
                 "forward_return_risk_adj": forward_ret_risk_adj,  # C3: risk-adjusted target
             },
@@ -957,6 +988,17 @@ def build_feature_matrix(
     else:
         result["sector_relative_20d"] = 0.0
         result["sector_relative_60d"] = 0.0
+
+    # Industry-relative reversal (RRLP 2023, IRRX): -(ret_20d - sector_relative_20d)
+    # Computed at panel level because it requires the cross-sectional sector_relative_20d.
+    # Positive = stock fell vs sector (liquidity-driven) → bounce expected (LONG signal)
+    # Negative = stock rose vs sector without news → reversal expected (SHORT signal)
+    if "ret_20d" in result.columns:
+        result["industry_relative_reversal"] = (
+            -(result["ret_20d"] - result["sector_relative_20d"])
+        ).clip(-2.0, 2.0).fillna(0.0)
+    else:
+        result["industry_relative_reversal"] = 0.0
 
     # Cross-sectional momentum percentile (0–1) based on 6m return excluding last month.
     if "cs_momentum_raw" in result.columns:

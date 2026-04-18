@@ -7,9 +7,8 @@ Base models are refit on train+validation before deployment predictions.
 """
 
 
-from itertools import product
-
 import numpy as np
+from scipy.optimize import minimize
 from scipy.stats import spearmanr
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.linear_model import RidgeCV
@@ -106,28 +105,42 @@ class StackedEnsemble:
         predictions: dict[str, np.ndarray],
         y_val: np.ndarray,
     ) -> dict[str, float]:
-        """Grid search over blend weights; maximize Spearman IC on validation."""
+        """
+        Maximize Spearman IC on validation via SLSQP constrained optimization.
+
+        Constraints: weights sum to 1, each weight in [0.05, 0.90].
+        Falls back to equal weights if optimization fails.
+        """
         y_val = np.asarray(y_val, dtype=np.float64)
         names = list(predictions.keys())
-        best_ic = -999.0
-        best_w = dict(self.blend_weights)
+        n = len(names)
+        preds_matrix = np.column_stack([predictions[name] for name in names])
 
-        for r_w, g_w in product([0.2, 0.3, 0.4, 0.5], [0.2, 0.3, 0.4]):
-            x_w = round(1.0 - r_w - g_w, 2)
-            if x_w < 0.1:
-                continue
-            if abs(r_w + g_w + x_w - 1.0) > 1e-6:
-                continue
-            w = {"ridge": r_w, "gbr": g_w, "xgb": x_w}
-            pred = np.zeros_like(y_val, dtype=np.float64)
-            for n in names:
-                if n in w:
-                    pred += w[n] * predictions[n]
-            ic_val, _ = spearmanr(pred, y_val)
-            ic_val = float(ic_val) if np.isfinite(ic_val) else -999.0
-            if ic_val > best_ic:
-                best_ic = ic_val
-                best_w = dict(w)
+        def neg_ic(w: np.ndarray) -> float:
+            blended = preds_matrix @ w
+            ic, _ = spearmanr(blended, y_val)
+            return -float(ic) if np.isfinite(ic) else 0.0
+
+        constraints = {"type": "eq", "fun": lambda w: w.sum() - 1.0}
+        bounds = [(0.05, 0.90)] * n
+        w0 = np.full(n, 1.0 / n)
+
+        result = minimize(
+            neg_ic,
+            x0=w0,
+            method="SLSQP",
+            bounds=bounds,
+            constraints=constraints,
+            options={"ftol": 1e-9, "maxiter": 500},
+        )
+
+        if result.success:
+            best_w = {name: float(round(result.x[i], 4)) for i, name in enumerate(names)}
+            best_ic = -result.fun
+        else:
+            # Fallback: equal weights
+            best_w = {name: round(1.0 / n, 4) for name in names}
+            best_ic = -neg_ic(w0)
 
         print(f"  Optimal blend: {best_w} (IC={best_ic:.4f})")
         return best_w

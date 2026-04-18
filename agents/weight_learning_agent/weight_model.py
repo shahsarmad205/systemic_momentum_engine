@@ -347,7 +347,10 @@ class WeightLearner:
         alpha: float = 0.01,
         time_decay_lambda: float = 0.001,
         target_type: str = "regression",  # or 'classification'
-        return_target_type: str = "raw",  # 'raw' | 'excess' | 'sharpe_scaled'
+        return_target_type: str = "excess",  # 'raw' | 'excess' | 'sharpe_scaled'
+        # 'excess' = forward_return - SPY return: removes non-predictable market beta from target.
+        # Training on raw returns contaminates the objective with systematic beta that the
+        # model cannot forecast, inflating in-sample fit without improving cross-sectional ranking.
     ):
         self.model_type = model_type
         self.alpha = alpha
@@ -991,24 +994,53 @@ class WeightLearner:
         self,
         df: pd.DataFrame,
         n_splits: int = 5,
+        embargo_days: int | None = None,
+        max_train_days: int | None = None,
     ) -> list[dict]:
         """
-        Expanding-window walk-forward cross-validation with an embargo gap
-        between train and test windows.
+        Walk-forward cross-validation with embargo gap and optional rolling window.
 
-        The embargo is fixed at 5 trading days to match the default
-        5-day forward-return horizon, so the last 5 training dates do
-        not overlap with the test labels' look-ahead window.
+        Embargo (Deep et al. 2025 §3.5; Bailey & López de Prado 2014):
+          Must be >= the forward-return horizon to guarantee training labels do
+          not look into the test period. A training sample at date d has a forward
+          return calculated over [d+1, d+horizon]. If embargo < horizon, the last
+          (horizon - embargo) training dates have contaminated labels. Default = 15
+          trading days, matching the 15-day holding period.
 
-        Returns a list of per-split result dicts with metrics and weights.
+        Rolling window (Pardo 2008; Kirschenmann et al. 2022):
+          Set max_train_days to cap training window size. Without it, an expanding
+          window includes stale crisis data (e.g. 2018) when training for 2024 Bull.
+          Typical values: 504 (2y), 756 (3y).
+
+        Statistical output (Deep et al. 2025 §3.7; Harvey et al. 2016):
+          Per-fold IC results are tested for significance: t-test (H0: IC=0),
+          binomial win-rate test (H0: p_positive=0.5), bootstrap 95% CI, and
+          IC-IR (IC Information Ratio = mean_IC / std_IC * sqrt(n_folds)).
+
+        Args:
+            df: Training dataframe with 'date', feature columns, and target.
+            n_splits: Number of equal-length folds to divide the time series into.
+            embargo_days: Gap in trading days between train end and test start.
+                Defaults to 15 (= lookahead horizon). Must be >= prediction horizon.
+            max_train_days: If set, caps the training window to this many unique
+                trading days (rolling window). None = expanding window (default).
+
+        Returns:
+            List of per-split result dicts with metrics, weights, and OOS statistics.
         """
+        from scipy.stats import binomtest, ttest_1samp
+
         dates = np.sort(df["date"].unique())
         split_size = len(dates) // n_splits
 
-        # Embargo length in trading days between train and test.
-        EMBARGO_DAYS = 5
+        # Embargo: must be >= forward-return horizon to prevent label contamination.
+        # Bailey & López de Prado (2014): "The last T*h observations of the training
+        # set have labels that bleed into the test period." Fix: embargo >= horizon.
+        EMBARGO_DAYS = embargo_days if embargo_days is not None else 15
 
         results: list[dict] = []
+        # Per-fold blend weights for ensemble stability diagnostics.
+        fold_ensemble_weights: list[dict] = []
 
         for k in range(1, n_splits):
             cutoff_idx = k * split_size
@@ -1018,12 +1050,23 @@ class WeightLearner:
             test_start = dates[cutoff_idx]
             test_end = dates[test_end_idx]
 
-            # End date for the training window with an embargo gap:
-            # exclude the last EMBARGO_DAYS dates before test_start.
+            # End date for the training window with an embargo gap.
+            # Embargo >= horizon guarantees zero label contamination: a training
+            # sample at date d has forward return [d+1, d+EMBARGO_DAYS]; with
+            # embargo=15 the last training sample's label ends at train_end+14,
+            # and test_start = train_end + 15 — no overlap.
             train_end_idx = max(0, cutoff_idx - EMBARGO_DAYS)
             train_end = dates[train_end_idx]
 
-            train_df = df[df["date"] < train_end]
+            # Rolling window (Pardo 2008): cap training window to max_train_days
+            # unique trading dates to prevent stale-regime contamination.
+            if max_train_days is not None:
+                train_start_idx = max(0, train_end_idx - max_train_days)
+                train_start = dates[train_start_idx]
+                train_df = df[(df["date"] >= train_start) & (df["date"] < train_end)]
+            else:
+                train_df = df[df["date"] < train_end]
+
             test_df = df[(df["date"] >= test_start) & (df["date"] <= test_end)]
 
             if len(train_df) < 100 or len(test_df) < 20:
@@ -1106,6 +1149,10 @@ class WeightLearner:
             # Propagate tuning flag into each fold if enabled on the parent learner.
             fold_learner.tune = getattr(self, "tune", False)
             fold_weights = fold_learner.fit(train_df, feature_cols=selected_features)
+
+            # Capture ensemble blend weights for stability diagnostics.
+            if self.model_type == "ensemble" and fold_learner.ensemble_weights is not None:
+                fold_ensemble_weights.append(dict(fold_learner.ensemble_weights))
 
             # Drop any rows in the test fold that still contain NaNs in the
             # active feature columns or in the target. This prevents downstream
@@ -1233,6 +1280,8 @@ class WeightLearner:
                 "test_end": str(test_end)[:10],
                 "n_train": len(train_df),
                 "n_test": len(test_df),
+                "embargo_days": EMBARGO_DAYS,
+                "rolling_window": max_train_days,
                 "r2": None if r2 is None else round(r2, 4),
                 "mae": None if mae is None else round(mae, 6),
                 "directional_accuracy": round(dir_acc, 4),
@@ -1241,6 +1290,7 @@ class WeightLearner:
                 "train_ic": fold_learner._train_metrics.get("ic"),
                 "auc": round(auc, 4),
                 "weights": fold_weights.to_dict(),
+                "ensemble_blend_weights": dict(fold_learner.ensemble_weights) if fold_learner.ensemble_weights else None,
             }
             if self.target_type == "classification":
                 result_row["effective_auc"] = round(effective_auc, 4)
@@ -1254,20 +1304,110 @@ class WeightLearner:
                     "training window or holding period"
                 )
 
-        # Overfit diagnostic: compare average train IC vs average OOS IC.
+        # ------------------------------------------------------------------
+        # Overfit diagnostic + OOS IC significance tests
+        # (Deep et al. 2025 §3.7; Harvey et al. 2016; Bailey & LdP 2014)
+        # ------------------------------------------------------------------
         if results:
             train_ics = [r.get("train_ic") for r in results if r.get("train_ic") is not None]
             oos_ics = [r.get("ic") for r in results if r.get("ic") is not None]
+
             if train_ics and oos_ics:
                 mean_train_ic = float(np.mean(train_ics))
                 mean_oos_ic = float(np.mean(oos_ics))
+                std_oos_ic = float(np.std(oos_ics, ddof=1)) if len(oos_ics) > 1 else 0.0
                 gap = mean_train_ic - mean_oos_ic
+
                 if gap > 0.3:
                     print(
                         f"⚠ Overfit detected: train IC={mean_train_ic:+.3f}, "
                         f"OOS IC={mean_oos_ic:+.3f} (gap={gap:+.3f}). "
-                        "Consider increasing regularization."
+                        "Consider increasing regularization or max_train_days."
                     )
+
+                n_folds = len(oos_ics)
+
+                # IC Information Ratio: annualised signal-quality metric.
+                # IC-IR = mean(IC) / std(IC) * sqrt(n_folds). Values >= 0.5 are
+                # considered meaningful; >= 1.0 is institutional-grade signal quality.
+                ic_ir = (mean_oos_ic / (std_oos_ic + 1e-9)) * np.sqrt(n_folds) if n_folds > 1 else 0.0
+
+                # t-test H₀: mean(IC) = 0 (Deep et al. 2025 §3.7; Harvey et al. 2016)
+                if n_folds >= 3:
+                    t_stat, p_val = ttest_1samp(oos_ics, 0.0)
+                    t_stat, p_val = float(t_stat), float(p_val)
+                else:
+                    t_stat, p_val = float("nan"), float("nan")
+
+                # Binomial win-rate test H₀: p(IC > 0) = 0.5 (Deep et al. 2025 §3.7)
+                n_positive = sum(ic > 0 for ic in oos_ics)
+                if n_folds >= 3:
+                    binom = binomtest(n_positive, n_folds, p=0.5, alternative="greater")
+                    binom_p = float(binom.pvalue)
+                else:
+                    binom_p = float("nan")
+
+                # Bootstrap 95% CI on mean OOS IC (10 000 resamples)
+                rng = np.random.default_rng(42)
+                arr = np.array(oos_ics, dtype=float)
+                boot_means = np.array([
+                    rng.choice(arr, size=len(arr), replace=True).mean()
+                    for _ in range(10_000)
+                ])
+                ci_lo, ci_hi = float(np.percentile(boot_means, 2.5)), float(np.percentile(boot_means, 97.5))
+
+                # Stamp aggregate stats onto every result dict for caller convenience
+                agg = {
+                    "mean_oos_ic": round(mean_oos_ic, 4),
+                    "std_oos_ic": round(std_oos_ic, 4),
+                    "ic_ir": round(ic_ir, 3),
+                    "ic_tstat": round(t_stat, 3) if np.isfinite(t_stat) else None,
+                    "ic_pvalue": round(p_val, 4) if np.isfinite(p_val) else None,
+                    "ic_positive_folds": n_positive,
+                    "ic_total_folds": n_folds,
+                    "ic_binom_pvalue": round(binom_p, 4) if np.isfinite(binom_p) else None,
+                    "ic_ci95_lo": round(ci_lo, 4),
+                    "ic_ci95_hi": round(ci_hi, 4),
+                    "overfit_gap": round(gap, 4),
+                }
+
+                # Ensemble blend weight stability (Bailey & LdP 2014 §5 — unstable
+                # blend weights across folds are a hallmark of overfitting to a regime).
+                blend_stability: dict = {}
+                if fold_ensemble_weights and len(fold_ensemble_weights) >= 2:
+                    model_names = list(fold_ensemble_weights[0].keys())
+                    for mn in model_names:
+                        fold_vals = [fw[mn] for fw in fold_ensemble_weights if mn in fw]
+                        blend_stability[mn] = {
+                            "mean": round(float(np.mean(fold_vals)), 4),
+                            "std": round(float(np.std(fold_vals, ddof=1)), 4),
+                        }
+                    agg["ensemble_blend_stability"] = blend_stability
+
+                for r in results:
+                    r.update(agg)
+
+                # Human-readable significance summary (Harvey et al. 2016 threshold: |t| > 3.0)
+                sig = "✓ significant (|t|>3)" if np.isfinite(t_stat) and abs(t_stat) > 3.0 else "✗ not significant"
+                blend_line = ""
+                if blend_stability:
+                    parts = [f"{mn}: {v['mean']:.2f}±{v['std']:.2f}" for mn, v in blend_stability.items()]
+                    high_instability = any(v["std"] > 0.15 for v in blend_stability.values())
+                    blend_line = (
+                        f"\n  Blend weights: {' | '.join(parts)}"
+                        + (" ⚠ HIGH INSTABILITY (std>0.15)" if high_instability else "")
+                    )
+                print(
+                    f"\n── Walk-Forward OOS Summary ({'rolling' if max_train_days else 'expanding'} window) ──\n"
+                    f"  Folds: {n_folds}  |  Embargo: {EMBARGO_DAYS}d\n"
+                    f"  Mean OOS IC : {mean_oos_ic:+.4f}  (train IC: {mean_train_ic:+.4f})\n"
+                    f"  IC-IR       : {ic_ir:+.3f}  (≥0.5 good, ≥1.0 institutional)\n"
+                    f"  t-stat      : {t_stat:+.3f}  p={p_val:.4f}  {sig}\n"
+                    f"  Positive folds: {n_positive}/{n_folds}  (binom p={binom_p:.4f})\n"
+                    f"  Bootstrap 95% CI: [{ci_lo:+.4f}, {ci_hi:+.4f}]\n"
+                    f"  Overfit gap: {gap:+.4f}"
+                    + blend_line
+                )
 
         return results
 
