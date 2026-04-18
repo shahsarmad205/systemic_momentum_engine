@@ -12,12 +12,13 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_REGIMES = ["Bull", "Bear", "Sideways", "Crisis"]
+SUPPORTED_REGIMES = ["Bull", "Bear", "Cautious", "Sideways", "Crisis"]
 _KEY_MAP = {
-    "Bull": "signal_confidence_multiplier_bull",
-    "Bear": "signal_confidence_multiplier_bear",
+    "Bull":     "signal_confidence_multiplier_bull",
+    "Bear":     "signal_confidence_multiplier_bear",
+    "Cautious": "signal_confidence_multiplier_cautious",
     "Sideways": "signal_confidence_multiplier_sideways",
-    "Crisis": "signal_confidence_multiplier_crisis",
+    "Crisis":   "signal_confidence_multiplier_crisis",
 }
 
 
@@ -121,6 +122,7 @@ import math
 _REGIME_CFG_ATTRS = {
     "Bull":     "signal_confidence_multiplier_bull",
     "Bear":     "signal_confidence_multiplier_bear",
+    "Cautious": "signal_confidence_multiplier_cautious",
     "Sideways": "signal_confidence_multiplier_sideways",
     "Crisis":   "signal_confidence_multiplier_crisis",
 }
@@ -165,8 +167,9 @@ def signal_confidence_multiplier_for_regime(
     if multiplier is None:
         fallback = {
             "Bull":     getattr(config, "signal_confidence_multiplier_bull", None),
-            "Sideways": getattr(config, "signal_confidence_multiplier_sideways", None),
             "Bear":     getattr(config, "signal_confidence_multiplier_bear", None),
+            "Cautious": getattr(config, "signal_confidence_multiplier_cautious", None),
+            "Sideways": getattr(config, "signal_confidence_multiplier_sideways", None),
             "Crisis":   getattr(config, "signal_confidence_multiplier_crisis", None),
         }.get(regime_key)
         if fallback is not None:

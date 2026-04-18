@@ -1420,6 +1420,86 @@ def compute_deflated_sharpe_ratio(
     return dsr
 
 
+def compute_min_backtest_length(
+    observed_sr: float,
+    n_trials: int,
+    skew: float = 0.0,
+    kurt: float = 3.0,
+    alpha: float = 0.05,
+) -> int:
+    """
+    Minimum Backtest Length (MinBTL) — Bailey & López de Prado (2014).
+
+    Returns the minimum number of trading days T such that
+    DSR(SR, T, n_trials, skew, kurt) ≥ 1 − alpha.  Solved numerically
+    via binary search because the expected-maximum SR* depends on T.
+
+    Parameters
+    ----------
+    observed_sr : float
+        Annualised Sharpe ratio of the selected strategy.
+    n_trials : int
+        Total number of strategies / parameter combinations evaluated.
+    skew : float
+        Skewness of strategy daily returns.
+    kurt : float
+        Kurtosis (not excess) of strategy daily returns.  Normal = 3.0.
+    alpha : float
+        One-sided significance level (default 0.05 → DSR ≥ 0.95).
+
+    Returns
+    -------
+    int : minimum trading days required.
+    Returns 999_999 (proxy for ∞) when no finite T can achieve the
+    threshold (i.e. SR is too low to ever overcome the multiple-testing
+    penalty at this n_trials).
+
+    References
+    ----------
+    Bailey, D. & López de Prado, M. (2014).  The Deflated Sharpe Ratio.
+    Journal of Portfolio Management 40(5), 94–107.
+    """
+    if observed_sr <= 0.0:
+        return 999_999
+
+    EULER_MASCHERONI = 0.5772156649
+
+    def _dsr_at_t(t: int) -> float:
+        """DSR evaluated at a specific T (trading days)."""
+        e_max = (
+            (1.0 - EULER_MASCHERONI) * norm.ppf(1.0 - 1.0 / n_trials)
+            + EULER_MASCHERONI * norm.ppf(1.0 - 1.0 / (n_trials * np.e))
+        ) if n_trials > 1 else 0.0
+        # SR* in annualised units — shrinks as T grows
+        sr_star = e_max * np.sqrt(252.0 / max(t, 1))
+        if observed_sr <= sr_star:
+            return 0.0
+        v_moment = (
+            1.0 - skew * observed_sr + ((kurt - 1.0) / 4.0) * observed_sr ** 2
+        )
+        if v_moment <= 0.0:
+            return 1.0
+        sr_variance = v_moment / max(t - 1, 1)
+        return float(norm.cdf((observed_sr - sr_star) / np.sqrt(sr_variance)))
+
+    target = 1.0 - alpha
+
+    # Verify the upper bound is achievable within a reasonable horizon.
+    if _dsr_at_t(100_000) < target:
+        return 999_999
+
+    # Binary search: find smallest T ≥ 2 where DSR ≥ target.
+    lo, hi = 2, 100_000
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if _dsr_at_t(mid) >= target:
+            hi = mid
+        else:
+            lo = mid + 1
+
+    return lo
+
+
 # ------------------------------------------------------------------
 # Multiple testing correction (Bonferroni + BHY)
 # ------------------------------------------------------------------
@@ -1540,11 +1620,24 @@ def walk_forward_significance_report(
     if n_windows == 0:
         return {}
 
-    if n_total_trials is None:
+    n_trials_defaulted = n_total_trials is None
+    if n_trials_defaulted:
+        # WARN: defaulting to n_windows massively underestimates the true
+        # number of strategies evaluated (parameter sweeps, model variants,
+        # feature combos).  Pass the actual count for a valid DSR.
+        import warnings as _warnings
+        _warnings.warn(
+            "walk_forward_significance_report: n_total_trials not provided — "
+            f"defaulting to n_windows={n_windows}. This almost certainly "
+            "underestimates the true number of trials, inflating DSR. "
+            "Pass the actual n_trials (all hyperparameter / model variants "
+            "explored before selecting this strategy).",
+            UserWarning,
+            stacklevel=2,
+        )
         n_total_trials = n_windows
 
     # Convert annualised SR to t-statistics (SR_ann = SR_daily × sqrt(252))
-    # T = SR_ann × sqrt(T) / sqrt(252) ... simplify:
     # t-stat for H₀: μ = 0 from Sharpe: t = SR_ann × sqrt(n) / sqrt(252)
     t_stats = [sr * np.sqrt(n_days_per_window / 252) for sr in oos_sharpes]
     p_values = [float(2.0 * (1.0 - norm.cdf(abs(t)))) for t in t_stats]
@@ -1554,11 +1647,22 @@ def walk_forward_significance_report(
 
     best_sr = max(oos_sharpes)
     best_idx = oos_sharpes.index(best_sr)
+    n_total_days = n_days_per_window * n_windows
     dsr = compute_deflated_sharpe_ratio(
         observed_sr=best_sr,
-        n_days=n_days_per_window * n_windows,
+        n_days=n_total_days,
         n_trials=n_total_trials,
     )
+
+    # MinBTL: minimum trading days for this SR to be statistically credible
+    # given the number of trials.  Returned as years for readability.
+    min_btl_days = compute_min_backtest_length(
+        observed_sr=best_sr,
+        n_trials=n_total_trials,
+        alpha=alpha,
+    )
+    min_btl_years = round(min_btl_days / 252, 1) if min_btl_days < 999_999 else None
+    btl_satisfied = n_total_days >= min_btl_days
 
     mean_sr = float(np.mean(oos_sharpes))
     positive_fraction = float(sum(s > 0 for s in oos_sharpes) / n_windows)
@@ -1580,9 +1684,17 @@ def walk_forward_significance_report(
         "best_window_sr": round(best_sr, 4),
         "deflated_sharpe_ratio": round(dsr, 4),
         "dsr_is_credible": dsr >= (1.0 - alpha),
+        "n_total_trials_used": n_total_trials,
+        "n_trials_defaulted": n_trials_defaulted,
+        "min_backtest_length_days": min_btl_days if min_btl_days < 999_999 else None,
+        "min_backtest_length_years": min_btl_years,
+        "min_btl_satisfied": btl_satisfied,
         "summary": (
             f"WF OOS: {n_windows} windows | mean SR={mean_sr:.3f} | "
             f"{bonf['n_significant']}/{n_windows} Bonferroni-significant | "
-            f"DSR={dsr:.3f} ({'CREDIBLE' if dsr >= 0.95 else 'SUSPECT'})"
+            f"DSR={dsr:.3f} ({'CREDIBLE' if dsr >= 0.95 else 'SUSPECT'}) | "
+            f"MinBTL={'∞' if min_btl_days >= 999_999 else f'{min_btl_days}d ({min_btl_years}y)'} "
+            f"({'OK' if btl_satisfied else 'INSUFFICIENT'})"
+            + (" [n_trials defaulted!]" if n_trials_defaulted else "")
         ),
     }
