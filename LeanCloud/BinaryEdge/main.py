@@ -76,9 +76,10 @@ class InstitutionalPortfolioConstructionModel(PortfolioConstructionModel):
                 # Cap at 1/12 (8.33%)
                 percent = min(w, 1.0 / self.max_positions)
                 
-                # Calculate quantity using algorithm's buying power logic (safest bridge)
-                qty = algorithm.CalculateOrderQuantity(insight.Symbol, percent)
-                targets.append(PortfolioTarget(insight.Symbol, qty))
+                # PortfolioTarget.Percent: second arg is portfolio fraction, not share qty.
+                # CalculateOrderQuantity + PortfolioTarget(symbol, qty) mismatches the
+                # PCM contract — execution model interprets the value as a percent.
+                targets.append(PortfolioTarget.Percent(insight.Symbol, percent))
 
         # 4. Handle Shorts (Equal weight within short book)
         if short_insights:
@@ -89,8 +90,7 @@ class InstitutionalPortfolioConstructionModel(PortfolioConstructionModel):
             percent_short = -min(w_short, 0.08)
             
             for insight in short_insights:
-                qty = algorithm.CalculateOrderQuantity(insight.Symbol, percent_short)
-                targets.append(PortfolioTarget(insight.Symbol, qty))
+                targets.append(PortfolioTarget.Percent(insight.Symbol, percent_short))
 
         # 5. Handle Liquidations
         flat_insights = [i for i in insights if i.Direction == InsightDirection.Flat]

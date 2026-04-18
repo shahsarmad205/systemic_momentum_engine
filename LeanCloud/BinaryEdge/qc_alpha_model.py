@@ -162,15 +162,24 @@ def LoadProductionModel(algorithm, model_path="best_long_model.pkl", min_feature
                     f"{len(obj.get('feature_columns', []))} features)"
                 )
             else:
-                n_feat = len(candidate.get("feature_columns", [])) if isinstance(candidate, dict) else 0
-                algorithm.Log(
-                    f"LoadProductionModel [{model_path}]: Object Store STALE "
-                    f"({n_feat} features < {min_features}). Deleting."
-                )
-                try:
-                    algorithm.ObjectStore.Delete(model_path)
-                except Exception:
-                    pass
+                # Only delete if it loaded as a dict with too few features (confirmed stale).
+                # Non-dict failures (corrupt pickle, truncated bytes) may be recoverable —
+                # deleting them during a live backtest is irreversible and destructive.
+                if isinstance(candidate, dict):
+                    n_feat = len(candidate.get("feature_columns") or [])
+                    algorithm.Log(
+                        f"LoadProductionModel [{model_path}]: Object Store STALE "
+                        f"({n_feat} features < {min_features}). Deleting."
+                    )
+                    try:
+                        algorithm.ObjectStore.Delete(model_path)
+                    except Exception:
+                        pass
+                else:
+                    algorithm.Log(
+                        f"LoadProductionModel [{model_path}]: Object Store load returned "
+                        f"unexpected type {type(candidate).__name__} — skipping (not deleting)."
+                    )
     except Exception as exc:
         algorithm.Log(f"Object Store load failed [{model_path}]: {exc}")
 
@@ -567,7 +576,8 @@ class TrendSignalAlphaModel(AlphaModel):
                         v = fund.OperationRatios.ROA.Value
                         if v is not None and np.isfinite(float(v)):
                             roa = float(v)
-                    except: pass
+                    except Exception as _e:
+                        algorithm.Log(f"[_inject_fundamentals] ROA error {symbol}: {_e}")
 
                     # Piotroski F-Score (Proxy from morningstar)
                     try:
@@ -583,16 +593,19 @@ class TrendSignalAlphaModel(AlphaModel):
                             if assets is not None and float(assets) > 0:
                                 accruals = (float(ni) - float(ocf)) / float(assets)
                         f_score = float(np.clip(pts, 0, 9))
-                    except: pass
-                    
+                    except Exception as _e:
+                        algorithm.Log(f"[_inject_fundamentals] F-score error {symbol}: {_e}")
+
                     # Leverage (TotalDebt / TotalAssets)
                     try:
                         debt = fund.FinancialStatements.BalanceSheet.TotalDebt.Value
                         assets = fund.FinancialStatements.BalanceSheet.TotalAssets.Value
                         if debt is not None and assets is not None and float(assets) > 0:
                             leverage = float(debt) / float(assets)
-                    except: pass
-            except: pass
+                    except Exception as _e:
+                        algorithm.Log(f"[_inject_fundamentals] leverage error {symbol}: {_e}")
+            except Exception as _e:
+                algorithm.Log(f"[_inject_fundamentals] fundamentals access error {symbol}: {_e}")
 
             roa_col.append(roa)
             delta_roa_col.append(roa - self._prev_roa.get(symbol, roa))
@@ -639,7 +652,9 @@ class TrendSignalAlphaModel(AlphaModel):
                         score = float(self.long_model.predict([fv])[0])
                     raw_scores[symbol] = score
                 except Exception as exc:
-                    pass
+                    # Log inference errors — silent failures cause invisible universe
+                    # shrinkage that changes position sizing without any observable signal.
+                    algorithm.Log(f"[_update_longs] inference error {symbol}: {exc}")
 
         if not raw_scores:
             return []

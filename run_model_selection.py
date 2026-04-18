@@ -105,8 +105,10 @@ try:
                 bin_labels = np.minimum((ranks * n_bins) // n, n_bins - 1).astype(np.int32)
                 labels[mask] = bin_labels
 
-            _, counts = np.unique(date_groups, return_counts=True)
-            group_sizes = counts.tolist()
+            # Preserve the order groups appear in X (np.unique sorts by value,
+            # which matches sorted-by-date data but silently breaks otherwise).
+            _, first_idx, counts = np.unique(date_groups, return_index=True, return_counts=True)
+            group_sizes = counts[np.argsort(first_idx)].tolist()
 
             self._model = _lgb.LGBMRanker(
                 objective="lambdarank",
@@ -863,19 +865,21 @@ def _sharpe_ic_obj(y_true: np.ndarray, y_pred: np.ndarray):
     sigma_r = float(np.sqrt((r * r).mean())) + 1e-8
     ic = float((f * r).mean()) / (sigma_f * sigma_r)
 
-    # Gradient of −IC w.r.t. f_i (we minimise −IC → maximise IC)
-    grad_ic = (r / n) / (sigma_f * sigma_r) - ic * f / (n * sigma_f ** 2)
+    # Gradient of −IC w.r.t. f_i — per-sample (not averaged over the full batch).
+    # Liu et al. (2023) compute the gradient per date cross-section (n_cs ≈ 400 tickers).
+    # When y_true/y_pred span the full training window (n = n_dates × n_cs ≈ 700k),
+    # dividing by n makes each gradient ~1764× smaller than the per-date formulation;
+    # after clipping this degrades to a sign-loss with no ordinal information.
+    # Omitting the 1/n factor restores per-sample scale and preserves ordinal signal.
+    grad_ic = r / (sigma_f * sigma_r) - ic * f / sigma_f ** 2
     grad = -grad_ic  # negate: XGB minimises
-    # Clip: when predictions are near-constant at initialisation (sigma_f ≈ 1e-8),
-    # the gradient can blow up to ~1e7.  Clipping to [-1, 1] prevents NaN scores
-    # while preserving the gradient direction that XGBoost uses for split-finding.
+    # Clip: prevents explosion when predictions are near-constant at init (sigma_f ≈ 1e-8).
     grad = np.clip(grad, -1.0, 1.0)
 
     # Unit Hessian — required for XGBoost to find any splits.
-    # The previous hess=1/n (≈0.001 per sample) meant sum(hess_leaf) never reached
-    # min_child_weight=1 → zero splits → constant predictions → NaN IC.
-    # Unit hessian is the standard choice for custom ranking/IC objectives
-    # (used in LambdaMART, LightGBM lambdarank, etc.).
+    # hess=1/n (≈0.001 per sample) meant sum(hess_leaf) never reached min_child_weight=1
+    # → zero splits → constant predictions → NaN IC.
+    # Unit hessian is standard for ranking/IC objectives (LambdaMART, LightGBM lambdarank).
     hess = np.ones(n, dtype=np.float64)
     return grad, hess
 
@@ -915,7 +919,7 @@ def _build_models() -> list[tuple[str, Any, bool, str]]:
             Pipeline(
                 [
                     ("scaler", RobustScaler()),
-                    ("model", LogisticRegression(C=0.1, l1_ratio=0, max_iter=1000)),
+                    ("model", LogisticRegression(C=0.1, penalty="l2", max_iter=1000)),
                 ]
             ),
             False,
@@ -1664,12 +1668,15 @@ def main() -> None:
                         # construction uses) rather than absolute return prediction
                         # (which is dominated by market-wide beta noise).
                         fwd_raw = tr["forward_return"].replace([np.inf, -np.inf], np.nan)
-                        if "date" in tr.columns:
-                            rank_pct = fwd_raw.groupby(tr["date"]).transform(
-                                lambda x: x.rank(pct=True, na_option="keep")
+                        if "date" not in tr.columns:
+                            raise ValueError(
+                                "XGBRankIC requires a 'date' column for per-cross-section rank "
+                                "normalization. Falling back to global rank would re-introduce "
+                                "market-beta contamination that rank normalization is designed to remove."
                             )
-                        else:
-                            rank_pct = fwd_raw.rank(pct=True, na_option="keep")
+                        rank_pct = fwd_raw.groupby(tr["date"]).transform(
+                            lambda x: x.rank(pct=True, na_option="keep")
+                        )
                         # Scale [0, 1] → [-1, +1]: mean=0, symmetric around zero
                         y_tr = (rank_pct.fillna(0.5) * 2.0 - 1.0).values.astype(float)
                     else:

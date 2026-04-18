@@ -363,20 +363,20 @@ class SignalEngine:
             _routing_df["momentum_6m"] = (_close_r / _close_r.shift(126) - 1).clip(-1.0, 5.0)
         try:
             _routing_df = calculate_momentum_features(_routing_df)     # adds momentum_12m_skip1
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug("calculate_momentum_features failed for %s: %s", ticker, _e)
         try:
             _routing_df = calculate_short_logic_features(_routing_df)  # adds short_term_momentum_score, turnover_pct_rank
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug("calculate_short_logic_features failed for %s: %s", ticker, _e)
         try:
             _routing_df = calculate_factor_momentum_consistency(_routing_df)  # adds momentum_consistency_score
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug("calculate_factor_momentum_consistency failed for %s: %s", ticker, _e)
         try:
             _routing_df = calculate_information_discreteness(_routing_df)     # adds information_discreteness
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug("calculate_information_discreteness failed for %s: %s", ticker, _e)
         _routing_df = _routing_df.reindex(features.index)
 
         # Diagnostic features for ML/Ensemble analysis (defined later if in ML mode)
@@ -784,7 +784,7 @@ class SignalEngine:
                     # NEW SHORT SYNC FEATURES (RAW SCALE)
                     "dist_from_52w_high": (
                         (close / close.rolling(252).max() - 1.0)
-                    ).fillna(0.0),
+                    ).shift(1).fillna(0.0),  # shift(1): align with training (feature_builder uses lagged close)
                     "rsi_overbought": (
                         mr_feat["rsi_14_raw"].shift(1) > 70.0
                     ).astype(float).fillna(0.0),
@@ -806,10 +806,10 @@ class SignalEngine:
                     "short_term_reversal": (-ret_5d.shift(1)).clip(-0.5, 0.5).fillna(0.0),
                     "nearness_52w_low": (
                         1.0 / (1.0 + ((close / close.rolling(252, min_periods=60).min().replace(0, np.nan).clip(lower=1e-6)) - 1.0).clip(0, 10))
-                    ).fillna(0.5),
+                    ).shift(1).fillna(0.5),  # shift(1): training (feature_builder) lags via dist_from_52w_low.shift(1)
                     "nearness_52w_high": (
                         (close / close.rolling(252, min_periods=100).max().replace(0, np.nan)).clip(0.0, 1.0)
-                    ).fillna(0.5),
+                    ).shift(1).fillna(0.5),  # shift(1): align with training feature distribution
                     "low_vol_score": (
                         1.0 - daily_ret.rolling(20, min_periods=10).std().rolling(252, min_periods=60).rank(pct=True)
                     ).fillna(0.5),
@@ -1033,8 +1033,9 @@ class SignalEngine:
             scale = float(getattr(self.config, "score_scale", 1.0))
             adjusted = (adjusted * scale) * direction
 
-        # short_score_raw is only set in mode==ml; default to zeros in other modes
-        if "short_score_raw" not in dir():
+        # short_score_raw is only set in mode==ml; default to zeros in other modes.
+        # Use locals() (not dir()) — dir() is unreliable for local variable existence.
+        if "short_score_raw" not in locals():
             short_score_raw = pd.Series(0.0, index=features.index)
 
         signal_df = pd.DataFrame(

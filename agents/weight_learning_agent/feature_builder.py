@@ -122,9 +122,11 @@ def _fetch_earnings_surprise(ticker: str, dates: pd.DatetimeIndex) -> pd.Series:
         cal_end = max(dates_naive.max(), surprise.index.max())
         all_bdates = pd.date_range(cal_start, cal_end, freq="B")
 
-        # Reindex to daily, shift 1 day (announcement is after market close)
-        # then forward-fill so the signal persists until the next earnings date
-        s = surprise.reindex(all_bdates).shift(1).ffill()
+        # Shift 2 days: earnings are announced after close on day T; the signal
+        # is tradeable at open on T+1 at the earliest, but yfinance timestamps are
+        # sometimes market-open (not after-close), so shift(1) risks same-day leakage.
+        # shift(2) guarantees a full trading-day buffer regardless of timestamp alignment.
+        s = surprise.reindex(all_bdates).shift(2).ffill()
         return s.reindex(dates_naive)
     except Exception:
         return pd.Series(np.nan, index=dates)
