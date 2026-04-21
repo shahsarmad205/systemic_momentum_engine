@@ -570,7 +570,7 @@ def build_returns_matrix(
     for ticker, df in price_data.items():
         if df is None or df.empty or "Close" not in df.columns:
             continue
-        price_col = "AdjClose" if "AdjClose" in df.columns else "Close"
+        price_col = "Close" if "Close" in df.columns else "AdjClose"
         past = df[price_col].loc[df.index <= as_of_date].tail(lookback_days + 1)
         if len(past) < 2:
             continue
@@ -607,7 +607,7 @@ def annualized_vol(
     df = price_data[ticker]
     if "Close" not in df.columns or df.empty:
         return None
-    price_col = "AdjClose" if "AdjClose" in df.columns else "Close"
+    price_col = "Close" if "Close" in df.columns else "AdjClose"
     series = df[price_col].loc[df.index <= as_of_date].tail(lookback_days + 1)
     if len(series) < 2:
         return None

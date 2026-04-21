@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>graphify - graphify-out/graph.html</title>
+<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0f0f1a; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; display: flex; height: 100vh; overflow: hidden; }
+  #graph { flex: 1; }
+  #sidebar { width: 280px; background: #1a1a2e; border-left: 1px solid #2a2a4e; display: flex; flex-direction: column; overflow: hidden; }
+  #search-wrap { padding: 12px; border-bottom: 1px solid #2a2a4e; }
+  #search { width: 100%; background: #0f0f1a; border: 1px solid #3a3a5e; color: #e0e0e0; padding: 7px 10px; border-radius: 6px; font-size: 13px; outline: none; }
+  #search:focus { border-color: #4E79A7; }
+  #search-results { max-height: 140px; overflow-y: auto; padding: 4px 12px; border-bottom: 1px solid #2a2a4e; display: none; }
+  .search-item { padding: 4px 6px; cursor: pointer; border-radius: 4px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .search-item:hover { background: #2a2a4e; }
+  #info-panel { padding: 14px; border-bottom: 1px solid #2a2a4e; min-height: 140px; }
+  #info-panel h3 { font-size: 13px; color: #aaa; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em; }
+  #info-content { font-size: 13px; color: #ccc; line-height: 1.6; }
+  #info-content .field { margin-bottom: 5px; }
+  #info-content .field b { color: #e0e0e0; }
+  #info-content .empty { color: #555; font-style: italic; }
+  .neighbor-link { display: block; padding: 2px 6px; margin: 2px 0; border-radius: 3px; cursor: pointer; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-left: 3px solid #333; }
+  .neighbor-link:hover { background: #2a2a4e; }
+  #neighbors-list { max-height: 160px; overflow-y: auto; margin-top: 4px; }
+  #legend-wrap { flex: 1; overflow-y: auto; padding: 12px; }
+  #legend-wrap h3 { font-size: 13px; color: #aaa; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .legend-item { display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; border-radius: 4px; font-size: 12px; }
+  .legend-item:hover { background: #2a2a4e; padding-left: 4px; }
+  .legend-item.dimmed { opacity: 0.35; }
+  .legend-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+  .legend-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .legend-count { color: #666; font-size: 11px; }
+  #stats { padding: 10px 14px; border-top: 1px solid #2a2a4e; font-size: 11px; color: #555; }
+</style>
+</head>
+<body>
+<div id="graph"></div>
+<div id="sidebar">
+  <div id="search-wrap">
+    <input id="search" type="text" placeholder="Search nodes..." autocomplete="off">
+    <div id="search-results"></div>
+  </div>
+  <div id="info-panel">
+    <h3>Node Info</h3>
+    <div id="info-content"><span class="empty">Click a node to inspect it</span></div>
+  </div>
+  <div id="legend-wrap">
+    <h3>Communities</h3>
+    <div id="legend"></div>
+  </div>
+  <div id="stats">39 nodes &middot; 50 edges &middot; 6 communities</div>
+</div>
+<script>
+const RAW_NODES = [{"id": "mfic_paper", "label": "Exploring Techniques in Multi-Factor Index Construction", "color": {"background": "#E15759", "border": "#E15759", "highlight": {"background": "#ffffff", "border": "#E15759"}}, "size": 33.3, "font": {"size": 12, "color": "#ffffff"}, "title": "Exploring Techniques in Multi-Factor Index Construction", "community": 2, "community_name": "Bottom-Up Construction & Methodology", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 7}, {"id": "mfic_top_down_approach", "label": "Top-Down Multi-Factor Portfolio Construction", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 40.0, "font": {"size": 12, "color": "#ffffff"}, "title": "Top-Down Multi-Factor Portfolio Construction", "community": 0, "community_name": "Top-Down Factor Selection", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 9}, {"id": "mfic_bottom_up_approach", "label": "Bottom-Up Multi-Factor Portfolio Construction", "color": {"background": "#E15759", "border": "#E15759", "highlight": {"background": "#ffffff", "border": "#E15759"}}, "size": 26.7, "font": {"size": 12, "color": "#ffffff"}, "title": "Bottom-Up Multi-Factor Portfolio Construction", "community": 2, "community_name": "Bottom-Up Construction & Methodology", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 5}, {"id": "mfic_sector_neutral", "label": "Sector-Neutral Portfolio Construction", "color": {"background": "#EDC948", "border": "#EDC948", "highlight": {"background": "#ffffff", "border": "#EDC948"}}, "size": 26.7, "font": {"size": 12, "color": "#ffffff"}, "title": "Sector-Neutral Portfolio Construction", "community": 5, "community_name": "Sector Neutrality & Risk", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 5}, {"id": "mfic_sector_agnostic", "label": "Sector-Agnostic Portfolio Construction", "color": {"background": "#E15759", "border": "#E15759", "highlight": {"background": "#ffffff", "border": "#E15759"}}, "size": 13.3, "font": {"size": 0, "color": "#ffffff"}, "title": "Sector-Agnostic Portfolio Construction", "community": 2, "community_name": "Bottom-Up Construction & Methodology", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 1}, {"id": "mfic_factor_efficiency_ratio", "label": "Factor Efficiency Ratio (FER)", "color": {"background": "#76B7B2", "border": "#76B7B2", "highlight": {"background": "#ffffff", "border": "#76B7B2"}}, "size": 26.7, "font": {"size": 12, "color": "#ffffff"}, "title": "Factor Efficiency Ratio (FER)", "community": 3, "community_name": "Factor Efficiency Ratio Framework", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 5}, {"id": "mfic_fer_hunstad", "label": "FER by Hunstad and Dekhayser (2014) \u2014 Risk Decomposition Variant", "color": {"background": "#76B7B2", "border": "#76B7B2", "highlight": {"background": "#ffffff", "border": "#76B7B2"}}, "size": 13.3, "font": {"size": 0, "color": "#ffffff"}, "title": "FER by Hunstad and Dekhayser (2014) \u2014 Risk Decomposition Variant", "community": 3, "community_name": "Factor Efficiency Ratio Framework", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 1}, {"id": "mfic_fer_simplified", "label": "Simplified FER \u2014 Intended vs Unintended Factor Exposure Ratio", "color": {"background": "#76B7B2", "border": "#76B7B2", "highlight": {"background": "#ffffff", "border": "#76B7B2"}}, "size": 13.3, "font": {"size": 0, "color": "#ffffff"}, "title": "Simplified FER \u2014 Intended vs Unintended Factor Exposure Ratio", "community": 3, "community_name": "Factor Efficiency Ratio Framework", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 1}, {"id": "mfic_fer_proposed", "label": "Proposed FER \u2014 Active Factor Exposure per Unit Tracking Error (Eq. 3)", "color": {"background": "#EDC948", "border": "#EDC948", "highlight": {"background": "#ffffff", "border": "#EDC948"}}, "size": 20.0, "font": {"size": 12, "color": "#ffffff"}, "title": "Proposed FER \u2014 Active Factor Exposure per Unit Tracking Error (Eq. 3)", "community": 5, "community_name": "Sector Neutrality & Risk", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 3}, {"id": "mfic_absolute_fer", "label": "Absolute FER \u2014 Absolute Factor Exposure per Portfolio Concentration (Eq. 4)", "color": {"background": "#76B7B2", "border": "#76B7B2", "highlight": {"background": "#ffffff", "border": "#76B7B2"}}, "size": 16.7, "font": {"size": 12, "color": "#ffffff"}, "title": "Absolute FER \u2014 Absolute Factor Exposure per Portfolio Concentration (Eq. 4)", "community": 3, "community_name": "Factor Efficiency Ratio Framework", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 2}, {"id": "mfic_quality_factor", "label": "Quality Factor", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 20.0, "font": {"size": 12, "color": "#ffffff"}, "title": "Quality Factor", "community": 0, "community_name": "Top-Down Factor Selection", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 3}, {"id": "mfic_value_factor", "label": "Value Factor", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 20.0, "font": {"size": 12, "color": "#ffffff"}, "title": "Value Factor", "community": 0, "community_name": "Top-Down Factor Selection", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 3}, {"id": "mfic_momentum_factor", "label": "Momentum Factor", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 20.0, "font": {"size": 12, "color": "#ffffff"}, "title": "Momentum Factor", "community": 0, "community_name": "Top-Down Factor Selection", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 3}, {"id": "mfic_low_volatility_factor", "label": "Low Volatility Factor", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 16.7, "font": {"size": 12, "color": "#ffffff"}, "title": "Low Volatility Factor", "community": 0, "community_name": "Top-Down Factor Selection", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 2}, {"id": "mfic_composite_score", "label": "Composite Multi-Factor Score (Average of Single-Factor Z-Scores)", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 30.0, "font": {"size": 12, "color": "#ffffff"}, "title": "Composite Multi-Factor Score (Average of Single-Factor Z-Scores)", "community": 0, "community_name": "Top-Down Factor Selection", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 6}, {"id": "mfic_market_cap_weighting", "label": "Float-Adjusted Market-Cap Weighting Scheme", "color": {"background": "#59A14F", "border": "#59A14F", "highlight": {"background": "#ffffff", "border": "#59A14F"}}, "size": 13.3, "font": {"size": 0, "color": "#ffffff"}, "title": "Float-Adjusted Market-Cap Weighting Scheme", "community": 4, "community_name": "Weighting Schemes", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 1}, {"id": "mfic_score_weighting", "label": "Factor Score Weighting Scheme", "color": {"background": "#59A14F", "border": "#59A14F", "highlight": {"background": "#ffffff", "border": "#59A14F"}}, "size": 16.7, "font": {"size": 12, "color": "#ffffff"}, "title": "Factor Score Weighting Scheme", "community": 4, "community_name": "Weighting Schemes", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 2}, {"id": "mfic_hybrid_weighting", "label": "Hybrid Weighting Scheme (FMC x Factor Score)", "color": {"background": "#59A14F", "border": "#59A14F", "highlight": {"background": "#ffffff", "border": "#59A14F"}}, "size": 20.0, "font": {"size": 12, "color": "#ffffff"}, "title": "Hybrid Weighting Scheme (FMC x Factor Score)", "community": 4, "community_name": "Weighting Schemes", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 3}, {"id": "mfic_rebalance_frequency", "label": "Rebalancing Frequency (Quarterly vs Semiannual)", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 20.0, "font": {"size": 12, "color": "#ffffff"}, "title": "Rebalancing Frequency (Quarterly vs Semiannual)", "community": 1, "community_name": "Turnover & Rebalancing Control", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 3}, {"id": "mfic_factor_decay", "label": "Factor Decay (Diminishing Factor Exposure Between Rebalances)", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 13.3, "font": {"size": 0, "color": "#ffffff"}, "title": "Factor Decay (Diminishing Factor Exposure Between Rebalances)", "community": 1, "community_name": "Turnover & Rebalancing Control", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 1}, {"id": "mfic_active_share", "label": "Active Share / Target Active Share", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 26.7, "font": {"size": 12, "color": "#ffffff"}, "title": "Active Share / Target Active Share", "community": 1, "community_name": "Turnover & Rebalancing Control", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 5}, {"id": "mfic_tracking_error", "label": "Tracking Error (Active Risk)", "color": {"background": "#EDC948", "border": "#EDC948", "highlight": {"background": "#ffffff", "border": "#EDC948"}}, "size": 20.0, "font": {"size": 12, "color": "#ffffff"}, "title": "Tracking Error (Active Risk)", "community": 5, "community_name": "Sector Neutrality & Risk", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 3}, {"id": "mfic_portfolio_turnover", "label": "Portfolio Turnover", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 23.3, "font": {"size": 12, "color": "#ffffff"}, "title": "Portfolio Turnover", "community": 1, "community_name": "Turnover & Rebalancing Control", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 4}, {"id": "mfic_factor_imbalance", "label": "Factor Imbalance Metric", "color": {"background": "#E15759", "border": "#E15759", "highlight": {"background": "#ffffff", "border": "#E15759"}}, "size": 23.3, "font": {"size": 12, "color": "#ffffff"}, "title": "Factor Imbalance Metric", "community": 2, "community_name": "Bottom-Up Construction & Methodology", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 4}, {"id": "mfic_stock_count_selection", "label": "Target Stock Count Selection Method", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 13.3, "font": {"size": 0, "color": "#ffffff"}, "title": "Target Stock Count Selection Method", "community": 1, "community_name": "Turnover & Rebalancing Control", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 1}, {"id": "mfic_target_weight_selection", "label": "Target Weight Selection Method", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 13.3, "font": {"size": 0, "color": "#ffffff"}, "title": "Target Weight Selection Method", "community": 1, "community_name": "Turnover & Rebalancing Control", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 1}, {"id": "mfic_backtest_sp500", "label": "Backtest on S&P 500 Universe (Mar 1995 \u2013 May 2020, 116 portfolios)", "color": {"background": "#E15759", "border": "#E15759", "highlight": {"background": "#ffffff", "border": "#E15759"}}, "size": 16.7, "font": {"size": 12, "color": "#ffffff"}, "title": "Backtest on S&amp;P 500 Universe (Mar 1995 \u2013 May 2020, 116 portfolios)", "community": 2, "community_name": "Bottom-Up Construction & Methodology", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 2}, {"id": "mfic_rank_based_approach", "label": "Rank-Based Multi-Factor Portfolio Selection", "color": {"background": "#E15759", "border": "#E15759", "highlight": {"background": "#ffffff", "border": "#E15759"}}, "size": 20.0, "font": {"size": 12, "color": "#ffffff"}, "title": "Rank-Based Multi-Factor Portfolio Selection", "community": 2, "community_name": "Bottom-Up Construction & Methodology", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 3}, {"id": "mfic_hhi_concentration", "label": "Herfindahl-Hirschman Index for Portfolio Concentration", "color": {"background": "#76B7B2", "border": "#76B7B2", "highlight": {"background": "#ffffff", "border": "#76B7B2"}}, "size": 13.3, "font": {"size": 0, "color": "#ffffff"}, "title": "Herfindahl-Hirschman Index for Portfolio Concentration", "community": 3, "community_name": "Factor Efficiency Ratio Framework", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 1}, {"id": "mfic_factor_correlation", "label": "Factor Exposure Correlations (Cross-Factor)", "color": {"background": "#E15759", "border": "#E15759", "highlight": {"background": "#ffffff", "border": "#E15759"}}, "size": 13.3, "font": {"size": 0, "color": "#ffffff"}, "title": "Factor Exposure Correlations (Cross-Factor)", "community": 2, "community_name": "Bottom-Up Construction & Methodology", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 1}, {"id": "mfic_rationale_sector_neutral_efficiency", "label": "Rationale: Sector Neutrality Reduces Unintended Active Risk More Than It Costs in Factor Exposure", "color": {"background": "#EDC948", "border": "#EDC948", "highlight": {"background": "#ffffff", "border": "#EDC948"}}, "size": 13.3, "font": {"size": 0, "color": "#ffffff"}, "title": "Rationale: Sector Neutrality Reduces Unintended Active Risk More Than It Costs in Factor Exposure", "community": 5, "community_name": "Sector Neutrality & Risk", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 1}, {"id": "mfic_rationale_topdown_dilution", "label": "Rationale: Top-Down Factor Dilution Compensated by Proportional Tracking Error Reduction", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 13.3, "font": {"size": 0, "color": "#ffffff"}, "title": "Rationale: Top-Down Factor Dilution Compensated by Proportional Tracking Error Reduction", "community": 0, "community_name": "Top-Down Factor Selection", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 1}, {"id": "mfic_rationale_hybrid_weight", "label": "Rationale: FMC x Score Hybrid Weighting Maintains Liquidity While Improving Factor Tilt", "color": {"background": "#59A14F", "border": "#59A14F", "highlight": {"background": "#ffffff", "border": "#59A14F"}}, "size": 13.3, "font": {"size": 0, "color": "#ffffff"}, "title": "Rationale: FMC x Score Hybrid Weighting Maintains Liquidity While Improving Factor Tilt", "community": 4, "community_name": "Weighting Schemes", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 1}, {"id": "mfic_rationale_rebalance_tradeoff", "label": "Rationale: Semiannual Rebalancing Reduces Turnover Cost at Expense of Factor Decay; Higher Active Share Compensates", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 13.3, "font": {"size": 0, "color": "#ffffff"}, "title": "Rationale: Semiannual Rebalancing Reduces Turnover Cost at Expense of Factor Decay; Higher Active Share Compensates", "community": 1, "community_name": "Turnover & Rebalancing Control", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 1}, {"id": "mfic_rationale_linear_exposure_risk", "label": "Rationale: Linear Relationship Between Active Share and Tracking Error Means No Optimal Concentration Point", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 13.3, "font": {"size": 0, "color": "#ffffff"}, "title": "Rationale: Linear Relationship Between Active Share and Tracking Error Means No Optimal Concentration Point", "community": 1, "community_name": "Turnover & Rebalancing Control", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 1}, {"id": "mfic_sp_quality_index", "label": "S&P Quality Index Methodology", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 13.3, "font": {"size": 0, "color": "#ffffff"}, "title": "S&amp;P Quality Index Methodology", "community": 0, "community_name": "Top-Down Factor Selection", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 1}, {"id": "mfic_sp_enhanced_value_index", "label": "S&P Enhanced Value Index Methodology", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 13.3, "font": {"size": 0, "color": "#ffffff"}, "title": "S&amp;P Enhanced Value Index Methodology", "community": 0, "community_name": "Top-Down Factor Selection", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 1}, {"id": "mfic_sp_momentum_index", "label": "S&P Momentum Index Methodology", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 13.3, "font": {"size": 0, "color": "#ffffff"}, "title": "S&amp;P Momentum Index Methodology", "community": 0, "community_name": "Top-Down Factor Selection", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 1}, {"id": "mfic_innes_2018", "label": "'The Merits and Methods of Multi-Factor Investing' \u2014 Innes (2018)", "color": {"background": "#E15759", "border": "#E15759", "highlight": {"background": "#ffffff", "border": "#E15759"}}, "size": 13.3, "font": {"size": 0, "color": "#ffffff"}, "title": "&#x27;The Merits and Methods of Multi-Factor Investing&#x27; \u2014 Innes (2018)", "community": 2, "community_name": "Bottom-Up Construction & Methodology", "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf", "file_type": "paper", "degree": 1}];
+const RAW_EDGES = [{"from": "mfic_paper", "to": "mfic_top_down_approach", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_paper", "to": "mfic_bottom_up_approach", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_paper", "to": "mfic_sector_neutral", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_paper", "to": "mfic_sector_agnostic", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_paper", "to": "mfic_factor_efficiency_ratio", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_paper", "to": "mfic_backtest_sp500", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_paper", "to": "mfic_innes_2018", "label": "cites", "title": "cites [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_top_down_approach", "to": "mfic_quality_factor", "label": "conceptually_related_to", "title": "conceptually_related_to [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_top_down_approach", "to": "mfic_value_factor", "label": "conceptually_related_to", "title": "conceptually_related_to [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_top_down_approach", "to": "mfic_momentum_factor", "label": "conceptually_related_to", "title": "conceptually_related_to [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_top_down_approach", "to": "mfic_low_volatility_factor", "label": "conceptually_related_to", "title": "conceptually_related_to [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_top_down_approach", "to": "mfic_factor_imbalance", "label": "conceptually_related_to", "title": "conceptually_related_to [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_top_down_approach", "to": "mfic_rank_based_approach", "label": "conceptually_related_to", "title": "conceptually_related_to [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_top_down_approach", "to": "mfic_rationale_topdown_dilution", "label": "rationale_for", "title": "rationale_for [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_top_down_approach", "to": "mfic_portfolio_turnover", "label": "conceptually_related_to", "title": "conceptually_related_to [INFERRED]", "dashes": true, "width": 1, "color": {"opacity": 0.35}, "confidence": "INFERRED"}, {"from": "mfic_bottom_up_approach", "to": "mfic_composite_score", "label": "implements", "title": "implements [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_bottom_up_approach", "to": "mfic_factor_imbalance", "label": "conceptually_related_to", "title": "conceptually_related_to [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_bottom_up_approach", "to": "mfic_rank_based_approach", "label": "conceptually_related_to", "title": "conceptually_related_to [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_bottom_up_approach", "to": "mfic_portfolio_turnover", "label": "conceptually_related_to", "title": "conceptually_related_to [INFERRED]", "dashes": true, "width": 1, "color": {"opacity": 0.35}, "confidence": "INFERRED"}, {"from": "mfic_sector_neutral", "to": "mfic_tracking_error", "label": "conceptually_related_to", "title": "conceptually_related_to [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_sector_neutral", "to": "mfic_rationale_sector_neutral_efficiency", "label": "rationale_for", "title": "rationale_for [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_sector_neutral", "to": "mfic_factor_imbalance", "label": "conceptually_related_to", "title": "conceptually_related_to [INFERRED]", "dashes": true, "width": 1, "color": {"opacity": 0.35}, "confidence": "INFERRED"}, {"from": "mfic_sector_neutral", "to": "mfic_fer_proposed", "label": "conceptually_related_to", "title": "conceptually_related_to [INFERRED]", "dashes": true, "width": 1, "color": {"opacity": 0.35}, "confidence": "INFERRED"}, {"from": "mfic_factor_efficiency_ratio", "to": "mfic_fer_hunstad", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_factor_efficiency_ratio", "to": "mfic_fer_simplified", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_factor_efficiency_ratio", "to": "mfic_fer_proposed", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_factor_efficiency_ratio", "to": "mfic_absolute_fer", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_fer_proposed", "to": "mfic_tracking_error", "label": "conceptually_related_to", "title": "conceptually_related_to [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_absolute_fer", "to": "mfic_hhi_concentration", "label": "conceptually_related_to", "title": "conceptually_related_to [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_quality_factor", "to": "mfic_composite_score", "label": "conceptually_related_to", "title": "conceptually_related_to [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_quality_factor", "to": "mfic_sp_quality_index", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_value_factor", "to": "mfic_composite_score", "label": "conceptually_related_to", "title": "conceptually_related_to [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_value_factor", "to": "mfic_sp_enhanced_value_index", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_momentum_factor", "to": "mfic_composite_score", "label": "conceptually_related_to", "title": "conceptually_related_to [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_momentum_factor", "to": "mfic_sp_momentum_index", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_low_volatility_factor", "to": "mfic_composite_score", "label": "conceptually_related_to", "title": "conceptually_related_to [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_composite_score", "to": "mfic_score_weighting", "label": "implements", "title": "implements [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_market_cap_weighting", "to": "mfic_hybrid_weighting", "label": "conceptually_related_to", "title": "conceptually_related_to [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_score_weighting", "to": "mfic_hybrid_weighting", "label": "conceptually_related_to", "title": "conceptually_related_to [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_hybrid_weighting", "to": "mfic_rationale_hybrid_weight", "label": "rationale_for", "title": "rationale_for [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_rebalance_frequency", "to": "mfic_factor_decay", "label": "conceptually_related_to", "title": "conceptually_related_to [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_rebalance_frequency", "to": "mfic_portfolio_turnover", "label": "conceptually_related_to", "title": "conceptually_related_to [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_rebalance_frequency", "to": "mfic_rationale_rebalance_tradeoff", "label": "rationale_for", "title": "rationale_for [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_active_share", "to": "mfic_tracking_error", "label": "conceptually_related_to", "title": "conceptually_related_to [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_active_share", "to": "mfic_portfolio_turnover", "label": "conceptually_related_to", "title": "conceptually_related_to [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_active_share", "to": "mfic_stock_count_selection", "label": "conceptually_related_to", "title": "conceptually_related_to [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_active_share", "to": "mfic_target_weight_selection", "label": "implements", "title": "implements [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_active_share", "to": "mfic_rationale_linear_exposure_risk", "label": "rationale_for", "title": "rationale_for [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_factor_imbalance", "to": "mfic_factor_correlation", "label": "conceptually_related_to", "title": "conceptually_related_to [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "mfic_backtest_sp500", "to": "mfic_rank_based_approach", "label": "implements", "title": "implements [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}];
+const LEGEND = [{"cid": 0, "color": "#4E79A7", "label": "Top-Down Factor Selection", "count": 10}, {"cid": 1, "color": "#F28E2B", "label": "Turnover &amp; Rebalancing Control", "count": 8}, {"cid": 2, "color": "#E15759", "label": "Bottom-Up Construction &amp; Methodology", "count": 8}, {"cid": 3, "color": "#76B7B2", "label": "Factor Efficiency Ratio Framework", "count": 5}, {"cid": 4, "color": "#59A14F", "label": "Weighting Schemes", "count": 4}, {"cid": 5, "color": "#EDC948", "label": "Sector Neutrality &amp; Risk", "count": 4}];
+
+// HTML-escape helper — prevents XSS when injecting graph data into innerHTML
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// Build vis datasets
+const nodesDS = new vis.DataSet(RAW_NODES.map(n => ({
+  id: n.id, label: n.label, color: n.color, size: n.size,
+  font: n.font, title: n.title,
+  _community: n.community, _community_name: n.community_name,
+  _source_file: n.source_file, _file_type: n.file_type, _degree: n.degree,
+})));
+
+const edgesDS = new vis.DataSet(RAW_EDGES.map((e, i) => ({
+  id: i, from: e.from, to: e.to,
+  label: '',
+  title: e.title,
+  dashes: e.dashes,
+  width: e.width,
+  color: e.color,
+  arrows: { to: { enabled: true, scaleFactor: 0.5 } },
+})));
+
+const container = document.getElementById('graph');
+const network = new vis.Network(container, { nodes: nodesDS, edges: edgesDS }, {
+  physics: {
+    enabled: true,
+    solver: 'forceAtlas2Based',
+    forceAtlas2Based: {
+      gravitationalConstant: -60,
+      centralGravity: 0.005,
+      springLength: 120,
+      springConstant: 0.08,
+      damping: 0.4,
+      avoidOverlap: 0.8,
+    },
+    stabilization: { iterations: 200, fit: true },
+  },
+  interaction: {
+    hover: true,
+    tooltipDelay: 100,
+    hideEdgesOnDrag: true,
+    navigationButtons: false,
+    keyboard: false,
+  },
+  nodes: { shape: 'dot', borderWidth: 1.5 },
+  edges: { smooth: { type: 'continuous', roundness: 0.2 }, selectionWidth: 3 },
+});
+
+network.once('stabilizationIterationsDone', () => {
+  network.setOptions({ physics: { enabled: false } });
+});
+
+function showInfo(nodeId) {
+  const n = nodesDS.get(nodeId);
+  if (!n) return;
+  const neighborIds = network.getConnectedNodes(nodeId);
+  const neighborItems = neighborIds.map(nid => {
+    const nb = nodesDS.get(nid);
+    const color = nb ? nb.color.background : '#555';
+    return `<span class="neighbor-link" style="border-left-color:${esc(color)}" onclick="focusNode(${JSON.stringify(nid)})">${esc(nb ? nb.label : nid)}</span>`;
+  }).join('');
+  document.getElementById('info-content').innerHTML = `
+    <div class="field"><b>${esc(n.label)}</b></div>
+    <div class="field">Type: ${esc(n._file_type || 'unknown')}</div>
+    <div class="field">Community: ${esc(n._community_name)}</div>
+    <div class="field">Source: ${esc(n._source_file || '-')}</div>
+    <div class="field">Degree: ${n._degree}</div>
+    ${neighborIds.length ? `<div class="field" style="margin-top:8px;color:#aaa;font-size:11px">Neighbors (${neighborIds.length})</div><div id="neighbors-list">${neighborItems}</div>` : ''}
+  `;
+}
+
+function focusNode(nodeId) {
+  network.focus(nodeId, { scale: 1.4, animation: true });
+  network.selectNodes([nodeId]);
+  showInfo(nodeId);
+}
+
+// Track hovered node — hover detection is more reliable than click params
+let hoveredNodeId = null;
+network.on('hoverNode', params => {
+  hoveredNodeId = params.node;
+  container.style.cursor = 'pointer';
+});
+network.on('blurNode', () => {
+  hoveredNodeId = null;
+  container.style.cursor = 'default';
+});
+container.addEventListener('click', () => {
+  if (hoveredNodeId !== null) {
+    showInfo(hoveredNodeId);
+    network.selectNodes([hoveredNodeId]);
+  }
+});
+network.on('click', params => {
+  if (params.nodes.length > 0) {
+    showInfo(params.nodes[0]);
+  } else if (hoveredNodeId === null) {
+    document.getElementById('info-content').innerHTML = '<span class="empty">Click a node to inspect it</span>';
+  }
+});
+
+const searchInput = document.getElementById('search');
+const searchResults = document.getElementById('search-results');
+searchInput.addEventListener('input', () => {
+  const q = searchInput.value.toLowerCase().trim();
+  searchResults.innerHTML = '';
+  if (!q) { searchResults.style.display = 'none'; return; }
+  const matches = RAW_NODES.filter(n => n.label.toLowerCase().includes(q)).slice(0, 20);
+  if (!matches.length) { searchResults.style.display = 'none'; return; }
+  searchResults.style.display = 'block';
+  matches.forEach(n => {
+    const el = document.createElement('div');
+    el.className = 'search-item';
+    el.textContent = n.label;
+    el.style.borderLeft = `3px solid ${n.color.background}`;
+    el.style.paddingLeft = '8px';
+    el.onclick = () => {
+      network.focus(n.id, { scale: 1.5, animation: true });
+      network.selectNodes([n.id]);
+      showInfo(n.id);
+      searchResults.style.display = 'none';
+      searchInput.value = '';
+    };
+    searchResults.appendChild(el);
+  });
+});
+document.addEventListener('click', e => {
+  if (!searchResults.contains(e.target) && e.target !== searchInput)
+    searchResults.style.display = 'none';
+});
+
+const hiddenCommunities = new Set();
+const legendEl = document.getElementById('legend');
+LEGEND.forEach(c => {
+  const item = document.createElement('div');
+  item.className = 'legend-item';
+  item.innerHTML = `<div class="legend-dot" style="background:${c.color}"></div>
+    <span class="legend-label">${c.label}</span>
+    <span class="legend-count">${c.count}</span>`;
+  item.onclick = () => {
+    if (hiddenCommunities.has(c.cid)) {
+      hiddenCommunities.delete(c.cid);
+      item.classList.remove('dimmed');
+    } else {
+      hiddenCommunities.add(c.cid);
+      item.classList.add('dimmed');
+    }
+    const updates = RAW_NODES
+      .filter(n => n.community === c.cid)
+      .map(n => ({ id: n.id, hidden: hiddenCommunities.has(c.cid) }));
+    nodesDS.update(updates);
+  };
+  legendEl.appendChild(item);
+});
+</script>
+<script>
+// Render hyperedges as shaded regions
+const hyperedges = [{"id": "four_factor_multi_factor_model", "label": "Four-Factor Multi-Factor Model (Quality, Value, Momentum, Low Volatility)", "nodes": ["mfic_quality_factor", "mfic_value_factor", "mfic_momentum_factor", "mfic_low_volatility_factor", "mfic_composite_score"], "relation": "form", "confidence": "EXTRACTED", "confidence_score": 1.0, "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf"}, {"id": "portfolio_construction_decision_framework", "label": "Multi-Factor Portfolio Construction Decision Framework", "nodes": ["mfic_top_down_approach", "mfic_bottom_up_approach", "mfic_sector_neutral", "mfic_sector_agnostic", "mfic_active_share", "mfic_market_cap_weighting", "mfic_score_weighting", "mfic_hybrid_weighting", "mfic_rebalance_frequency"], "relation": "participate_in", "confidence": "EXTRACTED", "confidence_score": 1.0, "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf"}, {"id": "fer_variants", "label": "Factor Efficiency Ratio Variants", "nodes": ["mfic_fer_hunstad", "mfic_fer_simplified", "mfic_fer_proposed", "mfic_absolute_fer"], "relation": "implement", "confidence": "EXTRACTED", "confidence_score": 1.0, "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf"}, {"id": "turnover_tradeoff_group", "label": "Turnover Trade-Off: Active Share, Rebalance Frequency, Factor Decay", "nodes": ["mfic_active_share", "mfic_rebalance_frequency", "mfic_factor_decay", "mfic_portfolio_turnover"], "relation": "participate_in", "confidence": "EXTRACTED", "confidence_score": 1.0, "source_file": "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf"}];
+function drawHyperedges() {
+    const canvas = network.canvas.frame.canvas;
+    const ctx = canvas.getContext('2d');
+    hyperedges.forEach(h => {
+        const positions = h.nodes
+            .map(nid => network.getPositions([nid])[nid])
+            .filter(p => p !== undefined);
+        if (positions.length < 2) return;
+        // Draw convex hull as filled polygon
+        ctx.save();
+        ctx.globalAlpha = 0.12;
+        ctx.fillStyle = '#6366f1';
+        ctx.strokeStyle = '#6366f1';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        const scale = network.getScale();
+        const offset = network.getViewPosition();
+        const toCanvas = (p) => ({
+            x: (p.x - offset.x) * scale + canvas.width / 2,
+            y: (p.y - offset.y) * scale + canvas.height / 2
+        });
+        const pts = positions.map(toCanvas);
+        // Expand hull slightly
+        const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+        const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+        const expanded = pts.map(p => ({
+            x: cx + (p.x - cx) * 1.15,
+            y: cy + (p.y - cy) * 1.15
+        }));
+        ctx.moveTo(expanded[0].x, expanded[0].y);
+        expanded.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
+        ctx.closePath();
+        ctx.fill();
+        ctx.globalAlpha = 0.4;
+        ctx.stroke();
+        // Label
+        ctx.globalAlpha = 0.8;
+        ctx.fillStyle = '#4f46e5';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(h.label, cx, cy - 5);
+        ctx.restore();
+    });
+}
+network.on('afterDrawing', drawHyperedges);
+</script>
+</body>
+</html>

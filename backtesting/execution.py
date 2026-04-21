@@ -29,3 +29,18 @@ class ExecutionEngine:
         if signal == "Bullish":
             return price * (1 - self.slippage_frac)
         return price * (1 + self.slippage_frac)
+
+    def apply_entry_slippage_scaled(self, price: float, signal: str, scalar: float = 1.0) -> float:
+        """VIX-scaled entry slippage. scalar=1 → normal; scalar=2.5 → stress-regime fill.
+        Captures the empirical spread expansion during liquidity stress (VIX > rolling median)."""
+        frac = self.slippage_frac * max(scalar, 0.0)
+        if signal == "Bullish":
+            return price * (1.0 + frac)
+        return price * (1.0 - frac)
+
+    def apply_exit_slippage_scaled(self, price: float, signal: str, scalar: float = 1.0) -> float:
+        """VIX-scaled exit slippage. Symmetric with apply_entry_slippage_scaled."""
+        frac = self.slippage_frac * max(scalar, 0.0)
+        if signal == "Bullish":
+            return price * (1.0 - frac)
+        return price * (1.0 + frac)

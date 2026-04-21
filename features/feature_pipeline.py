@@ -189,10 +189,7 @@ def calculate_factor_momentum_consistency(df: pd.DataFrame) -> pd.DataFrame:
     if "momentum_1m_skip_eom" in df.columns:
         mom_1m = df["momentum_1m_skip_eom"]
     else:
-        close_col = (
-            "AdjClose" if "AdjClose" in df.columns
-            else ("Close" if "Close" in df.columns else "close")
-        )
+        close_col = "Close" if "Close" in df.columns else "close"
         if close_col in df.columns:
             mom_1m = df[close_col].pct_change(21)
         else:
@@ -241,10 +238,7 @@ def calculate_information_discreteness(df: pd.DataFrame) -> pd.DataFrame:
         Lower = more continuous (better long quality)
         Higher = more discrete (weaker, mean-reverts sooner)
     """
-    close_col = (
-        "AdjClose" if "AdjClose" in df.columns
-        else ("Close" if "Close" in df.columns else "close")
-    )
+    close_col = "Close" if "Close" in df.columns else "close"
     if close_col not in df.columns or len(df) < 252:
         df["information_discreteness"] = 0.0
         return df
@@ -258,7 +252,7 @@ def calculate_information_discreteness(df: pd.DataFrame) -> pd.DataFrame:
     pret_sign = np.sign(pret)
 
     # Daily returns for %neg / %pos computation
-    daily_ret = close.pct_change()
+    daily_ret = close.pct_change(fill_method=None)
     neg_frac = (daily_ret < 0).rolling(formation, min_periods=100).mean()
     pos_frac = (daily_ret > 0).rolling(formation, min_periods=100).mean()
 
@@ -363,7 +357,7 @@ def calculate_short_logic_features(df: pd.DataFrame) -> pd.DataFrame:
     if "volatility_percentile" in df.columns:
         df["high_vol_reversal_flag"] = (df["volatility_percentile"] > 0.67).astype(float)
     else:
-        rets = close.pct_change()
+        rets = close.pct_change(fill_method=None)
         vol_20 = rets.rolling(20, min_periods=10).std()
         vol_pct = vol_20.rolling(252, min_periods=60).rank(pct=True)
         df["high_vol_reversal_flag"] = (vol_pct > 0.67).astype(float).fillna(0.0)
@@ -374,8 +368,14 @@ def calculate_short_logic_features(df: pd.DataFrame) -> pd.DataFrame:
 def calculate_core_trend_features(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
-    close = df["AdjClose"] if "AdjClose" in df.columns else (df["Close"] if "Close" in df.columns else df["close"])
-    df["daily_return"] = close.pct_change()
+    close = df["Close"] if "Close" in df.columns else df["close"]
+    # Use CRSP total return directly when available (WRDS path); fall back to
+    # pct_change for Yahoo/legacy data.  For adj_price-based Close the two are
+    # numerically identical on a daily basis, but ret is the authoritative source.
+    if "ret" in df.columns and "daily_return" not in df.columns:
+        df["daily_return"] = pd.to_numeric(df["ret"], errors="coerce")
+    else:
+        df["daily_return"] = close.pct_change(fill_method=None)
     df["momentum_3m"] = close / close.shift(63) - 1
     df["momentum_6m"] = close / close.shift(126) - 1
     
@@ -455,7 +455,11 @@ def calculate_value_quality_features(df: pd.DataFrame) -> pd.DataFrame:
       - quality_score       : rolling 60d Sharpe ratio proxy (consistent earners beat volatile)
     """
     close = df["Close"] if "Close" in df.columns else df["close"]
-    daily_ret = close.pct_change()
+    # Prefer pre-computed daily_return (sourced from CRSP ret on WRDS path)
+    if "daily_return" in df.columns:
+        daily_ret = pd.to_numeric(df["daily_return"], errors="coerce")
+    else:
+        daily_ret = close.pct_change(fill_method=None)
 
     # 1. Short-term reversal (1-week contrarian; lagged 1d for look-ahead safety)
     ret_5d = close.pct_change(5).shift(1)
@@ -626,7 +630,7 @@ def build_feature_matrix(df: pd.DataFrame, config=None) -> pd.DataFrame:
                 end = ix.max().strftime("%Y-%m-%d") if hasattr(ix.max(), "strftime") else str(ix.max())[:10]
                 spy = get_ohlcv("SPY", start, end, use_cache=True, cache_ttl_days=0)
                 if spy is not None and not spy.empty and "Close" in spy.columns:
-                    spy_ret = spy["Close"].pct_change()
+                    spy_ret = spy["Close"].pct_change(fill_method=None)
                     stock_ret = base["daily_return"]
                     capm_df = compute_capm_features(stock_ret, spy_ret)
                     for col in ("capm_alpha", "capm_beta", "capm_residual_vol"):

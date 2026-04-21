@@ -443,6 +443,55 @@ def _print_outputs_produced(config, result, outputs_written: list) -> None:
     print(SEP)
 
 
+def _try_init_wrds(config, tickers: list[str]) -> None:
+    """
+    Optionally connect to WRDS and configure Compustat fundamentals.
+
+    Activates when the WRDS_USERNAME environment variable is set and the
+    `wrds` Python package is installed.  Wires the fundamental router so all
+    downstream calls use Compustat (rdq point-in-time) instead of EDGAR.
+
+    When WRDS_USERNAME is absent this is a silent no-op — Yahoo + EDGAR
+    continue to work as before.
+    """
+    import os
+    wrds_user = os.environ.get("WRDS_USERNAME")
+    if not wrds_user:
+        return  # WRDS not configured — stay on Yahoo/EDGAR path
+
+    try:
+        from utils.wrds_universe import WRDSUniverse, connect_wrds
+        from features.fundamental_router import configure_wrds
+        import logging
+        log = logging.getLogger(__name__)
+
+        db = connect_wrds(wrds_user)
+        universe = WRDSUniverse(db)
+
+        start = getattr(config, "start_date", "2007-01-01")
+        end = getattr(config, "end_date", "2023-12-31")
+
+        # Build ticker → permno map for the backtest window
+        all_permnos = universe.get_unique_permnos(start, end)
+        # We need a date to resolve point-in-time tickers; use start date
+        permno_to_tick = universe.permno_to_ticker_map(all_permnos, start)
+        ticker_to_permno: dict[str, int] = {v: k for k, v in permno_to_tick.items()}
+
+        # Filter to only tickers in our backtest universe
+        relevant = {t: p for t, p in ticker_to_permno.items() if t in tickers}
+
+        configure_wrds(db, relevant)
+        log.info(
+            "WRDS active: Compustat fundamentals enabled for %d/%d tickers.",
+            len(relevant), len(tickers),
+        )
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning(
+            "WRDS init failed (%s) — falling back to EDGAR fundamentals.", exc
+        )
+
+
 def main():
     args = parse_args()
     # Verbose flag overrides DEV_MODE; otherwise use DEV_MODE for convenience.
@@ -458,6 +507,8 @@ def main():
         for attr in (
             "signal_confidence_multiplier_bull",
             "signal_confidence_multiplier_bear",
+            "signal_confidence_multiplier_cautious",
+            "signal_confidence_multiplier_sideways",
             "signal_confidence_multiplier_crisis",
         ):
             if hasattr(config, attr):
@@ -477,6 +528,12 @@ def main():
 
     apply_dev_mode(config)
     tickers = _resolve_tickers(config)
+
+    # --- Optional WRDS initialisation ---
+    # When WRDS_USERNAME is set, wire up Compustat fundamentals and optionally
+    # replace Yahoo price data with CRSP data.  Gracefully no-ops when WRDS is
+    # unavailable so the Yahoo/EDGAR path continues to work unchanged.
+    _try_init_wrds(config, tickers)
 
     # --- Ensemble Detail Logging ---
     if getattr(config, "signal_mode", "price") == "ml":
@@ -736,7 +793,7 @@ def main():
         )
         
         rob = m.get("expiry_regime_robustness", {})
-        for r_name in ["Bull", "Bear", "Sideways", "Crisis"]:
+        for r_name in ["Bull", "Bear", "Cautious", "Sideways", "Crisis"]:
             r_data = rob.get(r_name, {"win_rate": 0.0, "count": 0})
             summary_block += f"  {r_name:<20} : {r_data['win_rate']:.1%} (n={r_data['count']})\n"
             

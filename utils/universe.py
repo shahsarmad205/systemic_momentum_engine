@@ -69,6 +69,61 @@ def get_sp500_tickers(cache_path="config/sp500_tickers.txt", max_age_days=7):
             "JPM", "V", "JNJ", "WMT", "PG", "XOM", "UNH", "HD", "AVGO"
         ]
 
+def _load_wrds_universe(config, universe_cfg: dict) -> list[str]:
+    """
+    Build a point-in-time S&P 500 universe from CRSP via WRDS and return
+    tickers for the existing ticker-addressed pipeline.
+
+    Requires WRDS_USERNAME env var and the ``wrds`` Python package.
+    Returns [] on any failure so the caller can fall back gracefully.
+    """
+    import os
+    wrds_user = os.environ.get("WRDS_USERNAME")
+    if not wrds_user:
+        return []
+
+    try:
+        from utils.wrds_universe import WRDSUniverse, build_backtest_universe, connect_wrds
+
+        start_date = getattr(config, "start_date", None) or (
+            config.get("start_date") if isinstance(config, dict) else None
+        )
+        if not start_date:
+            return []
+
+        min_price = universe_cfg.get("min_price", 10.0)
+        # accept both key spellings from YAML
+        min_dollar_vol = universe_cfg.get(
+            "min_dollar_vol", universe_cfg.get("min_dollar_volume", 1e8)
+        )
+
+        db = connect_wrds(wrds_user)
+        universe = WRDSUniverse(db)
+
+        # Build investable universe at the backtest start date
+        permnos = build_backtest_universe(
+            db,
+            date=start_date,
+            min_price=float(min_price),
+            min_dollar_vol=float(min_dollar_vol),
+        )
+        if not permnos:
+            return []
+
+        # Map PERMNOs → tickers (point-in-time)
+        permno_to_tick = universe.permno_to_ticker_map(permnos, start_date)
+        tickers = [permno_to_tick[p] for p in permnos if p in permno_to_tick]
+        print(
+            f"WRDS universe at {start_date}: {len(permnos)} PERMNOs → {len(tickers)} tickers "
+            f"(price≥${min_price}, dvol≥${min_dollar_vol/1e6:.0f}M, no delistings)"
+        )
+        return tickers
+
+    except Exception as exc:
+        print(f"_load_wrds_universe error: {exc}")
+        return []
+
+
 def load_universe(config):
     """
     Dynamically resolve symbols from config for run_backtest.py or run_model_selection.py.
@@ -91,7 +146,18 @@ def load_universe(config):
     mode = universe_cfg.get('mode', 'custom')
     cache_path = universe_cfg.get('cache_path', 'config/sp500_tickers.txt')
     cache_age = universe_cfg.get('cache_max_age_days', 7)
-    
+
+    if mode == 'wrds':
+        tickers = _load_wrds_universe(config, universe_cfg)
+        if tickers:
+            # Apply exclude + max_tickers and return immediately (already deduped)
+            exclude = universe_cfg.get('exclude', [])
+            max_t = universe_cfg.get('max_tickers', 500)
+            return [t for t in tickers if t not in exclude][:max_t]
+        # Fall through to sp500 mode on WRDS failure
+        print("WRDS universe load failed — falling back to Wikipedia S&P 500 list.")
+        mode = 'sp500'
+
     if mode == 'sp500':
         tickers = get_sp500_tickers(cache_path=cache_path, max_age_days=cache_age)
     elif mode == 'file':

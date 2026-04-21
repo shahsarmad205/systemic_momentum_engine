@@ -64,7 +64,7 @@ def _fetch_fundamental_cols(ticker: str, dates: pd.DatetimeIndex) -> dict:
     Falls back to 0.0 on any error — never blocks training.
     """
     try:
-        from features.fundamental_builder import fetch_fundamental_features
+        from features.fundamental_router import fetch_fundamental_features
         fund_df = fetch_fundamental_features(ticker, dates)
         return {col: fund_df[col] for col in fund_df.columns}
     except Exception:
@@ -253,7 +253,7 @@ def sector_relative_features_by_ticker(
     rows: list[dict] = []
     for tk in tickers:
         df = price_data[tk]
-        price_col = "AdjClose" if "AdjClose" in df.columns else "Close"
+        price_col = "Close" if "Close" in df.columns else "AdjClose"
         if price_col not in df.columns:
             continue
         close = pd.to_numeric(df[price_col], errors="coerce")
@@ -300,7 +300,7 @@ def vol_rank_features_by_ticker(
     rows: list[dict] = []
     for tk in tickers:
         df = price_data[tk]
-        price_col = "AdjClose" if "AdjClose" in df.columns else "Close"
+        price_col = "Close" if "Close" in df.columns else "AdjClose"
         if price_col not in df.columns:
             continue
         close = pd.to_numeric(df[price_col], errors="coerce")

@@ -123,6 +123,11 @@ def _download_yahoo(ticker: str, start: pd.Timestamp, end: pd.Timestamp) -> pd.D
         # Preserve adjusted close and corporate actions when available
         if "Adj Close" in raw.columns:
             df["AdjClose"] = raw["Adj Close"].reindex(df.index)
+            # Align with WRDS canonical convention: Close = adjusted price.
+            # Store unadjusted as raw_price so downstream always reads Close
+            # as the split/dividend-adjusted series regardless of data source.
+            df["raw_price"] = df["Close"]
+            df["Close"] = df["AdjClose"]
         if "Dividends" in raw.columns:
             df["Dividends"] = raw["Dividends"].reindex(df.index)
         if "Stock Splits" in raw.columns:

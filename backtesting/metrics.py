@@ -1132,34 +1132,109 @@ def compute_institutional_alpha_metrics(trades: pd.DataFrame, daily_equity: pd.D
 # [ADVANCED] Institutional Quantitative Auditing Modules
 # ------------------------------------------------------------------
 
-def compute_grinold_ir_decomposition(trades: pd.DataFrame, trades_per_year: float, N_eff: float = 10.0):
+def compute_effective_n_from_returns(trades: pd.DataFrame, price_data: dict | None = None) -> float:
     """
-    Fundamental Law: IR = IC * sqrt(breadth)
-    Correcting for cross-sectional correlation between signals.
+    Eigenvalue participation ratio: N_eff = (Σλ)² / Σλ².
+
+    Replaces the hardcoded avg_corr=0.3 assumption in Grinold-Kahn breadth.
+    Uses the cross-sectional correlation of per-ticker trade returns as a proxy
+    for signal correlation (Menchero et al. 2011, Qian 2006).
+
+    Falls back to N_eff = N / (1 + avg_corr*(N-1)) with avg_corr estimated
+    empirically from the trades if the price data is not available.
+    """
+    if trades.empty or "ticker" not in trades.columns or "return" not in trades.columns:
+        return 1.0
+
+    try:
+        # Build a ticker × signal_date return matrix
+        pivot = trades.pivot_table(
+            index="signal_date", columns="ticker", values="return", aggfunc="mean"
+        )
+        pivot = pivot.dropna(how="all").fillna(0.0)
+        if pivot.shape[0] < 5 or pivot.shape[1] < 2:
+            raise ValueError("Insufficient data for eigenvalue N_eff")
+
+        # Ledoit-Wolf covariance of return vectors across dates
+        try:
+            from sklearn.covariance import LedoitWolf
+            lw = LedoitWolf(assume_centered=True)
+            lw.fit(pivot.values)
+            cov = lw.covariance_
+        except Exception:
+            cov = np.cov(pivot.values, rowvar=False)
+
+        eigvals = np.linalg.eigvalsh(cov)
+        eigvals = eigvals[eigvals > 1e-10]
+        if len(eigvals) == 0:
+            return 1.0
+        s1 = float(eigvals.sum())
+        s2 = float((eigvals ** 2).sum())
+        n_eff = (s1 ** 2) / s2 if s2 > 1e-12 else 1.0
+        return float(n_eff)
+
+    except Exception:
+        # Fallback: empirical avg pairwise correlation from trades
+        if "ticker" in trades.columns and "return" in trades.columns:
+            pivot2 = trades.pivot_table(
+                index="signal_date", columns="ticker", values="return", aggfunc="mean"
+            ).dropna(how="all").fillna(0.0)
+            if pivot2.shape[1] >= 2:
+                corr_mat = pivot2.corr().values
+                N = corr_mat.shape[0]
+                upper = corr_mat[np.triu_indices(N, k=1)]
+                avg_corr = float(np.clip(upper.mean(), 0.0, 1.0))
+                return float(N / (1.0 + avg_corr * (N - 1)))
+        return 10.0
+
+
+def compute_grinold_ir_decomposition(
+    trades: pd.DataFrame,
+    trades_per_year: float,
+    N_eff: float | None = None,
+    price_data: dict | None = None,
+):
+    """
+    Fundamental Law of Active Management: IR = IC × √Breadth.
+
+    Breadth is now computed from eigenvalue participation ratio of the
+    cross-sectional return covariance matrix — NOT hardcoded avg_corr=0.3.
+
+    IC is measured as gross Spearman correlation (pre-cost) between
+    adjusted_score at signal_date and holding-period return.
     """
     ic_series = compute_ic_series(trades)
     if ic_series.empty:
         return {"ic_mean": 0, "effective_breadth": 0, "predicted_ir": 0, "realized_ir": 0}
-    
+
     ic_mean = float(ic_series.mean())
     ic_std = float(ic_series.std())
-    
-    # Breadth calculation: assumes ~ 0.3 avg pairwise correlation between stock signals
-    # Effective breadth = Total Trades / Adjustment Factor
-    avg_corr = 0.3
-    N = N_eff
-    eff_breadth = trades_per_year / (1 + (avg_corr * (N - 1)))
-    
-    predicted_ir = ic_mean * np.sqrt(eff_breadth)
-    # Realized T-stat / IR
-    realized_ir = ic_mean / (ic_std / np.sqrt(len(ic_series))) if ic_std > 0 else 0
-    
+
+    # Effective breadth: eigenvalue-based (no hardcoded correlation assumption)
+    if N_eff is None:
+        N_eff = compute_effective_n_from_returns(trades, price_data)
+
+    N = max(float(N_eff), 1.0)
+    # Breadth = trades_per_year scaled by effective independence
+    # Grinold-Kahn generalised: breadth = trades_per_year × (N_eff / N_nominal)
+    # where N_nominal = number of unique tickers traded per period
+    n_tickers = float(trades["ticker"].nunique()) if "ticker" in trades.columns else max(N, 1.0)
+    independence_ratio = min(N / n_tickers, 1.0) if n_tickers > 0 else 1.0
+    eff_breadth = float(trades_per_year) * independence_ratio
+
+    predicted_ir = ic_mean * np.sqrt(max(eff_breadth, 0.0))
+
+    # IC t-statistic: IR of the signal itself across cross-sectional dates
+    ic_t = (ic_mean / (ic_std / np.sqrt(len(ic_series)))) if ic_std > 0 else 0.0
+
     return {
         "ic_mean": ic_mean,
+        "ic_std": ic_std,
+        "n_eff_eigenvalue": N_eff,
         "effective_breadth": eff_breadth,
         "predicted_ir_grinold": predicted_ir,
-        "realized_ir": realized_ir,
-        "ic_t_stat": realized_ir
+        "realized_ir": ic_t,
+        "ic_t_stat": ic_t,
     }
 
 

@@ -65,17 +65,20 @@ def _load_pickle(path: Path) -> Any:
     import sys
     import warnings
 
-    # LGBMRankerWrapper is defined in run_model_selection.py which runs as __main__
-    # when invoked directly.  Artifacts pickled there store the class as
-    # "__main__.LGBMRankerWrapper".  Patch __main__ before unpickling so that
-    # any context (backtester, signal engine, etc.) can deserialise the artifact.
+    # run_model_selection.py runs as __main__ when invoked directly.
+    # Pickle stores references to classes/functions defined there as "__main__.<name>".
+    # Patch __main__ with every known symbol before unpickling so that any context
+    # (backtester, signal engine, etc.) can deserialise these artifacts.
+    _SYMBOLS_TO_PATCH = ("LGBMRankerWrapper", "_sharpe_ic_obj")
     try:
         import run_model_selection as _rms  # noqa: PLC0415
         _main = sys.modules.get("__main__")
-        if _main is not None and not hasattr(_main, "LGBMRankerWrapper"):
-            _lgbmrw = getattr(_rms, "LGBMRankerWrapper", None)
-            if _lgbmrw is not None:
-                setattr(_main, "LGBMRankerWrapper", _lgbmrw)
+        if _main is not None:
+            for _sym in _SYMBOLS_TO_PATCH:
+                if not hasattr(_main, _sym):
+                    _val = getattr(_rms, _sym, None)
+                    if _val is not None:
+                        setattr(_main, _sym, _val)
     except Exception:
         pass
 

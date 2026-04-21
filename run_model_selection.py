@@ -1228,9 +1228,91 @@ def _train_regime_models(
         print(f"  {regime_label}: n={n}  scale_pos_weight={scale:.2f}  → saved {path.name}")
 
     if saved:
-        print("\n[C2] Regime-conditional models ready. Add to backtest_config.yaml:")
+        print("\n[C2] Regime-conditional classifier models ready.")
+
+    # ── Regime-conditional REGRESSORS for soft-mixture blending ────────────────────────
+    # Train XGBRegressor on each regime's data subset using forward_return as target.
+    # The inference engine blends these four models with weights proportional to the
+    # current regime probability, producing a continuous score that smoothly transitions
+    # across regime boundaries rather than hard-switching at regime detection day.
+    #
+    # Blend weights (hardcoded in signals.py _REGIME_BLEND_WEIGHTS):
+    #   Bull    → 85% Bull model, 10% Sideways, 5% Bear
+    #   Bear    → 65% Bear model, 15% Sideways, 15% Crisis, 5% Bull
+    #   Crisis  → 75% Crisis model, 20% Bear, 5% Sideways
+    #   Sideways→ 65% Sideways, 15% Bull, 15% Bear, 5% Crisis
+    print("\n[C2] Training per-regime XGBRegressor models for soft-mixture inference...")
+    try:
+        from xgboost import XGBRegressor as _XGBReg
+    except ImportError:
+        print("[C2] XGBoost not available; skipping regime regressor training.")
+        return
+
+    if "forward_return" not in df.columns:
+        print("[C2] forward_return column missing from feature matrix; skipping regime regressors.")
+        return
+
+    _reg_regime_map = {
+        "Bull": "bull",
+        "Bear": "bear",
+        "HighVol": "highvol",
+        "Normal": "normal",
+        "Crisis": "highvol",
+        "Sideways": "normal",
+    }
+    _reg_saved: list[str] = []
+    for _rlabel, _rsuffix in _reg_regime_map.items():
+        _rdf = df[df["regime_label"] == _rlabel].copy()
+        _n = len(_rdf)
+        if _n < 300:
+            print(f"  {_rlabel} (regressor): only {_n} samples — skipping (need ≥300).")
+            continue
+
+        _X = (
+            _rdf[active_feats]
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .clip(-10.0, 10.0)
+            .values
+        )
+        _X = np.nan_to_num(_X, nan=0.0, posinf=0.0, neginf=0.0).copy()
+        _y = _rdf["forward_return"].fillna(0.0).values
+
+        _xgb_reg = _XGBReg(
+            n_estimators=200,
+            max_depth=4,
+            learning_rate=0.05,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            eval_metric="rmse",
+            verbosity=0,
+            random_state=42,
+        )
+        with np.errstate(all="ignore"):
+            _xgb_reg.fit(_X, _y)
+
+        _reg_path = out_dir / f"xgb_regime_reg_{_rsuffix}.pkl"
+        _reg_artifact = {
+            "model_name": f"XGBRegressor_{_rlabel}",
+            "model_type": "regressor",
+            "regime": _rlabel,
+            "horizon_days": int(horizon),
+            "target": "forward_return",
+            "feature_columns": active_feats,
+            "n_train": int(_n),
+            "trained_at": pd.Timestamp.utcnow().isoformat(),
+            "estimator": _xgb_reg,
+        }
+        with open(_reg_path, "wb") as _fh:
+            pickle.dump(_reg_artifact, _fh)
+        _reg_saved.append(str(_reg_path))
+        print(f"  {_rlabel} (regressor): n={_n} → saved {_reg_path.name}")
+
+    if _reg_saved:
+        print("\n[C2] Regime regressor models ready. Add to backtest_config.yaml:")
         print("  signals:")
-        print("    ml_regime_models_dir: output/models   # xgb_regime_bull/bear/highvol/normal.pkl")
+        print("    ml_regime_models_dir: output/models   # enables soft-mixture blending")
+        print("    ml_regime_blend_enabled: true")
 
 
 def _weighted_recency_mean(vals: np.ndarray, decay_base: float = 0.95) -> float:
@@ -1326,6 +1408,44 @@ def _compute_institutional_metrics(
         "oos_beat_rate": float(beat_rate) if np.isfinite(beat_rate) else float("nan"),
         "oos_composite": composite,
     }
+
+
+def _compute_psr(daily_returns: np.ndarray, benchmark_sr: float = 0.0) -> float:
+    """Probabilistic Sharpe Ratio (Bailey & Lopez de Prado 2012).
+
+    PSR(SR*) = Φ{ (SR_hat - SR*) × √(T-1) / √[1 - γ₃×SR_hat + (γ₄-1)/4 × SR_hat²] }
+
+    where SR_hat is the in-sample annualised Sharpe, γ₃ skewness, γ₄ excess kurtosis.
+    With SR*=0 this answers: 'What is the probability this Sharpe is truly above zero?'
+
+    Used as a multiple-testing deflation: composite × PSR penalises models whose apparent
+    outperformance could be explained by chance given the number of paths tested
+    (Harvey & Liu 2015, 'Backtesting').  Models with fat tails (high kurtosis) receive
+    larger penalties because their realised Sharpe is statistically less reliable.
+    """
+    try:
+        from scipy.stats import norm as _snorm, skew as _skew, kurtosis as _kurt
+    except ImportError:
+        return 0.5   # scipy unavailable: treat as 50% confidence
+
+    r = np.asarray(daily_returns, dtype=float)
+    r = r[np.isfinite(r)]
+    T = len(r)
+    if T < 10:
+        return 0.5
+    mu = float(r.mean())
+    sigma = float(r.std(ddof=1))
+    if sigma < 1e-10:
+        return 0.5
+    sr_daily = mu / sigma                           # per-period Sharpe (not annualised yet)
+    sr_annual = sr_daily * np.sqrt(252)             # annualised for benchmark comparison
+    gamma3 = float(_skew(r))                        # skewness
+    gamma4 = float(_kurt(r, fisher=True)) + 3.0     # convert excess → full kurtosis
+    denom_sq = 1.0 - gamma3 * sr_annual + (gamma4 - 1.0) / 4.0 * sr_annual ** 2
+    if denom_sq <= 0:
+        return 0.5
+    z = (sr_annual - benchmark_sr) * np.sqrt(T - 1) / np.sqrt(denom_sq)
+    return float(_snorm.cdf(z))
 
 
 def main() -> None:
@@ -1886,6 +2006,14 @@ def main() -> None:
             "train_time_avg": float(np.nanmean(tr_t)),
             "test_time_avg": float(np.nanmean(te_t)),
             "n_windows": int(len(wm)),
+            # PSR: probability that the chained OOS Sharpe is genuinely > 0 after
+            # adjusting for fat tails.  Multiplied into composite below to produce
+            # oos_composite_dsr — the Harvey-Liu multiple-testing-corrected ranking score.
+            "oos_psr": round(_compute_psr(
+                chained_daily.dropna().values
+                if hasattr(chained_daily, "dropna")
+                else chained_daily[np.isfinite(chained_daily)]
+            ), 4),
         }
         # Leakage sanity: chained Sharpe should not be extreme if chained IC is near-zero.
         suspicious = bool(
@@ -2060,6 +2188,23 @@ def main() -> None:
 
     if not rows:
         raise SystemExit("No model produced valid results.")
+
+    # ── Deflated Sharpe composite (Harvey & Liu 2015 multiple-testing correction) ──────
+    # oos_composite_dsr = ICIR × (1+Calmar) × beat_rate × PSR(SR_hat)
+    # PSR deflates models whose realised Sharpe is driven by fat tails or few test paths;
+    # consistent, Gaussian-return models are penalised least.  Use --select_metric
+    # oos_composite_dsr to make DSR the ranking criterion.
+    if rows:
+        for _r in rows:
+            _r["oos_composite_dsr"] = round(
+                float(_r.get("oos_composite", 0.0)) * float(_r.get("oos_psr", 0.5)), 4
+            )
+        _psr_vals = [_r["oos_psr"] for _r in rows]
+        print(
+            f"\nDSR deflation: PSR range [{min(_psr_vals):.3f}, {max(_psr_vals):.3f}] "
+            f"across {len(rows)} models. "
+            "Use --select_metric oos_composite_dsr to rank by deflated composite."
+        )
 
     report = pd.DataFrame(rows)
     # Selection/ranking: honor --select_metric with a penalty if suspicious.

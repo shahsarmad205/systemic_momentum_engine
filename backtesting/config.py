@@ -333,6 +333,10 @@ class BacktestConfig:
     equity_csv_path: str = "output/backtests/daily_equity.csv"
     cost_sensitivity_report_path: str = "output/backtests/cost_sensitivity_report.csv"
 
+    # Continuous optimization mode (forecast → risk model → optimizer → gradual execution)
+    use_continuous_optimization: bool = False
+    optimization_config: dict = field(default_factory=dict)
+
 
 def load_config(path: str = "backtest_config.yaml") -> BacktestConfig:
     """Read YAML and merge into a BacktestConfig, using defaults for missing keys."""
@@ -712,5 +716,9 @@ def load_config(path: str = "backtest_config.yaml") -> BacktestConfig:
     cfg.trades_csv_path = out.get("trades_csv_path", cfg.trades_csv_path)
     cfg.equity_csv_path = out.get("equity_csv_path", cfg.equity_csv_path)
     cfg.cost_sensitivity_report_path = out.get("cost_sensitivity_report_path", cfg.cost_sensitivity_report_path)
+
+    # Continuous optimization mode
+    cfg.use_continuous_optimization = bool(bt.get("use_continuous_optimization", False))
+    cfg.optimization_config = bt.get("optimization_config", {}) or {}
 
     return cfg

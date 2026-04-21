@@ -1,4 +1,0 @@
-holding_days,variant_name,description,daily_sharpe,annual_return_pct,annual_turnover_x,max_drawdown_pct,win_rate_pct,profit_factor,trades,final_capital
-5,5-day,"Current (daily rebalance, 5-day hold)",0.8901,79.65,11.15,0.11,49.05,1.225,7020,"$65,545,972"
-20,20-day,Weekly frequency (20-day hold) - 4x lower turnover,0.9555,85.51,2.79,0.11,49.05,1.225,1755,"$93,475,936"
-30,30-day,Monthly frequency (30-day hold) - 6x lower turnover,0.9628,86.16,1.86,0.11,49.05,1.225,1170,"$97,168,803"

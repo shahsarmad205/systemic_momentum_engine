@@ -238,7 +238,7 @@ class MarketRegimeAgent:
         close = spy["Close"]
 
         df["spy_1m_return"] = close.pct_change(21)
-        df["spy_30d_vol"] = close.pct_change().rolling(30).std() * np.sqrt(252) * 100
+        df["spy_30d_vol"] = close.pct_change(fill_method=None).rolling(30).std() * np.sqrt(252) * 100
 
         sma200 = close.rolling(200).mean()
         df["spy_sma_gap"] = (close - sma200) / sma200

@@ -82,7 +82,7 @@ def calculate_market_breadth(
     valid_200 = valid_200.replace(0, np.nan)
     pct_above_200 = above_200.sum(axis=1) / valid_200
 
-    rets = closes.pct_change()
+    rets = closes.pct_change(fill_method=None)
     up = (rets > 0).sum(axis=1)
     down = (rets < 0).sum(axis=1)
     ad_ratio = up / (down + 1.0)

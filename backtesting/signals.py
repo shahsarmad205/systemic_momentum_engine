@@ -73,6 +73,23 @@ def compute_rolling_trend_scores(features: pd.DataFrame) -> pd.Series:
 
 from utils.ensemble_scoring import compute_ensemble_score, load_ensemble_models
 
+# ── Soft-Mixture Regime Blend Weights ────────────────────────────────────────────────
+# For each discrete regime label, specifies how much weight each regime-specific
+# XGBRegressor contributes to the final combined long_score.
+# Design principle (Citadel/Man Group research):
+#   - Pure regimes (Bull, Crisis) use their own model heavily (0.75-0.85 weight).
+#   - Transition regimes (Cautious) blend neighbours significantly to handle uncertainty.
+#   - Crisis model is isolated from Bull to prevent momentum features contaminating
+#     defensive predictions (and vice versa).
+# Weights sum to 1.0 per row. Adjust to taste — these are the starting calibration.
+_REGIME_BLEND_WEIGHTS: dict[str, dict[str, float]] = {
+    "Bull":     {"bull": 0.85, "normal": 0.10, "bear": 0.05, "highvol": 0.00},
+    "Cautious": {"bull": 0.35, "normal": 0.30, "bear": 0.30, "highvol": 0.05},
+    "Sideways": {"bull": 0.15, "normal": 0.65, "bear": 0.15, "highvol": 0.05},
+    "Bear":     {"bull": 0.05, "normal": 0.15, "bear": 0.65, "highvol": 0.15},
+    "Crisis":   {"bull": 0.00, "normal": 0.05, "bear": 0.20, "highvol": 0.75},
+}
+
 # Calendar-day buffers for downloading enough data around the backtest window
 HISTORY_BUFFER_DAYS = 400   # 200-day MA + 126-day momentum warm-up
 EXIT_BUFFER_DAYS = 30       # room for last trade's exit
@@ -280,6 +297,9 @@ class SignalEngine:
         self.signal_smoothing_enabled = bool(signal_smoothing_enabled)
         self.signal_smoothing_span = int(signal_smoothing_span)
         self._ensemble_models_cache = None
+        # Regime-specific regressor models for soft-mixture blending.
+        # Populated lazily on first call when ml_regime_blend_enabled=True.
+        self._regime_reg_cache: dict[str, Any] | None = None
         self._warned_all_nan_cols = False
         self._warned_ensemble_norm_ignored = False
         # C2: regime-conditional model routing
@@ -302,7 +322,7 @@ class SignalEngine:
             self._fundamental_cache: dict[str, pd.DataFrame] = {}
         if ticker not in self._fundamental_cache:
             try:
-                from features.fundamental_builder import fetch_fundamental_features
+                from features.fundamental_router import fetch_fundamental_features
                 df = fetch_fundamental_features(ticker, index)
                 self._fundamental_cache[ticker] = df.reindex(index).fillna(0.0)
             except Exception:
@@ -433,7 +453,7 @@ class SignalEngine:
 
         f_trend = trend_scores * conf_mult
 
-        price_col = "AdjClose" if "AdjClose" in stock_data.columns else "Close"
+        price_col = "Close" if "Close" in stock_data.columns else "AdjClose"
         close = stock_data[price_col].reindex(features.index)
         volume = stock_data["Volume"].reindex(features.index)
         ret_5d = close.pct_change(5)
@@ -505,7 +525,7 @@ class SignalEngine:
                 # 1) SPY Macro: realised vol spike
                 if spy_df is not None and not spy_df.empty and "Close" in spy_df.columns:
                     spy_close = pd.to_numeric(spy_df["Close"], errors="coerce").dropna().sort_index()
-                    spy_ret = spy_close.pct_change()
+                    spy_ret = spy_close.pct_change(fill_method=None)
                     vol5 = spy_ret.rolling(5).std(ddof=0) * np.sqrt(252.0)
                     vol60 = spy_ret.rolling(60).std(ddof=0) * np.sqrt(252.0)
                     vol_spike = (vol5 / vol60).replace([np.inf, -np.inf], np.nan).shift(1)
@@ -569,7 +589,7 @@ class SignalEngine:
                 end = ix.max().strftime("%Y-%m-%d") if hasattr(ix.max(), "strftime") else str(ix.max())[:10]
                 # 3) CAPM Beta
                 if spy_df is not None and not spy_df.empty and "Close" in spy_df.columns:
-                    spy_ret = pd.to_numeric(spy_df["Close"], errors="coerce").pct_change()
+                    spy_ret = pd.to_numeric(spy_df["Close"], errors="coerce").pct_change(fill_method=None)
                     capm_df = compute_capm_features(daily_ret.astype(float), spy_ret.astype(float), window=60)
                     if "capm_beta" in capm_df.columns:
                         capm_beta_series = (
@@ -713,8 +733,8 @@ class SignalEngine:
             try:
                 from features.capm_features import compute_capm_features
                 if spy_df is not None and not spy_df.empty and "Close" in spy_df.columns:
-                    spy_ret = spy_df["Close"].reindex(stock_data.index).ffill().pct_change()
-                    stock_ret = stock_data["Close"].pct_change()
+                    spy_ret = spy_df["Close"].reindex(stock_data.index).ffill().pct_change(fill_method=None)
+                    stock_ret = stock_data["Close"].pct_change(fill_method=None)
                     capm_df = compute_capm_features(stock_ret, spy_ret)
                     for col in ("capm_alpha", "capm_beta", "capm_residual_vol"):
                         if col in capm_df.columns:
@@ -725,6 +745,12 @@ class SignalEngine:
             except Exception:
                 for col in ("capm_alpha", "capm_beta", "capm_residual_vol"):
                     signal_df_tmp[col] = 0.0 if col != "capm_beta" else 1.0
+            # Fix 2: preserve raw ret_5d BEFORE any panel CS z-score override.
+            # short_term_reversal is trained on raw return units (-ret_5d clipped ±0.5).
+            # If CS z-scored ret_5d (typically ±2σ) were used, the clip would squash
+            # ~99% of values to exactly ±0.5, destroying all cross-sectional variation.
+            _raw_ret_5d = ret_5d
+
             if panel_features is not None:
                 # Pillar 29: Override isolation features with Joint-Panel Normalised features
                 pf = panel_features.reindex(features.index).ffill().fillna(0.0)
@@ -803,7 +829,9 @@ class SignalEngine:
                     "capm_residual_vol": signal_df_tmp["capm_residual_vol"].fillna(0.0),
                     "capm_alpha": signal_df_tmp["capm_alpha"].fillna(0.0),
                     # All-weather features (in training feature_subset but missing from inference)
-                    "short_term_reversal": (-ret_5d.shift(1)).clip(-0.5, 0.5).fillna(0.0),
+                    # Fix 2: use raw (un-CS-zscored) ret_5d — training computed
+                    # short_term_reversal from raw pct_change(5), not z-score units
+                    "short_term_reversal": (-_raw_ret_5d.shift(1)).clip(-0.5, 0.5).fillna(0.0),
                     "nearness_52w_low": (
                         1.0 / (1.0 + ((close / close.rolling(252, min_periods=60).min().replace(0, np.nan).clip(lower=1e-6)) - 1.0).clip(0, 10))
                     ).shift(1).fillna(0.5),  # shift(1): training (feature_builder) lags via dist_from_52w_low.shift(1)
@@ -884,7 +912,77 @@ class SignalEngine:
                 from utils.ensemble_scoring import _predict_model, LoadedEnsembleModel
 
                 if long_model:
-                    long_score = _predict_model(long_model, model_features, clip=bool(ens_cfg.get("clip", False)))
+                    # ── Soft-Mixture Regime Blending ──────────────────────────────────
+                    # If per-regime XGBRegressor models exist, blend their predictions
+                    # using _REGIME_BLEND_WEIGHTS rather than using the single main model.
+                    # This avoids hard regime switches and handles transition uncertainty
+                    # (e.g. "Cautious" blends Bull/Sideways/Bear evenly).
+                    # Falls back to the single main model if blend models are not found.
+                    _blend_enabled = bool(
+                        getattr(self.config, "ml_regime_blend_enabled", False)
+                        if hasattr(self, "config") else False
+                    )
+                    _models_dir = (
+                        str(getattr(self.config, "ml_regime_models_dir", "") or "")
+                        if hasattr(self, "config") else ""
+                    )
+                    if _blend_enabled and _models_dir and self.regime_series is not None:
+                        # Lazily load regime-specific regressor models once
+                        if self._regime_reg_cache is None:
+                            import os, pickle as _pkl
+                            self._regime_reg_cache = {}
+                            for _suffix in ("bull", "bear", "normal", "highvol"):
+                                _rpath = os.path.join(_models_dir, f"xgb_regime_reg_{_suffix}.pkl")
+                                if os.path.exists(_rpath):
+                                    try:
+                                        with open(_rpath, "rb") as _rfh:
+                                            self._regime_reg_cache[_suffix] = _pkl.load(_rfh)
+                                    except Exception as _e:
+                                        logger.warning("Failed to load regime model %s: %s", _rpath, _e)
+
+                        if self._regime_reg_cache:
+                            # Compute each regime model's prediction once (expensive but
+                            # unavoidable — each model sees all dates in one shot)
+                            _regime_scores: dict[str, pd.Series] = {}
+                            for _suf, _rmod in self._regime_reg_cache.items():
+                                try:
+                                    _rf = model_features[_rmod["feature_columns"]] if isinstance(_rmod, dict) else model_features
+                                    _est = _rmod["estimator"] if isinstance(_rmod, dict) else _rmod
+                                    _pred = _predict_model(
+                                        type("_M", (), {"estimator": _est, "model_type": "regressor",
+                                                        "weight": 1.0, "clip": False})(),
+                                        _rf,
+                                        clip=False,
+                                    )
+                                    _regime_scores[_suf] = _pred
+                                except Exception as _e:
+                                    logger.debug("Regime model %s predict failed: %s", _suf, _e)
+
+                            if _regime_scores:
+                                # Build per-date regime label series aligned to features
+                                _panel_reg = (
+                                    self.regime_series.reindex(model_features.index)
+                                    .ffill().bfill().fillna("Sideways")
+                                    .astype(str)
+                                )
+                                _blended = pd.Series(0.0, index=model_features.index)
+                                for _date_idx in model_features.index:
+                                    _rlabel = str(_panel_reg.loc[_date_idx]) if _date_idx in _panel_reg.index else "Sideways"
+                                    _weights = _REGIME_BLEND_WEIGHTS.get(_rlabel, _REGIME_BLEND_WEIGHTS["Sideways"])
+                                    _day_score = 0.0
+                                    _w_total = 0.0
+                                    for _suf, _w in _weights.items():
+                                        if _w > 0 and _suf in _regime_scores:
+                                            _day_score += _w * float(_regime_scores[_suf].loc[_date_idx])
+                                            _w_total += _w
+                                    _blended.loc[_date_idx] = _day_score / max(_w_total, 1e-8)
+                                long_score = _blended
+                            else:
+                                long_score = _predict_model(long_model, model_features, clip=bool(ens_cfg.get("clip", False)))
+                        else:
+                            long_score = _predict_model(long_model, model_features, clip=bool(ens_cfg.get("clip", False)))
+                    else:
+                        long_score = _predict_model(long_model, model_features, clip=bool(ens_cfg.get("clip", False)))
 
                 if short_model:
                     raw_short = _predict_model(short_model, model_features, clip=bool(ens_cfg.get("clip", False)))

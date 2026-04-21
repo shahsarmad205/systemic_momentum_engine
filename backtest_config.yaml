@@ -1,5 +1,77 @@
 backtest:
   bootstrap: false
+  # ── Continuous optimization mode (forecast-driven, no discrete top-N rebalance) ──
+  # Set use_continuous_optimization: true to activate.
+  # Leave false to use the existing cross-sectional top-N pipeline.
+  use_continuous_optimization: true
+  optimization_config:
+    forecast:
+      tau_days: 6            # Alpha decay constant: 50% decayed at ~4d, ~90% at 14d
+      smoothing_span: 5      # EMA span for signal → forecast smoothing
+      scale_factor: 0.012    # Vol-normalised score → fractional expected return.
+                             # Calibration at mean stock vol=30% (actual large-cap S&P 500):
+                             # w*(z=1)=3.3%, w*(z=2)=6.7%, w*(z=3)=10% (capped)
+                             # Formula: w* = scale×z / (2λσ²); scale=0.012 at lambda=2, sigma=30%
+      use_forecast_demean: true  # Remove CS mean bias (adjusted_score mean≈−0.012) without
+                                  # destroying signal magnitude (do NOT divide by std)
+      max_alpha: 0.05            # Clip forecasts to ±5% expected return after demeaning
+    risk_model:
+      window: 60             # Rolling window for covariance estimation (trading days)
+      min_periods: 20        # Minimum observations before using estimated cov
+      method: ledoit_wolf    # 'ledoit_wolf' (recommended) or 'sample'
+    optimizer:
+      lambda_risk: 2.0       # Risk aversion: higher → lower gross exposure
+      gamma_turnover: 4.0    # Turnover penalty: higher → lower turnover
+                             # Calibration: doubling both scale and gamma keeps turnover identical.
+                             # scale/gamma ratio preserved → ~340%/yr < 500%/yr target
+                             # Position sizes doubled vs scale=0.006/gamma=2.0 baseline
+      max_weight: 0.10       # Max absolute weight per position (fraction of portfolio)
+      net_exposure_max: 0.3  # Fix 2: cut beta 1.258→~0.35; was 1.0 (unconstrained)
+      long_only: false        # Set false to allow shorts (requires enable_shorts: true)
+      gross_cap: 0.6         # Fix 4: reduce gross leverage; was 1.0
+      min_position_weight: 0.02  # Fix 1: zero out positions <2% → forces concentration,
+                                 # eliminates index-hugging from 300-500 tiny positions
+    execution:
+      horizon_days: 3              # Spread trades over T days (1=immediate, 3=recommended)
+      short_close_horizon_days: 2  # Faster exit from shorts — reversal IC decays past day 2-3
+      min_trade_weight: 0.001      # Ignore weight changes smaller than 0.1% (avoids micro-trades)
+    exposure_scaling:
+      enabled: true          # Scale portfolio weights by cross-sectional signal strength
+      strength_window: 60    # Rolling history of daily signal strength (days)
+      strength_percentile: 75 # Normalize against 75th pct → α_t=1.0 on strong days
+      ema_span: 5            # EMA smoothing span for α_t (prevents day-to-day instability)
+      min_exposure: 0.1      # Floor: never scale below 10% even on weak-signal days
+    factor_model:
+      enabled: false         # eta_beta/xi_sector removed: Σ_idio already strips
+                             # market+sector variance. Additive penalties on idio
+                             # covariance double-count and break λ calibration.
+      market_ticker: "SPY"   # Still needed: vol-targeting in MultiAlphaEngine
+      sector_mapping_path: "config/sector_mapping.csv"  # Still needed: neutralization
+    multi_alpha:
+      enabled: true          # Full multi-alpha: Gram-Schmidt orth, Σ⁻¹μ weights, vol-targeting
+      # §2 Alpha sources
+      # α₁=reversal(τ=2d), α₂=core-ML(τ=7d), α₃=momentum+vol-div(τ=20d)
+      reversal_days: 1       # Lookback for short-term reversal
+      momentum_days: 20      # Lookback for medium-term momentum
+      use_volume_divergence: true  # Blend −corr(ret_1d, volume, 10) into α₃ (Alpha101 paper)
+      # §3 CS normalization
+      clip_sigma: 3.0        # Hard clip z-scores to ±3σ per alpha
+      # §5 Data-driven weights (Σ⁻¹μ from rolling IC)
+      weights: [0.2, 0.5, 0.3]   # Fix 5: downweight α₁ reversal (decays 2-3d); was [0.5, 0.25, 0.25]
+      ic_window: 60          # Rolling IC history for Σ⁻¹μ computation
+      ic_horizon_days: 5     # MUST match holding_period_days. IC calibration horizon:
+                             # 1-day IC upweights α₁ reversal (good at 1d, BAD at 5d).
+                             # 5-day IC correctly measures which alpha predicts over the
+                             # actual holding period — fixes the signal inversion bug.
+      weight_ridge: 0.001    # Ridge regularisation on IC covariance matrix
+      # §7 Continuous vol-targeting: s_t = clip(target_vol / σ_mkt, lo, hi)
+      market_ticker: "SPY"
+      target_vol: 0.15       # Annualised portfolio vol target (15%)
+      vol_scale_window: 20   # SPY rolling std window (trading days)
+      vol_scale_lo: 0.2      # Fix 3: lower floor — allows proper crisis deleveraging; was 0.5
+      vol_scale_hi: 1.3      # Fix 3: cap leverage at 1.3× (not 2×); was 2.0
+      # §9 Diagnostics (always computed)
+      corr_window: 60        # Rolling window for correlation matrix logging
   # BREADTH FIX (Grinold-Kahn Fundamental Law):
   # IR = IC × √N. At IC=0.0274, need N>200 for IR>0.4. Currently N≈32.5.
   # Fix: 18 longs × (252/10d rebalance) × diversity_discount ≈ 80 effective bets/yr.
@@ -19,23 +91,23 @@ backtest:
   # BREADTH FIX: reduce from 15→10 days → 50% more rebalances per year → more independent bets.
   # Turnover will increase ~50% (from ~295% to ~440%) but breadth improvement dominates:
   # More bets at same IC > fewer bets at same IC (Grinold-Kahn). HSBC/Warwick survey §4.
-  rebalance_every_trading_days: 10
+  rebalance_every_trading_days: 5   # Fix 5: match holding_period_days; was 10
   signal_confidence_multiplier: 0.3        # Phase 8: lowered from 1.0 — regressor model std=0.006
   signal_confidence_multiplier_bear: 0.2   # Phase 8: lowered from 0.6
   signal_confidence_multiplier_crisis: 0.2 # Phase 8: lowered from 0.5
   signal_confidence_multiplier_sideways: 0.2 # Phase 8: lowered from 0.5
   start_date: '2008-01-01'   # TRUE OOS evaluation window — model trained on 2007-2022
   end_date: '2022-12-31'    # Full year end for walk-forward windows
-  holding_period_days: 10    # Reduced from 15: match rebalance cadence, fresher signals
-  lookahead_horizon_days: 10  # MUST match holding_period_days and model_selection.lookahead_horizon_days
+  holding_period_days: 5     # Fix 5: match reversal decay (2-3d); was 10
+  lookahead_horizon_days: 5  # MUST match holding_period_days; was 10
   dynamic_holding:                         # B2: holding period varies by signal strength
     enabled: true
     by_signal:
-      Bullish: 10            # Reduced from 15 to match new rebalance cadence
-      Bearish: 7             # Shorts: shorter hold, overextension reversal mean-reverts fast
+      Bullish: 5             # Fix 5: match new holding_period_days; was 10
+      Bearish: 4             # Shorts: slightly shorter than longs
     by_strength:             # CS z-score bands for selected stocks (≈1.5–3.5 range)
-      - [2.0, 15]            # |z| >= 2.0 → hold 15 days (high conviction, was 20)
-      - [1.0, 10]            # |z| >= 1.0 → hold 10 days (normal, was 15)
+      - [2.0, 8]             # |z| >= 2.0 → hold 8 days (high conviction); was 15
+      - [1.0, 5]             # |z| >= 1.0 → hold 5 days (normal); was 10
 data:
   cache_dir: data/cache
   cache_ohlcv: true
@@ -43,7 +115,7 @@ data:
   provider: yahoo
 execution:
   commission_per_trade: 1.0
-  enable_shorts: false   # Paper signals (RRLP/MS/JLST) require full-universe turnover dispersion; S&P 500 large-caps all have high TO — gate barely filters
+  enable_shorts: true   # Paper signals (RRLP/MS/JLST) require full-universe turnover dispersion; S&P 500 large-caps all have high TO — gate barely filters
   long_only: false
   slippage_bps: 1.0
   # OVEREXTENSION REVERSAL FIX: new short_score_raw = nearness_52w_high × short_term_reversal.
@@ -60,6 +132,12 @@ execution_costs:
   sensitivity_test: false
   slippage_bps: 1.0
   spread_bps: 1.0
+  # VIX-scaled transaction costs (Hasbrouck 2009 / Almgren-Chriss).
+  # slippage_effective = slippage_bps × (1 + alpha × max(0, VIX_t − VIX_252d_median))
+  # alpha=0.08: VIX=35 vs median=20 → 2.2× slippage; VIX=80 (GFC) → 5.8× slippage.
+  # Automatically self-limits turnover in illiquid markets — no manual regime switch needed.
+  vix_cost_scaling_enabled: true
+  vix_cost_alpha: 0.08
 
 # Almgren-Chriss square-root market impact model (replaces ad-hoc k_bps * sqrt formula).
 # Calibrated for US large-cap equities (Kissell & Malamut 2005 / ITG).
@@ -139,7 +217,7 @@ mean_variance:
   rebalance_days: 20
 model_selection:
   ensemble_size: 1   # XGBRegressor only. Ridge has std=1.653 across 5 windows (nearly as high as mean=1.786) — too volatile to blend. XGBRegressor alone: OOS Sharpe 1.312, std=1.189, far more consistent.
-  lookahead_horizon_days: 10   # MUST match holding_period_days — reduced from 15 to 10
+  lookahead_horizon_days: 5    # MUST match holding_period_days; was 10
   max_positions: 10
   min_positions: 3
   selection_weight_decay: 0.9
@@ -255,6 +333,8 @@ retraining:
 risk:
   bear_gross_cap_fraction: 0.5    # Phase 9: lowered from 0.7
   crisis_gross_cap_fraction: 0.3  # Phase 13: lowered from 0.4 — tighter crisis gross cap to break <20% DD
+  regime_short_suppression: true  # Suppress shorts in Crisis (fully) and Bear (capped at bear_short_cap)
+  bear_short_cap: 0.5             # In Bear, allow shorts up to 50% of max_weight (vs 100% in Bull/Sideways)
   # Bear: entry gate replaces forced liquidation — no new longs, existing positions exit via signal
   bear_liquidate_longs_on_regime_entry: false  # ARCH: removed — was selling at panic prices on day 1 of Bear
   bear_max_carry_days: 3        # cap planned exits for pre-Bear longs so they don't drag into Bear trend
@@ -293,6 +373,13 @@ risk:
   short_borrow_cost_bps: 50
   stop_loss_pct: 0.0
   take_profit_pct: 0.0
+  # ATR-scaled stop (Citadel/AQR standard). λ=2.5 means the stop fires when
+  # intraday low drops 2.5× ATR(14d) below entry — genuine adverse move, not noise.
+  # Set to 0.0 to disable. Recommended: start at 3.0 and tighten to 2.5 if 2008 DD improves.
+  atr_stop_lambda: 2.5
+  # Signal-flip exit: close position when model score inverts past this threshold.
+  # 0.0 = disabled. Set to 0.3 to enable; higher = less sensitive to transient reversals.
+  signal_flip_threshold: 0.0
   sharpe_circuit_breaker:               # D3: rolling Sharpe CB — soft exposure reducer
     enabled: true
     window_days: 120
@@ -373,6 +460,10 @@ signals:
   ml_short_weight: 0.5
   ml_standardize: false
   ml_regime_models_dir: output/models   # C2: enable regime-conditional routing (bull/bear/highvol/normal PKLs)
+  # Soft-mixture regime blending. Requires running: python run_model_selection.py --regime-models
+  # When true, long_score = Σ_r weight(regime_t, r) × f_r(features_t) per _REGIME_BLEND_WEIGHTS.
+  # Disabled by default until per-regime regressors are trained.
+  ml_regime_blend_enabled: false
   mode: ml
   score_direction: 1.0
   signal_confidence_multiplier: 0.3          # Phase 8: recalibrated for new regressor score scale (std=0.006)
@@ -398,14 +489,20 @@ slippage_tracking:
 
 # Pillar 29: Institutional Dynamic Universe
 universe:
-  mode: "sp500"
+  # mode options:
+  #   "wrds"   — point-in-time S&P 500 from crsp.dsp500list (requires WRDS_USERNAME)
+  #              Filters: price ≥ min_price, dollar_vol ≥ min_dollar_vol, excludes delistings
+  #   "sp500"  — current Wikipedia constituents (survivorship bias — research only)
+  #   "file"   — load from file_path
+  #   "custom" — use tickers list in config
+  mode: "wrds"           # switch to "wrds" once WRDS cache is populated (Phase 7)
   cache_path: "config/sp500_tickers.txt"
   cache_max_age_days: 7
   min_price: 10.0
-  min_dollar_volume: 1.0e8
+  min_dollar_vol: 1.0e8   # $100M daily dollar volume minimum
   max_tickers: 500
   exclude:
     - "SPY"
-    - "XYZ"  
+    - "XYZ"
     - "BF-B"
     - "BRK-B"  # class B has liquidity issues in some periods

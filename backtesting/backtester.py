@@ -18,6 +18,7 @@ import logging
 import math
 from collections import defaultdict
 from datetime import timedelta
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -128,6 +129,8 @@ class Backtester:
         self.config = config
         self.portfolio = Portfolio(config.initial_capital, config.max_positions)
         self.ticker_trade_counts: dict[str, int] = {}
+        # VIX-scaled cost scalar for the current simulation day (updated daily in the loop).
+        self._cost_scalar_today: float = 1.0
         # Regime-specific confidence multipliers (safe defaults to 1.0 if loader unavailable).
         self.regime_multipliers: dict[str, float] = {
             "Bull": 1.0,
@@ -315,11 +318,16 @@ class Backtester:
 
         # Phase 3 — simulation
         print("\nPhase 3: Running day-by-day portfolio simulation…")
-        self._simulate(price_data, signal_data, regime_data, regime_score_data)
-
-        # Collect outputs
-        trades = pd.DataFrame(self.portfolio.trade_log)
-        daily_equity = pd.DataFrame(self.portfolio.equity_history)
+        _use_opt = bool(getattr(self.config, "use_continuous_optimization", False))
+        if _use_opt:
+            print("  [continuous-optimization mode]")
+            trades, daily_equity = self._simulate_continuous(
+                price_data, signal_data, regime_data
+            )
+        else:
+            self._simulate(price_data, signal_data, regime_data, regime_score_data)
+            trades = pd.DataFrame(self.portfolio.trade_log)
+            daily_equity = pd.DataFrame(self.portfolio.equity_history)
 
         if not trades.empty:
             trades.sort_values("entry_date", inplace=True)
@@ -558,14 +566,18 @@ class Backtester:
             sig = "*" if abs(t_stat) > 1.96 else " "
 
             _bench = ""
-            if abs(ic) > 0.15:
+            if ic > 0.15:
                 _bench = "(exceptional — AQR grade)"
-            elif abs(ic) > 0.10:
+            elif ic > 0.10:
                 _bench = "(good — institutional grade)"
-            elif abs(ic) > 0.05:
+            elif ic > 0.05:
                 _bench = "(usable signal)"
-            else:
+            elif ic > -0.05:
                 _bench = "(weak — near noise)"
+            elif ic > -0.10:
+                _bench = "(anti-predictive — review signal direction)"
+            else:
+                _bench = "(strongly anti-predictive — signal likely inverted)"
 
             print("  IC Diagnostics (Grinold & Kahn):")
             print(f"    Signal: adjusted_score  IC={ic:+.4f}  ICIR={icir:+.3f}  "
@@ -898,8 +910,8 @@ class Backtester:
                     t_df["ticker"] = tk
                     t_df["ret_5d"] = t_df["Close"].pct_change(5)
                     t_df["ret_10d"] = t_df["Close"].pct_change(10)
-                    t_df["rolling_vol_20"] = t_df["Close"].pct_change().rolling(20).std()
-                    t_df["rolling_vol_60"] = t_df["Close"].pct_change().rolling(60).std()
+                    t_df["rolling_vol_20"] = t_df["Close"].pct_change(fill_method=None).rolling(20).std()
+                    t_df["rolling_vol_60"] = t_df["Close"].pct_change(fill_method=None).rolling(60).std()
                     t_df["volume_zscore"] = (t_df["Volume"] - t_df["Volume"].rolling(20).mean()) / t_df["Volume"].rolling(20).std().replace(0, np.nan)
                     t_df["vix_zscore"] = 0.0
                     t_df["vol_spike"] = 0.0
@@ -1156,6 +1168,43 @@ class Backtester:
             except Exception:
                 logger.exception("VIX deleveraging failed; vol_scalar unchanged")
 
+        # ── VIX-Scaled Transaction Costs (Almgren-Chriss + Hasbrouck 2009) ──────────────
+        # Bid-ask spreads expand 3-7× during stress. Replace fixed slippage_bps with a
+        # dynamic scalar: cost_scalar = 1 + α × max(0, VIX_t − VIX_rolling_median_t).
+        # α=0.08: at VIX=35 vs median=20 → scalar=2.2×; at VIX=80 (GFC peak) → scalar=5.8×.
+        # Automatically self-limits turnover in expensive markets — no regime override needed.
+        _vix_cost_scalar: dict[pd.Timestamp, float] = {}
+        if bool(getattr(self.config, "vix_cost_scaling_enabled", True)):
+            try:
+                _vc_start = pd.Timestamp(self.config.start_date) - pd.Timedelta(days=600)
+                _vc_end = pd.Timestamp(self.config.end_date) + pd.Timedelta(days=30)
+                _vc_dict = MarketRegimeAgent._download_vix(
+                    _vc_start, _vc_end, price_data.get("SPY", pd.DataFrame())
+                )
+                if _vc_dict:
+                    _vc_raw = pd.Series(_vc_dict)
+                    _vc_raw.index = pd.to_datetime(_vc_raw.index)
+                    _vc_aligned = (
+                        _vc_raw.reindex(pd.DatetimeIndex(trading_days))
+                        .ffill().bfill().fillna(15.0)
+                    )
+                    _vc_median = (
+                        _vc_aligned.rolling(252, min_periods=60)
+                        .median()
+                        .fillna(float(_vc_aligned.median()))
+                    )
+                    _vc_alpha = float(getattr(self.config, "vix_cost_alpha", 0.08))
+                    _vc_scalars = 1.0 + _vc_alpha * (_vc_aligned - _vc_median).clip(lower=0.0)
+                    for _d, _s in zip(trading_days, _vc_scalars):
+                        _vix_cost_scalar[pd.Timestamp(_d)] = float(_s)
+                    _peak_day = _vc_scalars.idxmax()
+                    logger.info(
+                        "VIX cost scaling active: α=%.3f | peak %.2f× on %s",
+                        _vc_alpha, float(_vc_scalars.max()), _peak_day.date(),
+                    )
+            except Exception:
+                logger.warning("VIX cost scaling init failed; using constant costs.")
+
         # Pre-index: calendar date → [(ticker, signal_row)] (string key so lookup matches regardless of type/tz)
         def _to_calendar_key(ts) -> str:
             if isinstance(ts, datetime.date) and not isinstance(ts, datetime.datetime):
@@ -1264,6 +1313,8 @@ class Backtester:
 
             # Today's market regime (used for risk exits and entry filters).
             regime_today = regime_data.get(date, "Sideways")
+            # Update VIX-scaled cost scalar — used by entry slippage and _close_position this day.
+            self._cost_scalar_today = _vix_cost_scalar.get(date, 1.0)
             prev_reg_before = prev_regime
             # C2: inform signal engine of current regime so it can route to regime-conditional model
             if hasattr(self.signal_engine, "set_regime"):
@@ -1582,6 +1633,39 @@ class Backtester:
                         )
                         continue
 
+                # ── ATR-Scaled Stop (Citadel/AQR standard) ───────────────────────────
+                # Fires when intraday low drops > λ × ATR(14d) below entry price.
+                # Regime-agnostic: the threshold self-calibrates to each stock's vol,
+                # so a genuine fraud blow-up on a low-vol name fires while normal
+                # momentum noise on a high-vol name does not.
+                # λ=0.0 disables; set atr_stop_lambda: 2.5 in risk config to enable.
+                _atr_lambda = float(getattr(self.config, "atr_stop_lambda", 0.0) or 0.0)
+                if _atr_lambda > 0 and long_side and pos.entry_atr > 0:
+                    _atr_stop_px = float(pos.entry_price) - _atr_lambda * pos.entry_atr
+                    if np.isfinite(low) and low <= _atr_stop_px:
+                        self._close_position(
+                            pos, date, price_data,
+                            exit_price_override=_atr_stop_px,
+                            reason="atr_stop",
+                        )
+                        continue
+
+                # ── Signal-Flip Exit ──────────────────────────────────────────────────
+                # Close a long (short) when today's model score has inverted past the
+                # threshold. The model itself is telling us the thesis no longer holds —
+                # holding to planned expiry on a reversed signal is a look-ahead trap.
+                # threshold=0.0 disables; set signal_flip_threshold: 0.3 to enable.
+                _flip_thresh = float(getattr(self.config, "signal_flip_threshold", 0.0) or 0.0)
+                if _flip_thresh > 0 and tk in signal_data:
+                    _sig_df = signal_data.get(tk)
+                    if _sig_df is not None and not _sig_df.empty and date in _sig_df.index:
+                        _cur_score = float(_sig_df.loc[date, "adjusted_score"])
+                        _flipped = (long_side and _cur_score < -_flip_thresh) or \
+                                   (not long_side and _cur_score > _flip_thresh)
+                        if _flipped:
+                            self._close_position(pos, date, price_data, reason="signal_flip")
+                            continue
+
             # --- 2. Execute pending entries at today's open ---
             existing_tickers = {p.ticker for p in self.portfolio.positions}
 
@@ -1758,7 +1842,7 @@ class Backtester:
                                 pxf.loc[pxf.index <= date, close_col],
                                 errors="coerce",
                             ).dropna()
-                            returns_60d[tk] = p.pct_change().tail(corr_window_days)
+                            returns_60d[tk] = p.pct_change(fill_method=None).tail(corr_window_days)
 
                 if len(returns_60d) >= 2:
                     ret_df = pd.DataFrame(returns_60d).dropna()
@@ -2125,7 +2209,9 @@ class Backtester:
                         if original_exit is None or next_date <= pd.Timestamp(original_exit):
                             scheduled_entries.append((next_at, entry))
                     continue
-                entry_price = self.execution.apply_entry_slippage(open_price, entry["signal"])
+                entry_price = self.execution.apply_entry_slippage_scaled(
+                    open_price, entry["signal"], self._cost_scalar_today
+                )
 
                 if entry.get("_cross_sectional"):
                     _mxp_cs = float(getattr(self.config, "max_position_pct_of_equity", 0.12))
@@ -2402,7 +2488,10 @@ class Backtester:
                 )
                 if pos:
                     self.ticker_trade_counts[tk] = self.ticker_trade_counts.get(tk, 0) + 1
-                    
+                    # Stamp ATR at entry so the ATR stop-loss has its reference level.
+                    if float(getattr(self.config, "atr_stop_lambda", 0.0) or 0.0) > 0:
+                        pos.entry_atr = self._compute_atr(tk, price_data, date)
+
                 if pos is None:
                     # Reschedule so we retry tomorrow (e.g. entry_price was 0 or size 0 this bar)
                     next_at = i + 1
@@ -2582,7 +2671,7 @@ class Backtester:
                 # (plus any configured execution_delay_days) at that day's open.
                 # Do not schedule new entries for tickers we already hold (re-entry only after expiry).
                 execute_at = i + 1 + execution_delay_days
-                if execute_at < len(trading_days):
+                if execute_at < len(trading_days) and trading_days[execute_at] <= end_ts:
                     currently_open = {p.ticker for p in self.portfolio.positions}
                     for e in new_entries:
                         if e["ticker"] not in currently_open:
@@ -2602,7 +2691,7 @@ class Backtester:
                 # (plus any configured execution_delay_days).
                 # Do not schedule new entries for tickers we already hold (re-entry only after expiry).
                 execute_at = i + 1 + execution_delay_days
-                if execute_at < len(trading_days):
+                if execute_at < len(trading_days) and trading_days[execute_at] <= end_ts:
                     currently_open = {p.ticker for p in self.portfolio.positions}
                     for e in new_entries:
                         if e["ticker"] not in currently_open:
@@ -2858,6 +2947,37 @@ class Backtester:
         except Exception:
             return 0.015
 
+    def _compute_atr(self, ticker: str, price_data: dict, date: pd.Timestamp, window: int = 14) -> float:
+        """ATR(window) in dollars at the given date.
+
+        True Range = max(H-L, |H-C_prev|, |L-C_prev|).
+        Returns 0.0 when price history is insufficient rather than raising.
+        Used by the ATR-scaled stop-loss so each stock's stop self-calibrates to
+        its own realised volatility — a 2.5×ATR stop means the same 'noise units'
+        regardless of whether the stock moves $0.50 or $5 per day.
+        """
+        try:
+            df = price_data.get(ticker)
+            if df is None or df.empty:
+                return 0.0
+            cols = {"High", "Low", "Close"}
+            if not cols.issubset(df.columns):
+                return 0.0
+            hist = df.loc[df.index <= pd.Timestamp(date)].tail(window + 1)
+            if len(hist) < 2:
+                return 0.0
+            high = hist["High"]
+            low = hist["Low"]
+            close_prev = hist["Close"].shift(1)
+            tr = pd.concat(
+                [(high - low), (high - close_prev).abs(), (low - close_prev).abs()],
+                axis=1,
+            ).max(axis=1)
+            atr = float(tr.iloc[1:].mean())   # drop first row (NaN prev close)
+            return atr if np.isfinite(atr) and atr > 0 else 0.0
+        except Exception:
+            return 0.0
+
     def _crisis_transition_exit_price(self, pos, date, price_data) -> float | None:
         """Exit at Open when enabled; else None (caller uses Close in _close_position)."""
         if not bool(getattr(self.config, "crisis_transition_use_open_exit", True)):
@@ -2883,7 +3003,9 @@ class Backtester:
         if exit_price_override is not None:
             base_price = exit_price_override
 
-        exit_price = self.execution.apply_exit_slippage(base_price, pos.signal)
+        exit_price = self.execution.apply_exit_slippage_scaled(
+            base_price, pos.signal, getattr(self, "_cost_scalar_today", 1.0)
+        )
         exit_cost = self.cost_model.cost_dollars(pos.position_size) if self.cost_model else self.execution.commission
         # Almgren-Chriss exit impact (no permanent impact on exit leg)
         if self._market_impact_model is not None and pos.position_size > 0:
@@ -2921,3 +3043,610 @@ class Backtester:
                 "implied_vol": round(sigma, 4),
             }
         self.portfolio.close_position(pos, date, exit_price, exit_cost, **extra)
+
+    # ==============================================================
+    # Continuous Optimization Simulation
+    # ==============================================================
+
+    def _simulate_continuous(
+        self,
+        price_data: dict,
+        signal_data: dict,
+        regime_data: dict,
+    ) -> tuple:
+        """
+        Forecast-driven continuous portfolio optimization simulation.
+
+        Architecture:
+            signal → forecast → risk_model → optimizer → trade_scheduler
+                                                        → mark-to-market
+
+        Replaces the discrete top-N rebalance loop with a daily QP that
+        naturally controls turnover via the turnover penalty γ||Δw||².
+
+        Returns
+        -------
+        (trades_df, daily_equity_df) compatible with existing metrics pipeline.
+        """
+        from .forecast import ForecastEngine
+        from .risk_model import RiskModel
+        from .optimizer import PortfolioOptimizer
+        from .trade_scheduler import TradeScheduler
+
+        cfg = self.config
+        opt_cfg = getattr(cfg, "optimization_config", {}) or {}
+
+        # ── Build components from config ────────────────────────────────────
+        fc_cfg = opt_cfg.get("forecast", {})
+        _use_demean = bool(fc_cfg.get("use_forecast_demean", True))
+        _max_alpha = float(fc_cfg.get("max_alpha", 0.05))
+        forecast_engine = ForecastEngine(
+            tau_days=float(fc_cfg.get("tau_days", 6.0)),
+            smoothing_span=int(fc_cfg.get("smoothing_span", 5)),
+            scale_factor=float(fc_cfg.get("scale_factor", 0.012)),
+        )
+
+        rm_cfg = opt_cfg.get("risk_model", {})
+        risk_model = RiskModel(
+            window=int(rm_cfg.get("window", 60)),
+            min_periods=int(rm_cfg.get("min_periods", 20)),
+            method=str(rm_cfg.get("method", "ledoit_wolf")),
+            annualize=True,
+        )
+
+        op_cfg = opt_cfg.get("optimizer", {})
+        fm_cfg = opt_cfg.get("factor_model", {})
+        _market_ticker = str(fm_cfg.get("market_ticker", "SPY"))
+        # eta_beta and xi_sector removed: when using Σ_idio (factor-neutralized
+        # covariance), market and sector variance are already absent. Additive
+        # factor penalties on top of Σ_idio double-count and make λ uncalibrated.
+        optimizer = PortfolioOptimizer(
+            lambda_risk=float(op_cfg.get("lambda_risk", 2.0)),
+            gamma_turnover=float(op_cfg.get("gamma_turnover", 4.0)),
+            max_weight=float(op_cfg.get("max_weight", getattr(cfg, "max_position_pct_of_equity", 0.10))),
+            net_exposure_max=float(op_cfg.get("net_exposure_max", 1.0)),
+            long_only=bool(op_cfg.get("long_only", not getattr(cfg, "enable_shorts", False))),
+            gross_cap=float(op_cfg.get("gross_cap", getattr(cfg, "max_gross_exposure", 1.0))),
+            min_position_weight=float(op_cfg.get("min_position_weight", 0.0)),
+        )
+
+        ex_cfg = opt_cfg.get("execution", {})
+        scheduler = TradeScheduler(
+            horizon=int(ex_cfg.get("horizon_days", 3)),
+            min_trade=float(ex_cfg.get("min_trade_weight", 0.001)),
+            short_close_horizon=int(ex_cfg.get("short_close_horizon_days", ex_cfg.get("horizon_days", 3))),
+        )
+
+        # ── Exposure scaling config ──────────────────────────────────────────
+        es_cfg = opt_cfg.get("exposure_scaling", {})
+        _use_exposure_scaling = bool(es_cfg.get("enabled", False))
+        _strength_window = int(es_cfg.get("strength_window", 60))
+        _strength_pct = float(es_cfg.get("strength_percentile", 75))
+        _es_ema_span = int(es_cfg.get("ema_span", 5))
+        _min_exposure = float(es_cfg.get("min_exposure", 0.1))
+        _es_alpha = 2.0 / (_es_ema_span + 1)  # EMA decay factor
+
+        # ── Multi-alpha engine (optional) ────────────────────────────────────
+        from .multi_alpha import MultiAlphaEngine
+        ma_cfg = opt_cfg.get("multi_alpha", {})
+        _use_multi_alpha = bool(ma_cfg.get("enabled", False))
+        _mae: Optional[MultiAlphaEngine] = None
+        if _use_multi_alpha:
+            _mae = MultiAlphaEngine(
+                base_weights=tuple(ma_cfg.get("weights", [0.5, 0.25, 0.25])),
+                reversal_days=int(ma_cfg.get("reversal_days", 1)),
+                momentum_days=int(ma_cfg.get("momentum_days", 20)),
+                clip_sigma=float(ma_cfg.get("clip_sigma", 3.0)),
+                ic_window=int(ma_cfg.get("ic_window", 60)),
+                corr_window=int(ma_cfg.get("corr_window", 60)),
+                target_vol=float(ma_cfg.get("target_vol", 0.15)),
+                vol_scale_window=int(ma_cfg.get("vol_scale_window", 20)),
+                vol_scale_lo=float(ma_cfg.get("vol_scale_lo", 0.5)),
+                vol_scale_hi=float(ma_cfg.get("vol_scale_hi", 2.0)),
+                weight_ridge=float(ma_cfg.get("weight_ridge", 1e-3)),
+                use_volume_divergence=bool(ma_cfg.get("use_volume_divergence", True)),
+                # CRITICAL: IC calibration horizon must match portfolio holding period.
+                # Default 1 (old behavior) trains on 1-day IC while positions are held
+                # 5 days — this upweights α₁ reversal which is anti-predictive at 5d.
+                ic_horizon_days=int(ma_cfg.get("ic_horizon_days", getattr(cfg, "holding_period_days", 5))),
+            )
+
+        # ── Sector mapping (always loaded — needed for Σ_idio + MAE neutralization) ──
+        # Previously gated on _use_factor_model + xi_sector > 0. Now unconditional:
+        # the sector map is required for consistent return-space neutralization in
+        # both the risk model (Σ_idio) and the MultiAlphaEngine (_factor_neutralize).
+        _sector_id_map: dict[str, int] = {}
+        _n_sectors: int = 0
+        _sector_map_path = str(fm_cfg.get("sector_mapping_path", "config/sector_mapping.csv"))
+        try:
+            import os
+            _sm_path = _sector_map_path if os.path.isabs(_sector_map_path) else os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))), _sector_map_path
+            )
+            _sm_df = pd.read_csv(_sm_path)
+            _sector_labels = sorted(_sm_df["sector"].dropna().unique().tolist())
+            _sector_label_to_id = {s: i for i, s in enumerate(_sector_labels)}
+            _n_sectors = len(_sector_labels)
+            for _, row in _sm_df.iterrows():
+                t_sym = str(row["ticker"])
+                t_sec = str(row["sector"])
+                if t_sec in _sector_label_to_id:
+                    _sector_id_map[t_sym] = _sector_label_to_id[t_sec]
+            logger.info(
+                "_simulate_continuous: loaded %d sector mappings, %d sectors",
+                len(_sector_id_map), _n_sectors,
+            )
+        except Exception as exc:
+            logger.warning(
+                "_simulate_continuous: could not load sector mapping (%s); "
+                "neutralization will be market-only (no sector demeaning).", exc
+            )
+
+        # ── Pre-compute smoothed forecast series (vectorised, no per-bar overhead) ──
+        signal_data_with_fc = forecast_engine.build_forecast_series(signal_data)
+
+        # ── Collect all dates in simulation window ───────────────────────────
+        start_ts = pd.Timestamp(cfg.start_date)
+        end_ts = pd.Timestamp(cfg.end_date)
+        all_dates: set = set()
+        for df in price_data.values():
+            if df is not None and not df.empty:
+                all_dates.update(df.index)
+        trading_days = sorted(d for d in all_dates if start_ts <= d <= end_ts)
+        if not trading_days:
+            logger.warning("_simulate_continuous: no trading days found.")
+            return pd.DataFrame(), pd.DataFrame()
+
+        tickers_universe = [t for t in signal_data_with_fc if t in price_data]
+
+        # ── MultiAlphaEngine precompute (once, before loop) ──────────────────
+        if _mae is not None:
+            _mae.precompute(
+                price_data,
+                tickers_universe,
+                market_ticker=str(ma_cfg.get("market_ticker", "SPY")),
+                sector_id_map=_sector_id_map if _sector_id_map else None,
+            )
+
+        # ── State ────────────────────────────────────────────────────────────
+        equity = float(cfg.initial_capital)
+        w_current: dict[str, float] = {t: 0.0 for t in tickers_universe}
+
+        # Exposure scaling state
+        from collections import deque
+        _strength_history: deque = deque(maxlen=_strength_window)
+        _alpha_ema: float = 1.0  # Start fully invested; ramp down on weak days
+
+        # Virtual position tracking (for trade log compatibility)
+        _POS_THRESHOLD = 0.005  # treat |w| > 0.5% as an open position
+        virt_positions: dict[str, dict] = {}  # ticker → entry info
+
+        equity_history: list[dict] = []
+        trade_log: list[dict] = []
+        total_cost_paid = 0.0
+
+        # Slippage / commission cost per unit of weight change (fraction)
+        cost_per_unit = (
+            float(getattr(cfg, "slippage_bps", 1.0)) +
+            float(getattr(cfg, "execution_costs_commission_bps", 1.0)) +
+            float(getattr(cfg, "execution_costs_spread_bps", 1.0))
+        ) / 10_000.0
+
+        for date in trading_days:
+            regime = regime_data.get(date, "Sideways")
+
+            # ── 1. Regime-based gross cap override ──────────────────────────
+            regime_gross_cap = optimizer.gross_cap
+            if regime == "Crisis":
+                regime_gross_cap = min(regime_gross_cap, float(getattr(cfg, "crisis_gross_cap_fraction", 0.30)))
+            elif regime == "Bear":
+                regime_gross_cap = min(regime_gross_cap, float(getattr(cfg, "bear_gross_cap_fraction", 0.50)))
+            optimizer.gross_cap = regime_gross_cap
+
+            # ── 2. Build today's forecasts for all tickers ───────────────────
+            raw_forecasts = forecast_engine.current_forecasts(
+                signal_data_with_fc, date, score_col="adjusted_score"
+            )
+
+            # ── 3. Regime multiplier on forecasts ────────────────────────────
+            regime_adj = getattr(cfg, "regime_adjustments", {}).get(regime, {})
+            score_mult = float(regime_adj.get("score_mult", 1.0))
+            forecasts = {t: v * score_mult for t, v in raw_forecasts.items()}
+
+            # ── 3b. Forecast normalisation / multi-alpha combination ─────────
+            _signal_strength = 0.0
+            if forecasts:
+                if _mae is not None:
+                    # Multi-alpha path: MAE handles CS norm, orthogonalization,
+                    # correlation-adjusted weighting, and vol regime scaling internally.
+                    forecasts = _mae.current_forecasts(date, forecasts)
+                else:
+                    # Single-alpha path: demean (remove negative-mean bias) + clip.
+                    # Do NOT divide by std — that destroys signal magnitude and makes
+                    # weak-signal days indistinguishable from strong ones.
+                    fc_arr = np.array(list(forecasts.values()))
+                    if _use_demean:
+                        fc_mean = float(fc_arr.mean())
+                        forecasts = {t: v - fc_mean for t, v in forecasts.items()}
+                        fc_arr = np.array(list(forecasts.values()))
+                    if _max_alpha > 0.0:
+                        forecasts = {t: float(np.clip(v, -_max_alpha, _max_alpha))
+                                     for t, v in forecasts.items()}
+                        fc_arr = np.array(list(forecasts.values()))
+
+                # Track CS std for exposure scaling (both paths)
+                fc_arr = np.array(list(forecasts.values()))
+                _signal_strength = float(fc_arr.std()) if len(fc_arr) > 1 else 0.0
+                _strength_history.append(_signal_strength)
+
+            # ── 4. Active tickers: universe ∩ those with signals today ───────
+            active_tickers = [t for t in tickers_universe if t in forecasts]
+            if not active_tickers:
+                # No signals → hold current weights, no trades
+                equity_history.append({"date": date, "equity": equity, "n_positions": 0,
+                                        "gross_exposure": sum(abs(v) for v in w_current.values()),
+                                        "regime": regime})
+                continue
+
+            # ── 5. Covariance matrix for active tickers (Σ_idio) ───────────
+            # Pass sector_id_map so risk model estimates Σ from idiosyncratic
+            # returns — the same return space as the alpha signals. Without
+            # this, λw'Σ_raw·w and the idio-space forecast μ have inconsistent
+            # units, making λ uncalibrated and the optimizer solution invalid.
+            cov, cov_tickers = risk_model.fit_at_date(
+                price_data, active_tickers, date,
+                sector_id_map=_sector_id_map if _sector_id_map else None,
+            )
+            if len(cov_tickers) < 2:
+                # Fallback: keep current weights
+                equity_history.append({"date": date, "equity": equity, "n_positions": 0,
+                                        "gross_exposure": sum(abs(v) for v in w_current.values()),
+                                        "regime": regime})
+                continue
+
+            # Align forecast and w_prev to cov_tickers order
+            fc_vec = {t: forecasts.get(t, 0.0) for t in cov_tickers}
+            wp_vec = {t: w_current.get(t, 0.0) for t in cov_tickers}
+
+            # ── 6. Optimise ──────────────────────────────────────────────────
+            # Factor penalties (eta_beta, xi_sector) removed. Σ_idio is estimated
+            # from idiosyncratic returns, so market and sector variance are already
+            # absent from the covariance. No additive penalties needed.
+            w_target_map = optimizer.optimize(fc_vec, cov, wp_vec, cov_tickers)
+
+            # Zero out tickers with no signal (they were in cov but not in forecasts)
+            for t in cov_tickers:
+                if t not in forecasts:
+                    w_target_map[t] = 0.0
+
+            # ── 7. Regime short suppression ──────────────────────────────────
+            # In Crisis/Bear regimes the short book gets destroyed by market beta
+            # surges (e.g. 2009 recovery, 2020 rebound). Suppress shorts entirely
+            # in Crisis; allow only weak shorts (≤50% of normal cap) in Bear.
+            if getattr(cfg, "regime_short_suppression", True):
+                if regime == "Crisis":
+                    w_target_map = {t: max(0.0, v) for t, v in w_target_map.items()}
+                elif regime == "Bear":
+                    _bear_short_cap = float(getattr(cfg, "bear_short_cap", 0.5))
+                    w_target_map = {
+                        t: max(v, -abs(optimizer.max_weight) * _bear_short_cap)
+                        for t, v in w_target_map.items()
+                    }
+
+            # ── 8. Exposure scaling: α_t × w_opt ─────────────────────────────
+            # Scales the whole portfolio by cross-sectional signal strength.
+            # Weak-signal days (flat cross-section) → small positions.
+            # α_t is EMA-smoothed to prevent day-to-day instability.
+            if _use_exposure_scaling and len(_strength_history) >= max(5, _strength_window // 4):
+                _hist_arr = np.array(_strength_history)
+                _threshold = float(np.percentile(_hist_arr, _strength_pct))
+                if _threshold > 1e-9:
+                    _alpha_raw = min(1.0, _signal_strength / _threshold)
+                else:
+                    _alpha_raw = 1.0
+                _alpha_ema = _alpha_raw * _es_alpha + _alpha_ema * (1.0 - _es_alpha)
+                _scale = max(_min_exposure, _alpha_ema)
+                w_target_map = {t: v * _scale for t, v in w_target_map.items()}
+
+            # ── 10. Gradual execution ────────────────────────────────────────
+            actual_delta = scheduler.step(w_target_map, w_current)
+
+            # ── 11. Apply cost and update weights ────────────────────────────
+            for t, dw in actual_delta.items():
+                if abs(dw) < scheduler.min_trade:
+                    continue
+                trade_dollar = abs(dw) * equity
+                # Fix 3: one-way cost per execution step — no ×2 multiplier.
+                # Round-trip cost is naturally paid as two separate one-way steps
+                # (open leg + close leg). Applying ×2 per step means a position
+                # opened over 3 scheduler steps pays 6× the correct one-way cost.
+                cost = trade_dollar * cost_per_unit
+                equity -= cost
+                total_cost_paid += cost
+                w_current[t] = w_current.get(t, 0.0) + dw
+                # Accumulate per-position cost for trade log attribution (Fix 3)
+                if t in virt_positions:
+                    virt_positions[t]["cumulative_cost"] = (
+                        virt_positions[t].get("cumulative_cost", 0.0) + cost
+                    )
+
+            # Clamp tiny residuals
+            for t in list(w_current.keys()):
+                if abs(w_current[t]) < 1e-5:
+                    w_current[t] = 0.0
+
+            # ── 12. Mark-to-market: compute today's P&L ─────────────────────
+            daily_pnl = 0.0
+            for t, w in w_current.items():
+                if abs(w) < 1e-6 or t not in price_data:
+                    continue
+                df_px = price_data[t]
+                if df_px is None or df_px.empty:
+                    continue
+                close_col = "Close" if "Close" in df_px.columns else "close"
+                # Find today and previous trading day close
+                idx_arr = df_px.index
+                loc = idx_arr.searchsorted(date)
+                if loc == 0 or loc >= len(idx_arr) or idx_arr[loc] != date:
+                    continue
+                try:
+                    c_today = float(pd.to_numeric(df_px[close_col].iloc[loc], errors="coerce"))
+                    c_prev = float(pd.to_numeric(df_px[close_col].iloc[loc - 1], errors="coerce"))
+                except (IndexError, ValueError):
+                    continue
+                if not (np.isfinite(c_today) and np.isfinite(c_prev) and c_prev > 0):
+                    continue
+                ret = (c_today - c_prev) / c_prev
+                daily_pnl += w * ret
+
+            equity = equity * (1.0 + daily_pnl)
+
+            # ── 10. Virtual position tracking → trade log ────────────────────
+            for t in tickers_universe:
+                w = w_current.get(t, 0.0)
+                direction = 1 if w > 0 else (-1 if w < 0 else 0)
+                prev_pos = virt_positions.get(t)
+
+                if prev_pos is None and abs(w) >= _POS_THRESHOLD:
+                    # Open a virtual position
+                    px = self._get_close_price(t, date, price_data)
+                    virt_positions[t] = {
+                        "entry_date": date,
+                        "entry_price": px,
+                        "direction": direction,
+                        "entry_weight": abs(w),
+                        "entry_equity": equity,             # Fix 4: equity at open for accurate position_size
+                        "entry_score": float(forecasts.get(t, 0.0)),  # Fix 1: entry-day signal for IC
+                        "cumulative_cost": 0.0,             # Fix 3: accumulate tx costs during hold
+                        "signal_date": date,
+                    }
+                elif prev_pos is not None:
+                    direction_flip = (prev_pos["direction"] > 0) != (direction > 0)
+                    closed = abs(w) < _POS_THRESHOLD or direction_flip
+                    if closed:
+                        # Close virtual position and record trade
+                        px_exit = self._get_close_price(t, date, price_data)
+                        px_entry = prev_pos["entry_price"]
+                        raw_ret = prev_pos["direction"] * (px_exit - px_entry) / (px_entry + 1e-12)
+                        # Fix 4: use entry equity so position_size reflects actual capital at risk
+                        _entry_equity = prev_pos.get("entry_equity", equity)
+                        _pos_size = prev_pos["entry_weight"] * _entry_equity
+                        _total_cost = prev_pos.get("cumulative_cost", 0.0)
+                        holding_days = max(1, (date - prev_pos["entry_date"]).days)
+                        trade_log.append({
+                            "ticker": t,
+                            "signal": "Bullish" if prev_pos["direction"] > 0 else "Bearish",
+                            "direction": prev_pos["direction"],
+                            "signal_date": prev_pos["signal_date"],
+                            "entry_date": prev_pos["entry_date"],
+                            "exit_date": date,
+                            "entry_price": px_entry,
+                            "exit_price": px_exit,
+                            "position_size": _pos_size,
+                            "shares": _pos_size / max(px_entry, 1e-6),
+                            "return": raw_ret,
+                            "pnl": raw_ret * _pos_size,
+                            "realized_pnl": raw_ret * _pos_size,
+                            # Fix 1: entry-day signal (not exit-day) for valid IC measurement
+                            "adjusted_score": prev_pos.get("entry_score", 0.0),
+                            "confidence": "High",
+                            "regime": regime,
+                            "holding_days": holding_days,
+                            # Fix 3: expose actual accumulated transaction costs
+                            "transaction_cost": _total_cost,
+                            "entry_cost": 0.0,
+                            "exit_cost": 0.0,
+                            "total_cost": _total_cost,
+                        })
+                        del virt_positions[t]
+                        # Re-open if still has weight (direction flip)
+                        if abs(w) >= _POS_THRESHOLD and direction_flip:
+                            px_new = self._get_close_price(t, date, price_data)
+                            virt_positions[t] = {
+                                "entry_date": date,
+                                "entry_price": px_new,
+                                "direction": direction,
+                                "entry_weight": abs(w),
+                                "entry_equity": equity,
+                                "entry_score": float(forecasts.get(t, 0.0)),
+                                "cumulative_cost": 0.0,
+                                "signal_date": date,
+                            }
+
+            n_open = int(sum(1 for v in w_current.values() if abs(v) >= _POS_THRESHOLD))
+            gross_exp = float(sum(abs(v) for v in w_current.values()))
+            equity_history.append({
+                "date": date,
+                "equity": equity,
+                "n_positions": n_open,
+                "gross_exposure": gross_exp,
+                "regime": regime,
+            })
+
+        # Close any remaining virtual positions at last trading day
+        last_date = trading_days[-1] if trading_days else None
+        if last_date is not None:
+            for t, prev_pos in list(virt_positions.items()):
+                px_exit = self._get_close_price(t, last_date, price_data)
+                px_entry = prev_pos["entry_price"]
+                raw_ret = prev_pos["direction"] * (px_exit - px_entry) / (px_entry + 1e-12)
+                avg_w = prev_pos["entry_weight"]
+                # Fix 4: use entry equity for consistent position_size
+                _entry_equity_eod = prev_pos.get("entry_equity", equity)
+                _pos_size_eod = avg_w * _entry_equity_eod
+                _total_cost_eod = prev_pos.get("cumulative_cost", 0.0)
+                holding_days = max(1, (last_date - prev_pos["entry_date"]).days)
+                trade_log.append({
+                    "ticker": t,
+                    "signal": "Bullish" if prev_pos["direction"] > 0 else "Bearish",
+                    "direction": prev_pos["direction"],
+                    "signal_date": prev_pos["signal_date"],
+                    "entry_date": prev_pos["entry_date"],
+                    "exit_date": last_date,
+                    "entry_price": px_entry,
+                    "exit_price": px_exit,
+                    "position_size": _pos_size_eod,
+                    "shares": _pos_size_eod / max(px_entry, 1e-6),
+                    "return": raw_ret,
+                    "pnl": raw_ret * _pos_size_eod,
+                    "realized_pnl": raw_ret * _pos_size_eod,
+                    # Fix 1: use stored entry-day signal; 0.0 fallback means this
+                    # position was opened before the fix — tolerable for final-day close
+                    "adjusted_score": prev_pos.get("entry_score", 0.0),
+                    "confidence": "High",
+                    "regime": regime_data.get(last_date, "Sideways"),
+                    "holding_days": holding_days,
+                    # Fix 3: expose actual accumulated costs
+                    "transaction_cost": _total_cost_eod,
+                    "entry_cost": 0.0,
+                    "exit_cost": 0.0,
+                    "total_cost": _total_cost_eod,
+                })
+
+        trades_df = pd.DataFrame(trade_log)
+        equity_df = pd.DataFrame(equity_history)
+
+        gross = sum(abs(v) for v in w_current.values())
+        n_pos = sum(1 for v in w_current.values() if abs(v) >= _POS_THRESHOLD)
+        print(f"  Continuous sim complete: {len(trading_days)} days, "
+              f"{len(trade_log)} virtual trades, "
+              f"final equity ${equity:,.0f}, "
+              f"gross exposure {gross:.1%}, "
+              f"total cost ${total_cost_paid:,.0f}")
+
+        # ── Tier 1 Diagnostics ───────────────────────────────────────────────
+        # D1-D5 per the institutional validation checklist.
+        # These run once at end-of-simulation from the accumulated history.
+
+        # ── D0: MultiAlpha signal diagnostics ───────────────────────────────
+        if _mae is not None:
+            print(f"  MultiAlpha correlations: {_mae.correlation_summary()}")
+            try:
+                ic_report = _mae.compute_ic_report(price_data)
+                print(ic_report)
+            except Exception as _ic_exc:
+                logger.debug("MultiAlpha IC report failed: %s", _ic_exc)
+
+        # ── D1: Cross-sectional mean(r_idio[t]) ≈ 0 ∀ t ────────────────────
+        # Verifies that factor neutralization is active. If mean is non-zero,
+        # either market demeaning failed or sector_id_map was not loaded.
+        if _mae is not None and _mae._ret_1d_df is not None:
+            try:
+                _idio_cs_mean = _mae._ret_1d_df.mean(axis=1)
+                _d1_mean = float(_idio_cs_mean.mean())
+                _d1_std = float(_idio_cs_mean.std())
+                print(f"\n  [D1] CS mean(r_idio): mean={_d1_mean:+.6f}  std={_d1_std:.6f}"
+                      f"  {'PASS' if abs(_d1_mean) < 1e-4 else 'FAIL — neutralization not active'}")
+            except Exception as _d1_exc:
+                logger.debug("D1 diagnostics failed: %s", _d1_exc)
+
+        # ── D2: Eigenvalue spectrum of alpha signal covariance ───────────────
+        # N_eff_signal ≈ K=3 means alphas are orthogonal. N_eff_signal ≈ 1
+        # means all three alphas collapse onto the same factor (neutralization
+        # didn't work or alpha operators are not independent).
+        if _mae is not None:
+            _neff_signal = _mae.effective_breadth()
+            print(f"  [D2] N_eff_signal (alpha covariance) = {_neff_signal:.2f} / 3.00"
+                  f"  {'PASS' if _neff_signal >= 2.0 else 'WARN — alphas not independent'}")
+
+        # ── D3: N_eff_portfolio from realized daily PnL covariance ───────────
+        # This is the TRUE effective breadth: how many independent bets does
+        # the portfolio actually hold? Distinct from N_eff_signal (which only
+        # measures alpha vector orthogonality, max=K=3).
+        # Computed from the equity_df daily returns per position is not trivially
+        # available here without per-position PnL tracking. Approximate from
+        # the covariance of daily equity changes — this gives a lower bound.
+        # Full per-position PnL covariance requires trade_log enrichment (future).
+        if equity_df is not None and len(equity_df) > 20:
+            try:
+                _eq_vals = equity_df["equity"].values.astype(float)
+                _daily_ret = np.diff(_eq_vals) / (_eq_vals[:-1] + 1e-10)
+                # Proxy: rolling 60d window covariance of daily gross_exposure-weighted return
+                # True D3 requires per-position PnL matrix; log the proxy clearly.
+                _eq_ret_series = pd.Series(_daily_ret)
+                _roll_var = _eq_ret_series.rolling(60, min_periods=20).var().dropna().values
+                if len(_roll_var) > 5:
+                    _s1 = float(np.sum(_roll_var))
+                    _s2 = float(np.sum(_roll_var ** 2))
+                    _neff_proxy = (_s1 ** 2) / (_s2 + 1e-12)
+                    print(f"  [D3] N_eff_portfolio (rolling-variance proxy) = {_neff_proxy:.1f}"
+                          f"  [NOTE: proxy only — full per-position PnL covariance not yet tracked]")
+            except Exception as _d3_exc:
+                logger.debug("D3 diagnostics failed: %s", _d3_exc)
+
+        # ── D4: IC_idio vs IC_raw comparison ─────────────────────────────────
+        # Reports IC from MAE's rolling history. These are already computed
+        # against r_idio (after Step 1 fix). Compare to raw-return IC to
+        # quantify how much the IC was inflated by market direction.
+        # Full raw vs idio split requires running MAE twice — log what we have.
+        if _mae is not None and any(_mae._ic_orth[k] for k in range(3)):
+            _labels = ["α₁ reversal", "α₂ core-ML ", "α₃ momentum"]
+            print(f"  [D4] IC summary (vs r_idio — corrected target):")
+            for k, lbl in enumerate(_labels):
+                _raw_h = list(_mae._ic_raw[k])
+                _orth_h = list(_mae._ic_orth[k])
+                if _raw_h:
+                    print(f"       {lbl}: IC_raw={np.mean(_raw_h):+.4f}"
+                          f"  IC_orth={np.mean(_orth_h):+.4f}"
+                          f"  ICIR={np.mean(_orth_h) / (np.std(_orth_h) + 1e-9):.2f}")
+
+        # ── D5: Turnover decomposition ────────────────────────────────────────
+        # Classify each trade into:
+        #   signal-driven: alpha signal changed direction / decayed past threshold
+        #   risk-driven:   optimizer reduced position to enforce gross/sector cap
+        #   mechanical:    residual (rebalance timer, min_trade threshold rounding)
+        # Full decomposition requires annotating trades at source. Proxy: log
+        # total annualised turnover; flag if it exceeds 500%/yr (timer-driven sign).
+        if trades_df is not None and len(trades_df) > 0 and len(equity_df) > 1:
+            try:
+                _n_days = (equity_df["date"].iloc[-1] - equity_df["date"].iloc[0]).days
+                _years = max(_n_days / 365.25, 0.01)
+                _total_traded = float(trades_df["position_size"].abs().sum())
+                _avg_equity = float(equity_df["equity"].mean())
+                _to_ann = (_total_traded / (_avg_equity + 1e-10)) / _years
+                _to_flag = "WARN — may be timer-driven" if _to_ann > 5.0 else "OK"
+                print(f"  [D5] Annualised turnover ≈ {_to_ann:.1%}/yr  {_to_flag}"
+                      f"\n       [Full signal/risk/mechanical decomposition requires per-trade annotation]")
+            except Exception as _d5_exc:
+                logger.debug("D5 diagnostics failed: %s", _d5_exc)
+
+        return trades_df, equity_df
+
+    def _get_close_price(
+        self,
+        ticker: str,
+        date: pd.Timestamp,
+        price_data: dict,
+    ) -> float:
+        """Lookup close price for a ticker on a date; fallback to last available."""
+        df = price_data.get(ticker)
+        if df is None or df.empty:
+            return 1.0
+        close_col = "Close" if "Close" in df.columns else "close"
+        if close_col not in df.columns:
+            return 1.0
+        hist = df.loc[df.index <= date, close_col]
+        if hist.empty:
+            return 1.0
+        val = float(pd.to_numeric(hist.iloc[-1], errors="coerce"))
+        return val if np.isfinite(val) and val > 0 else 1.0

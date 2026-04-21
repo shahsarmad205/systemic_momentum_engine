@@ -35,6 +35,9 @@ class Position:
     actual_exit_date: pd.Timestamp | None = None
     actual_holding_days: int = 0
     current_price: float = 0.0
+    # ATR(14d) in dollars at entry date, used by the volatility-scaled stop-loss.
+    # A 2.5×ATR stop fires on real adverse moves, not on normal vol noise.
+    entry_atr: float = 0.0
     # Total portfolio equity immediately before this leg opens (for % of book diagnostics).
     entry_book_equity: float = 0.0
     # Set when Crisis transition shortens planned_exit — min-hold must not block expiry.
