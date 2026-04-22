@@ -1,13 +1,88 @@
+# Python/runtime artifacts
 __pycache__/
-*.pyc
+*/__pycache__/
+*.py[cod]
+*$py.class
+.python-version
 .venv/
-output/cache/
-output/experiments/
-*.DS_Store
-*.ipynb_checkpoints
+venv/
+env/
 
-# Alpaca & local secrets — never commit real keys
-config/alpaca_config.yaml
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Local agent/editor state
+.codex/
+.claude/
+.DS_Store
+*.DS_Store
+*.ipynb_checkpoints/
+
+# Secrets and local credentials
 .env
-config/*.yaml
-!config/alpaca_config.example.yaml
+.env.*
+config/alpaca_config.yaml
+config/*.local.yaml
+
+# Generated market-data and provider caches
+data/cache/
+output/cache/
+graphify-out/cache/
+
+# Generated research/live outputs.
+# Keep explicitly versioned governance/model-release metadata only.
+output/
+!output/
+output/*
+!output/models/
+output/models/*
+!output/models/releases/
+!output/models/releases/**/
+!output/models/releases/**/*.json
+!output/models/releases/**/*.yaml
+!output/models/releases/**/*.yml
+!output/models/model_registry.json
+!output/models/production_pointer.json
+!output/models/promotion_log.jsonl
+!output/live/
+output/live/*
+!output/live/trading_halt_latch.json
+
+# Heavy binary/model artifacts should live in an artifact store or explicit release folder.
+*.pkl
+*.pickle
+*.joblib
+*.npy
+*.npz
+*.parquet
+*.feather
+*.h5
+*.hdf5
+
+# Generated reports and logs
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.pdf
+*.log
+*.jsonl
+
+# CSVs are usually generated outputs; explicitly allow source/config CSVs.
+*.csv
+
+# QuantConnect local sample data is large and reproducible from LEAN tooling.
+LeanCloud/data/
+
+# Final allow-list for source and explicitly versioned governance/model-release artifacts.
+!config/*.csv
+!LeanCloud/BinaryEdge/config.json
+!output/models/promotion_log.jsonl
+!output/models/releases/**/*.pkl
+!output/models/releases/**/*.pickle
+!output/models/releases/**/*.joblib
