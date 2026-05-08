@@ -10,7 +10,7 @@ jobs:
   generate-signals:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
 
     steps:
       - name: Checkout
@@ -38,13 +38,17 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python -m pipeline.daily_runner
 
-      - name: Commit and push cache
-        run: |
-          git config user.email "github-actions@github.com"
-          git config user.name "GitHub Actions"
-          git add output/cache/
-          git diff --staged --quiet || git commit -m "chore: daily signals $(date -u +%Y-%m-%d)"
-          git push
+      - name: Upload generated signal artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-signal-output
+          path: |
+            output/live/
+            output/runs/
+            output/models/*.json
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Job summary
         run: |

@@ -39,8 +39,9 @@ from backtesting import (
     run_execution_costs_sensitivity,
     run_transaction_cost_sensitivity,
     run_walk_forward,
+    run_oos_stitch,
 )
-from config import DEV_MODE, apply_dev_mode, get_effective_tickers, setup_logging
+from config import DEV_MODE, apply_dev_mode, setup_logging
 from utils.universe import load_universe
 
 # ------------------------------------------------------------------
@@ -77,6 +78,11 @@ def parse_args():
                    help="Disable shorts: negative scores ⇒ no position (long-only)")
     p.add_argument("--walk-forward", action="store_true",
                    help="Run walk-forward analysis instead of single backtest")
+    p.add_argument("--oos-stitch", action="store_true",
+                   help="Run OOS stitch: evaluate on non-overlapping test windows and chain equity curves "
+                        "(honest out-of-sample Sharpe/CAGR)")
+    p.add_argument("--ic-decay-per-alpha", action="store_true",
+                   help="After backtest: compute IC decay at 1/2/3/5/10/20d per alpha and print half-life table")
     p.add_argument("--ic-decay", action="store_true",
                    help="Run IC decay analysis after backtest")
     p.add_argument("--cost-sensitivity", action="store_true",
@@ -466,16 +472,15 @@ def _try_init_wrds(config, tickers: list[str]) -> None:
         log = logging.getLogger(__name__)
 
         db = connect_wrds(wrds_user)
-        universe = WRDSUniverse(db)
-
-        start = getattr(config, "start_date", "2007-01-01")
-        end = getattr(config, "end_date", "2023-12-31")
-
-        # Build ticker → permno map for the backtest window
-        all_permnos = universe.get_unique_permnos(start, end)
-        # We need a date to resolve point-in-time tickers; use start date
-        permno_to_tick = universe.permno_to_ticker_map(all_permnos, start)
-        ticker_to_permno: dict[str, int] = {v: k for k, v in permno_to_tick.items()}
+        ticker_to_permno = dict(getattr(config, "wrds_ticker_to_permno", {}) or {})
+        if not ticker_to_permno:
+            universe = WRDSUniverse(db)
+            start = getattr(config, "start_date", "2007-01-01")
+            end = getattr(config, "end_date", "2023-12-31")
+            all_permnos = universe.get_unique_permnos(start, end)
+            permno_to_tick = universe.permno_to_ticker_map(all_permnos, end)
+            ticker_to_permno = {v: k for k, v in permno_to_tick.items()}
+            setattr(config, "wrds_ticker_to_permno", ticker_to_permno)
 
         # Filter to only tickers in our backtest universe
         relevant = {t: p for t, p in ticker_to_permno.items() if t in tickers}
@@ -554,6 +559,13 @@ def main():
         _print_header(config, tickers)
         _run_walk_forward(config, tickers)
         print(f"{SEP}\n  Walk-forward complete.\n{SEP}")
+        return
+
+    # --- OOS stitch mode (honest out-of-sample evaluation) ---
+    if args.oos_stitch:
+        _print_header(config, tickers)
+        run_oos_stitch(config, tickers)
+        print(f"{SEP}\n  OOS stitch complete.\n{SEP}")
         return
 
     # --- Standard single-window backtest ---
@@ -919,6 +931,67 @@ def main():
     if args.ic_decay and result.price_data:
         print()
         _run_ic_decay(result, config)
+
+    # --- Per-alpha IC decay (Fix 5: signal half-life diagnostics) ---
+    if args.ic_decay_per_alpha:
+        try:
+            from backtesting.backtester import Backtester as _BT
+            # Retrieve the MAE from the last backtester run if available
+            _bt_instance = getattr(engine, "_last_backtester", None)
+            _mae = None
+            if _bt_instance is not None:
+                _mae = getattr(_bt_instance, "_last_mae", None)
+            if _mae is None:
+                # Re-instantiate MAE with precomputed price data
+                from backtesting.multi_alpha import MultiAlphaEngine
+                from backtesting.config import BacktestConfig
+                opt_cfg = getattr(config, "optimization_config", {}) or {}
+                ma_cfg = opt_cfg.get("multi_alpha", {})
+                if ma_cfg.get("enabled"):
+                    _mae = MultiAlphaEngine(
+                        base_weights=tuple(ma_cfg.get("weights", [0.2, 0.5, 0.3])),
+                        reversal_days=int(ma_cfg.get("reversal_days", 1)),
+                        momentum_days=int(ma_cfg.get("momentum_days", 20)),
+                        clip_sigma=float(ma_cfg.get("clip_sigma", 3.0)),
+                        ic_window=int(ma_cfg.get("ic_window", 60)),
+                        corr_window=int(ma_cfg.get("corr_window", 60)),
+                        target_vol=float(ma_cfg.get("target_vol", 0.15)),
+                        vol_scale_window=int(ma_cfg.get("vol_scale_window", 20)),
+                        vol_scale_lo=float(ma_cfg.get("vol_scale_lo", 0.2)),
+                        vol_scale_hi=float(ma_cfg.get("vol_scale_hi", 1.3)),
+                        weight_ridge=float(ma_cfg.get("weight_ridge", 1e-3)),
+                        use_volume_divergence=bool(ma_cfg.get("use_volume_divergence", True)),
+                        ic_horizon_days=int(ma_cfg.get("ic_horizon_days", 5)),
+                    )
+                    fm_cfg = opt_cfg.get("factor_model", {})
+                    from backtesting.backtester import Backtester
+                    import os as _os
+                    _sm_path = str(fm_cfg.get("sector_mapping_path", "config/sector_mapping.csv"))
+                    if not _os.path.isabs(_sm_path):
+                        _sm_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), _sm_path)
+                    _sid_map = {}
+                    try:
+                        import pandas as _pd
+                        _sm_df = _pd.read_csv(_sm_path)
+                        _sls = sorted(_sm_df["sector"].dropna().unique().tolist())
+                        _slid = {s: i for i, s in enumerate(_sls)}
+                        for _, row in _sm_df.iterrows():
+                            t = str(row["ticker"]); s = str(row["sector"])
+                            if s in _slid: _sid_map[t] = _slid[s]
+                    except Exception:
+                        pass
+                    _mae.precompute(
+                        result.price_data,
+                        list(result.price_data.keys()),
+                        market_ticker=str(ma_cfg.get("market_ticker", "SPY")),
+                        sector_id_map=_sid_map if _sid_map else None,
+                    )
+            if _mae is not None:
+                _mae.print_ic_decay_table(result.price_data)
+            else:
+                print("  [IC decay per alpha] MultiAlphaEngine not enabled in config — skipped.")
+        except Exception as exc:
+            print(f"  [IC decay per alpha] Error: {exc}")
 
     # --- Optional transaction cost sensitivity ---
     if args.cost_sensitivity:

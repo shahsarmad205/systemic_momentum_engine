@@ -71,7 +71,7 @@ def compute_rolling_trend_scores(features: pd.DataFrame) -> pd.Series:
     )
     return scores
 
-from utils.ensemble_scoring import compute_ensemble_score, load_ensemble_models
+from utils.ensemble_scoring import load_ensemble_models
 
 # ── Soft-Mixture Regime Blend Weights ────────────────────────────────────────────────
 # For each discrete regime label, specifies how much weight each regime-specific
@@ -582,7 +582,6 @@ class SignalEngine:
         if need_capm_beta:
             try:
                 from features.capm_features import compute_capm_features
-                from utils.market_data import get_ohlcv as _get_ohlcv
 
                 ix = features.index
                 start = ix.min().strftime("%Y-%m-%d") if hasattr(ix.min(), "strftime") else str(ix.min())[:10]
@@ -707,26 +706,65 @@ class SignalEngine:
                     "clip": bool(getattr(self.config, "ensemble_clip", False)),
                 }
             else:
-                # ML Mode: Dual Ensemble (Long + Short specialised models)
+                # ML Mode: Dual Ensemble (Long + Short specialised models).
+                # Overlay model is optional — enabled when ml_overlay_weight > 0.
+                # Model types are intentionally left generic here ("regressor" /
+                # "short_regressor") so load_ensemble_models falls back safely if the
+                # artifact pre-dates economic model support.  The loader overrides the
+                # type with artifact["model_type"] when that field is present and valid.
+                _ml_models: list[dict] = [
+                    {
+                        "path": str(getattr(self.config, "ml_long_model_path", "") or "").strip(),
+                        "weight": float(getattr(self.config, "ml_long_weight", 0.5)),
+                        "type": "regressor",
+                    },
+                    {
+                        "path": str(getattr(self.config, "ml_short_model_path", "") or "").strip(),
+                        "weight": float(getattr(self.config, "ml_short_weight", 0.5)),
+                        "type": "short_regressor",
+                    },
+                ]
+                _overlay_path = str(getattr(self.config, "ml_overlay_model_path", "") or "").strip()
+                _overlay_weight = float(getattr(self.config, "ml_overlay_weight", 0.0))
+                if _overlay_path and _overlay_weight > 0.0:
+                    _ml_models.append({
+                        "path": _overlay_path,
+                        "weight": _overlay_weight,
+                        "type": "overlay_alpha",
+                    })
                 ens_cfg = {
-                    "models": [
-                        {
-                            "path": str(getattr(self.config, "ml_long_model_path", "") or "").strip(),
-                            "weight": float(getattr(self.config, "ml_long_weight", 0.5)),
-                            "type": "regressor",   # best_long_model.pkl is a VotingRegressor ensemble
-                        },
-                        {
-                            "path": str(getattr(self.config, "ml_short_model_path", "") or "").strip(),
-                            "weight": float(getattr(self.config, "ml_short_weight", 0.5)),
-                            "type": "short_regressor",   # regressor on forward_return; lower score = stronger short
-                        }
-                    ],
+                    "models": _ml_models,
                     "normalize": False,
                     "standardize": bool(getattr(self.config, "ml_standardize", False)),
                     "clip": bool(getattr(self.config, "ml_clip", False)),
                 }
             if self._ensemble_models_cache is None:
                 self._ensemble_models_cache = load_ensemble_models(ens_cfg)
+
+                # M1: validate artifact horizon against config holding_period_days.
+                _artifact_horizons = [
+                    m.horizon_days for m in self._ensemble_models_cache if m.horizon_days
+                ]
+                if _artifact_horizons:
+                    import statistics as _stats
+                    _modal_h = int(_stats.mode(_artifact_horizons))
+                    _cfg_h = int(getattr(self.config, "holding_period_days", 5))
+                    if _modal_h != _cfg_h:
+                        if bool(getattr(self.config, "ml_use_artifact_horizon", False)):
+                            logger.warning(
+                                "SignalEngine [M1]: overriding holding_period_days %d→%d "
+                                "from artifact modal horizon.",
+                                _cfg_h, _modal_h,
+                            )
+                            self.config.holding_period_days = _modal_h
+                        else:
+                            logger.warning(
+                                "SignalEngine [M1]: artifact horizon=%dd ≠ "
+                                "holding_period_days=%dd. Forward return target "
+                                "misalignment at prediction→execution boundary. "
+                                "Set signals.ml_use_artifact_horizon: true to auto-correct.",
+                                _modal_h, _cfg_h,
+                            )
 
             # Pillar 29: Institutional Re-sequencing — Compute CAPM before ML model call
             signal_df_tmp = pd.DataFrame(index=features.index)
@@ -899,17 +937,25 @@ class SignalEngine:
                 logger.warning("SignalEngine: no %s models loaded; falling back to learned/price mode.", mode)
                 adjusted = f_trend * self.weights.get("trend", 1.0)
             else:
-                # 1) Calculate Long Score and Short Score independently to prevent dilution
+                # 1) Calculate Long Score and Short Score independently to prevent dilution.
+                # Economic model types ("long_alpha", "short_alpha") are handled in
+                # _predict_model — they call .predict() with the same direction convention
+                # as their regressor counterparts.
                 long_model = next(
-                    (m for m in self._ensemble_models_cache if m.model_type in ("classifier", "regressor")), None
+                    (m for m in self._ensemble_models_cache if m.model_type in ("classifier", "regressor", "long_alpha")), None
                 )
-                short_model = next((m for m in self._ensemble_models_cache if m.model_type in ("short_classifier", "short_regressor")), None)
+                overlay_model = next(
+                    (m for m in self._ensemble_models_cache if m.model_type == "overlay_alpha"), None
+                )
+                short_model = next(
+                    (m for m in self._ensemble_models_cache if m.model_type in ("short_classifier", "short_regressor", "short_alpha")), None
+                )
                 
                 long_score = pd.Series(0.0, index=features.index)
                 short_score = pd.Series(0.0, index=features.index)
                 short_score_raw = pd.Series(0.0, index=features.index)  # ungated — used for CS short ranking
 
-                from utils.ensemble_scoring import _predict_model, LoadedEnsembleModel
+                from utils.ensemble_scoring import _predict_model
 
                 if long_model:
                     # ── Soft-Mixture Regime Blending ──────────────────────────────────
@@ -927,18 +973,55 @@ class SignalEngine:
                         if hasattr(self, "config") else ""
                     )
                     if _blend_enabled and _models_dir and self.regime_series is not None:
-                        # Lazily load regime-specific regressor models once
+                        # Lazily load regime-specific regressor models once.
+                        # M2: prefer manifest-based loading; fall back to filename guessing.
                         if self._regime_reg_cache is None:
-                            import os, pickle as _pkl
+                            import json as _json, os, pickle as _pkl
                             self._regime_reg_cache = {}
-                            for _suffix in ("bull", "bear", "normal", "highvol"):
-                                _rpath = os.path.join(_models_dir, f"xgb_regime_reg_{_suffix}.pkl")
-                                if os.path.exists(_rpath):
-                                    try:
-                                        with open(_rpath, "rb") as _rfh:
-                                            self._regime_reg_cache[_suffix] = _pkl.load(_rfh)
-                                    except Exception as _e:
-                                        logger.warning("Failed to load regime model %s: %s", _rpath, _e)
+                            _manifest_p = os.path.join(_models_dir, "regime_models_manifest.json")
+                            if os.path.isfile(_manifest_p):
+                                try:
+                                    with open(_manifest_p) as _mf:
+                                        _manifest = _json.load(_mf)
+                                    _manifest_map: dict[str, str] = {
+                                        m["suffix"]: m["path"]
+                                        for m in (_manifest.get("models") or [])
+                                        if m.get("suffix") and m.get("path")
+                                    }
+                                except Exception as _me:
+                                    logger.warning(
+                                        "SignalEngine [M2]: failed to read regime manifest %s: %s",
+                                        _manifest_p, _me,
+                                    )
+                                    _manifest_map = {}
+                            else:
+                                logger.warning(
+                                    "SignalEngine [M2]: no regime_models_manifest.json in %s; "
+                                    "falling back to filename guessing. "
+                                    "Re-run with --regime-models to generate manifest.",
+                                    _models_dir,
+                                )
+                                _manifest_map = {
+                                    _sfx: os.path.join(_models_dir, f"xgb_regime_reg_{_sfx}.pkl")
+                                    for _sfx in ("bull", "bear", "normal", "highvol")
+                                }
+                            for _suffix, _rpath in _manifest_map.items():
+                                if not os.path.isfile(_rpath):
+                                    continue
+                                try:
+                                    with open(_rpath, "rb") as _rfh:
+                                        self._regime_reg_cache[_suffix] = _pkl.load(_rfh)
+                                except Exception as _e:
+                                    logger.warning(
+                                        "SignalEngine [M2]: failed to load regime model %s: %s",
+                                        _rpath, _e,
+                                    )
+                            if not self._regime_reg_cache:
+                                logger.warning(
+                                    "SignalEngine [M2]: no regime blend models loaded from %s; "
+                                    "blend disabled.",
+                                    _models_dir,
+                                )
 
                         if self._regime_reg_cache:
                             # Compute each regime model's prediction once (expensive but
@@ -949,8 +1032,13 @@ class SignalEngine:
                                     _rf = model_features[_rmod["feature_columns"]] if isinstance(_rmod, dict) else model_features
                                     _est = _rmod["estimator"] if isinstance(_rmod, dict) else _rmod
                                     _pred = _predict_model(
-                                        type("_M", (), {"estimator": _est, "model_type": "regressor",
-                                                        "weight": 1.0, "clip": False})(),
+                                        type("_M", (), {
+                                            "estimator": _est,
+                                            "model_type": "regressor",
+                                            "weight": 1.0,
+                                            "feature_columns": None,
+                                            "preprocessor_handled": False,
+                                        })(),
                                         _rf,
                                         clip=False,
                                     )
@@ -983,6 +1071,15 @@ class SignalEngine:
                             long_score = _predict_model(long_model, model_features, clip=bool(ens_cfg.get("clip", False)))
                     else:
                         long_score = _predict_model(long_model, model_features, clip=bool(ens_cfg.get("clip", False)))
+
+                # C3: blend overlay alpha into long_score when an overlay model is loaded.
+                # overlay_alpha is a long_only_overlay economic model; higher score = stronger
+                # directional tilt.  Weight is ml_overlay_weight (default 0.0 = disabled).
+                if overlay_model:
+                    _ov_w = float(getattr(self.config, "ml_overlay_weight", 0.0))
+                    if _ov_w > 0.0:
+                        overlay_score = _predict_model(overlay_model, model_features, clip=bool(ens_cfg.get("clip", False)))
+                        long_score = (1.0 - _ov_w) * long_score + _ov_w * overlay_score
 
                 if short_model:
                     raw_short = _predict_model(short_model, model_features, clip=bool(ens_cfg.get("clip", False)))

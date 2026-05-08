@@ -13,7 +13,6 @@ orthogonal to price momentum (SUE, Short Interest, Analyst Revisions).
 """
 
 import pandas as pd
-import numpy as np
 
 def compute_sue_score(df: pd.DataFrame, earnings_data: pd.DataFrame = None) -> pd.Series:
     """

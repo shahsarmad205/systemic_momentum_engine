@@ -1,0 +1,3677 @@
+{
+  "root": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine",
+  "runtime_command": [
+    "python3",
+    "run_model_selection.py",
+    "--output",
+    "unused_model_selection.json"
+  ],
+  "counts": {
+    "total_py_files": 322,
+    "runtime_used": 21,
+    "entry_points": 112,
+    "safe_to_archive": 101,
+    "unused_import": 89
+  },
+  "files": [
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/.unused_audit_tracer/sitecustomize.py",
+      "classification": "KEEP",
+      "reason": "Used during runtime trace",
+      "imported_by_anyone": false,
+      "runtime_used": true,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/LeanCloud/BinaryEdge/__init__.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/LeanCloud/BinaryEdge/encode_model.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/LeanCloud/BinaryEdge/main.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/LeanCloud/BinaryEdge/qc_alpha_model.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/LeanCloud/__init__.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/volatility_agent/__init__.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/volatility_agent/volatility_model.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/__init__.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/ensemble_model.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/feature_builder.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/feature_flags.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/regime_detection.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/weight_model.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/analysis/analyzer.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/analysis/bootstrap_validation.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/analysis/ensemble_validation.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/analysis/factor_analysis.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/analysis/feature_search.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/analysis/sideways_diagnostic.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/analyze_ic.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/audit_calibration.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtest/__init__.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtest/engine.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/__init__.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/alpha_capture.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/analytics.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/backtester.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/candidates.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/config.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/cost_lambda_calibrator.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/cross_sectional.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/engine.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/execution.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/factor_normalization.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/forecast.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/impact_model.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/metrics.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/multi_alpha.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/oos_forward_validation.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/optimizer.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/plotting.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/portfolio.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/portfolio_construction.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/position_sizing.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/regime.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/regime_exposure.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/regime_multipliers.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/result.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/risk_model.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/signals.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/strategy_vs_benchmark_report.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/trade_scheduler.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/universe_pit.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/universe_selector.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/brokers/__init__.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/brokers/alpaca_broker.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/brokers/execution_engine.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/config.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/data_loader.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/execution/__init__.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/execution/cost_model.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/execution/market_impact.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/__init__.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/alternative_features.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/breadth_features.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/capm_features.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/cross_sectional.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/engine.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/feature_pipeline.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/fundamental_builder.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/fundamental_router.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/latent_factor_features.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/wrds_fundamental_builder.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/wrds_panel_engine.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/main.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/__init__.py",
+      "classification": "KEEP",
+      "reason": "Used during runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": true,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/alpha_research.py",
+      "classification": "KEEP",
+      "reason": "Used during runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": true,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/configuration.py",
+      "classification": "KEEP",
+      "reason": "Used during runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": true,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/direction_model.py",
+      "classification": "KEEP",
+      "reason": "Used during runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": true,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/economic_objectives.py",
+      "classification": "KEEP",
+      "reason": "Used during runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": true,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/empirical_baselines.py",
+      "classification": "KEEP",
+      "reason": "Used during runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": true,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/ensemble_weighting.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/factor_neutralization.py",
+      "classification": "KEEP",
+      "reason": "Used during runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": true,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/factor_subsumption.py",
+      "classification": "KEEP",
+      "reason": "Used during runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": true,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/feature_redundancy.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/latent_regime.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/meta_labeling.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/model_registry.py",
+      "classification": "KEEP",
+      "reason": "Used during runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": true,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/objective_comparison.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/optimizer_l1.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/preparation.py",
+      "classification": "KEEP",
+      "reason": "Used during runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": true,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/regime_conditioning.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/research_contract.py",
+      "classification": "KEEP",
+      "reason": "Used during runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": true,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/research_diagnostics.py",
+      "classification": "KEEP",
+      "reason": "Used during runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": true,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/research_state.py",
+      "classification": "KEEP",
+      "reason": "Used during runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": true,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/residualization.py",
+      "classification": "KEEP",
+      "reason": "Used during runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": true,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/score_direction.py",
+      "classification": "KEEP",
+      "reason": "Used during runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": true,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/short_modeling.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/signal_stability.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/statistics.py",
+      "classification": "KEEP",
+      "reason": "Used during runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": true,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/target_construction.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/training.py",
+      "classification": "KEEP",
+      "reason": "Used during runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": true,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py",
+      "classification": "KEEP",
+      "reason": "Used during runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": true,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/options/__init__.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/options/black_scholes.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/patch_cleanup.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/patch_logging.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/patch_logging_lean.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/pipeline/__init__.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/pipeline/daily_runner.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/portfolio/__init__.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/portfolio/engine.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/portfolio/mean_variance.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/providers/__init__.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/providers/cache_manager.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/providers/wrds_adapter.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/providers/yahoo_adapter.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/qc_alpha_model.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/qc_main.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/research/__init__.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/research/factor_neutralization.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/research/ic_engine.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/risk/__init__.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/risk/drawdown_overlay.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/risk/hard_limits.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/risk/var.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_auto_retrain.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_backtest.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_daily_pipeline.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_daily_signals.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_gbm_analysis.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_ic_diagnostics.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_live_trading.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py",
+      "classification": "KEEP",
+      "reason": "Used during runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": true,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_mv_comparison.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_ops_suite.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_options_analysis.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_performance_tracker.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_regime_training.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_retrain_baseline.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_retrain_model.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_short_model.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_var_analysis.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_walk_forward.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_weight_learning.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/asymmetry_audit.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/audit_metrics.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/cost_viability_audit.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/counterfactual_audit.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/diag_wrds.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/diag_wrds_v2.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/diag_wrds_v3.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/horizon_audit.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/sign_audit.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/signal_decomposition.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/stability_audit.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/test_admission_summary.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/test_lr_costs.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/test_lr_neutrality.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/test_lr_pnl_attribution.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/test_lr_ranking.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/test_nested_selection_audit.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/test_pnl_trace.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/test_short_lr_ranking.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/validate_get_validation_state.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/validation_new.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/build_audit_pack.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/build_universe_top_adv.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/check_data_quality_lineage.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/check_dual_model_health.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/check_risk_limits.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/check_tca_health.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/check_wrds_data_integrity.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/compare_learned_models.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/debug_daily_signals.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/diagnose_tickers.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/export_crsp_to_cache.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/fetch_fills.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/governance_daily_summary.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/promote_model.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/pull_crsp_history.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/rebuild_wrds_cache.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/reconcile_model_governance.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/reconcile_positions.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/refresh_adv_cache.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/rollback_model.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/run_phase2_ablation.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/run_rollout_guard.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/run_shadow_comparison.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/run_shadow_monitor.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/run_split_validation.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/slo_health_check.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/train_short_weights.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/validate_backtest.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/validate_industry_standards.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/validate_model.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/validate_short_walkforward.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/validate_wrds_migration.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/simulation/__init__.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/simulation/gbm.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/simulation/monte_carlo_portfolio.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/test_ranker_opt.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/conftest.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/regression_robustness.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/shim_run.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_adv_cache_unit.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_analytics_walk_forward.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_backtester_integration_pipeline.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_check_dual_model_health.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_check_tca_health.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_data_contracts.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_data_quality_lineage.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_drawdown_overlay.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_ensemble_scoring.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_entrypoint_boundaries.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_execution_engine_directional_budgets.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_execution_kill_switch.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_extracted_helpers.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_feature_builder_wrds.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_golden_smoke.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_governance_daily_summary.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_governance_daily_summary_phase10.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_hard_limits.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_import_boundaries.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_live_trades.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_live_var_preflight.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_metrics.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_model_selection_alpha_research.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_model_selection_data_config.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_model_selection_economic_objectives.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_model_selection_factor_subsumption.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_model_selection_metric_taxonomy.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_model_selection_nested_search.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_model_selection_parallel_config.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_model_selection_preparation.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_model_selection_research_contract.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_model_selection_research_state.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_model_selection_residualization.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_model_selection_split_phase2.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_model_selection_training.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_model_selection_validation.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_nan_propagation.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_oos_windows.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_optimizer_constraints.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_overlay_validation.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_polarity_institutional.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_portfolio_construction.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_position_sizing.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_position_sizing_multiplicative.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_promote_model_commit_gate.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_promote_model_object_store.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_promote_model_readiness.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_reconcile_model_governance_integration.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_regime_exposure.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_regime_multipliers.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_regime_wrds.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_robustness_parity.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_robustness_schema.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_rollback_model.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_run_context.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_run_daily_pipeline_strict_preflight.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_run_daily_signals_split_phase3.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_run_ops_suite_governance.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_run_rollout_guard.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_run_shadow_comparison.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_run_split_validation.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_safety_controls.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_shorts.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_signal_generation.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_slo_health_check.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_split_model_labels.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_tca_health.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_trading_control.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_universe_selector.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_universe_wrds_context.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_validation_telemetry.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_vol_kill_switch.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_vol_sizing.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_weight_learning.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_wrds_data_integrity.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_wrds_fundamental_deterioration.py",
+      "classification": "SAFE_TO_ARCHIVE",
+      "reason": "Not imported statically, not runtime-used, not entry point",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/verify_ranker_opt.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/verify_vectorization.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tools/audit_unused_files.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tools/capacity_analyzer.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tools/confidence_researcher.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tools/cost_analyzer.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tools/deployability_ranker.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tools/horizon_optimizer.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tools/joint_optimizer.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tools/leg_researcher.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tools/marginal_value_analyzer.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tools/plot_parameter_sweep.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tools/position_sizing_stress.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tools/regime_exposure_validation.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tools/regime_researcher.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tools/run_parameter_sweep_grid.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tools/select_sweep_configs.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tools/viability_analyzer.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tools/vol_targeting_simulation.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/adv_cache.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/artifacts.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/data_governance.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/default_universe.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/ensemble_scoring.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/feature_audit.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/hashes.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/live_trades.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/market_data.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/quant_utils.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/run_context.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/signal_threshold.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/tca_health.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/trading_control.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/universe.py",
+      "classification": "KEEP",
+      "reason": "Used during runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": true,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_data.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_loader.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_prefetch.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_universe.py",
+      "classification": "UNUSED_IMPORT",
+      "reason": "Imported statically but not observed in runtime trace",
+      "imported_by_anyone": true,
+      "runtime_used": false,
+      "entry_point": false
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/verify_lean_parity.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    },
+    {
+      "file": "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/verify_qc_parity.py",
+      "classification": "KEEP_ENTRYPOINT",
+      "reason": "Has if __name__ == '__main__'",
+      "imported_by_anyone": false,
+      "runtime_used": false,
+      "entry_point": true
+    }
+  ],
+  "static_graph": {
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/.unused_audit_tracer/sitecustomize.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/LeanCloud/BinaryEdge/__init__.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/LeanCloud/BinaryEdge/encode_model.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/LeanCloud/BinaryEdge/main.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/LeanCloud/BinaryEdge/qc_alpha_model.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/qc_alpha_model.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/LeanCloud/BinaryEdge/qc_alpha_model.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/LeanCloud/__init__.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/volatility_agent/__init__.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/volatility_agent/volatility_model.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/volatility_agent/volatility_model.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/__init__.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/feature_builder.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/regime_detection.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/weight_model.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/ensemble_model.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/feature_builder.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/volatility_agent/volatility_model.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/feature_flags.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/regime_detection.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/signals.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/execution/cost_model.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/capm_features.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/cross_sectional.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/feature_pipeline.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/fundamental_router.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/wrds_panel_engine.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/market_data.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/quant_utils.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_data.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/feature_flags.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/weight_model.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/regime_detection.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/market_data.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_data.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/weight_model.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/ensemble_model.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/analysis/analyzer.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/analytics.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/metrics.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/analysis/bootstrap_validation.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/analysis/ensemble_validation.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/__init__.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/ensemble_model.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/weight_model.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/analysis/factor_analysis.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/analysis/feature_search.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/market_data.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/analysis/sideways_diagnostic.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/analyze_ic.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/audit_calibration.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtest/__init__.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtest/engine.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtest/engine.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/backtester.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/config.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/__init__.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/analytics.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/backtester.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/candidates.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/config.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/cross_sectional.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/engine.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/metrics.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/plotting.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/regime_multipliers.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/result.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/signals.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/alpha_capture.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/analytics.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/__init__.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/backtester.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/metrics.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/backtester.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/__init__.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/feature_builder.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/regime_detection.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/weight_model.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/__init__.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/alpha_capture.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/analytics.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/candidates.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/config.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/cost_lambda_calibrator.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/cross_sectional.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/execution.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/forecast.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/impact_model.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/metrics.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/multi_alpha.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/optimizer.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/portfolio.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/portfolio_construction.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/position_sizing.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/regime.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/regime_multipliers.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/result.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/risk_model.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/signals.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/trade_scheduler.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/universe_pit.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/config.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/execution/cost_model.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/execution/market_impact.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/options/black_scholes.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/portfolio/mean_variance.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/research/factor_neutralization.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/risk/drawdown_overlay.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/default_universe.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/market_data.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/quant_utils.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_data.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_loader.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_universe.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/candidates.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/quant_utils.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/config.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/cost_lambda_calibrator.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/cross_sectional.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/engine.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/candidates.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/execution.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/factor_normalization.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/forecast.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/impact_model.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/metrics.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/risk/var.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/multi_alpha.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/oos_forward_validation.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtest/engine.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/config.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/optimizer.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/plotting.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/portfolio.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/portfolio_construction.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/position_sizing.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/regime.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/market_data.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_data.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/regime_exposure.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/regime_multipliers.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/result.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/config.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/risk_model.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/multi_alpha.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/signals.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/volatility_agent/volatility_model.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/capm_features.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/feature_pipeline.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/fundamental_router.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/ensemble_scoring.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/signal_threshold.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/strategy_vs_benchmark_report.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/trade_scheduler.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/universe_pit.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/universe_selector.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/brokers/__init__.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/brokers/alpaca_broker.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/brokers/alpaca_broker.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/live_trades.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/brokers/execution_engine.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/brokers/alpaca_broker.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/risk/drawdown_overlay.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/adv_cache.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/live_trades.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/market_data.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/quant_utils.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/trading_control.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/config.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/config.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/data_loader.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/market_data.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/execution/__init__.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/execution/cost_model.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/execution/cost_model.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/execution/market_impact.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/__init__.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/breadth_features.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/engine.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/feature_pipeline.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/latent_factor_features.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/alternative_features.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/breadth_features.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/capm_features.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/cross_sectional.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/engine.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/feature_pipeline.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/feature_pipeline.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/alternative_features.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/capm_features.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/simulation/gbm.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/feature_audit.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/market_data.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/fundamental_builder.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/fundamental_router.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/fundamental_builder.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/wrds_fundamental_builder.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/latent_factor_features.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/wrds_fundamental_builder.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/wrds_panel_engine.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/volatility_agent/volatility_model.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/feature_flags.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/regime_detection.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/execution/cost_model.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/capm_features.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/cross_sectional.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/wrds_fundamental_builder.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/quant_utils.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_data.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_universe.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/main.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/__init__.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/default_universe.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/quant_utils.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/__init__.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/direction_model.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/factor_neutralization.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/alpha_research.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/research_contract.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/residualization.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/training.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/configuration.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/alpha_research.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/training.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/direction_model.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/economic_objectives.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/empirical_baselines.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/ensemble_weighting.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/objective_comparison.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/factor_neutralization.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/residualization.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/factor_subsumption.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/research_contract.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/residualization.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/feature_redundancy.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/research_contract.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/latent_regime.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/meta_labeling.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/objective_comparison.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/model_registry.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/economic_objectives.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/training.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/objective_comparison.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/alpha_research.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/training.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/optimizer_l1.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/preparation.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/training.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/regime_conditioning.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/objective_comparison.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/research_contract.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/research_diagnostics.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/research_state.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/residualization.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/score_direction.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/short_modeling.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/model_registry.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/objective_comparison.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/signal_stability.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/statistics.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/target_construction.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/alpha_research.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/residualization.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/training.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/training.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/residualization.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/optimizer.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/__init__.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/optimizer_l1.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/options/__init__.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/options/black_scholes.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/options/black_scholes.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/patch_cleanup.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/patch_logging.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/patch_logging_lean.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/pipeline/__init__.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/pipeline/daily_runner.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/signals.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/config.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/__init__.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/pipeline/__init__.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/market_data.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/portfolio/__init__.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/portfolio/mean_variance.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/portfolio/engine.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/portfolio.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/portfolio/mean_variance.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/providers/__init__.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/providers/cache_manager.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/providers/wrds_adapter.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/providers/yahoo_adapter.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/providers/cache_manager.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/providers/wrds_adapter.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/providers/cache_manager.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_data.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_universe.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/providers/yahoo_adapter.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/providers/cache_manager.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/qc_alpha_model.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/LeanCloud/BinaryEdge/qc_alpha_model.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/qc_main.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/LeanCloud/BinaryEdge/main.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/research/__init__.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/research/factor_neutralization.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/quant_utils.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/research/ic_engine.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/risk/__init__.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/risk/drawdown_overlay.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/risk/hard_limits.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/risk/var.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_auto_retrain.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/weight_model.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/__init__.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/config.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/default_universe.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_backtest.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtest/engine.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/__init__.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/backtester.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/config.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/multi_alpha.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/config.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/fundamental_router.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/universe.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_universe.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_daily_pipeline.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/feature_builder.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/artifacts.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/data_governance.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/market_data.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/run_context.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/trading_control.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_daily_signals.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/feature_builder.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/weight_model.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/regime.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/ensemble_scoring.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_gbm_analysis.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/config.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/config.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/simulation/gbm.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/market_data.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_ic_diagnostics.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/feature_builder.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_live_trading.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/feature_builder.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/weight_model.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/brokers/alpaca_broker.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/brokers/execution_engine.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/risk/var.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_daily_signals.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/hashes.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/quant_utils.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/run_context.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/trading_control.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/feature_builder.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/__init__.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/alpha_research.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/configuration.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/empirical_baselines.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/ensemble_weighting.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/factor_subsumption.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/feature_redundancy.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/meta_labeling.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/model_registry.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/objective_comparison.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/preparation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/regime_conditioning.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/research_contract.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/research_diagnostics.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/research_state.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/score_direction.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/short_modeling.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/statistics.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/training.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/market_data.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/universe.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_data.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_mv_comparison.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtest/engine.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/config.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/config.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/portfolio/mean_variance.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_ops_suite.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/brokers/alpaca_broker.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_options_analysis.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/options/black_scholes.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/market_data.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_performance_tracker.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/brokers/alpaca_broker.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/market_data.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_regime_training.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/feature_builder.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/universe.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_retrain_baseline.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/feature_builder.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/weight_model.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/backtester.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/config.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_retrain_model.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_performance_tracker.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_retrain_baseline.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/run_context.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_short_model.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/feature_builder.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/universe.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_var_analysis.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/risk/var.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_walk_forward.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/__init__.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/config.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/default_universe.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/universe.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_weight_learning.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/__init__.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/regime_detection.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/weight_model.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/Backtester.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/__init__.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/config.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/config.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/default_universe.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/asymmetry_audit.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/preparation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/training.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/audit_metrics.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/cost_viability_audit.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/preparation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/training.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/counterfactual_audit.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/preparation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/training.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/diag_wrds.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/diag_wrds_v2.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/diag_wrds_v3.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_universe.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/horizon_audit.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/preparation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/training.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/sign_audit.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/preparation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/training.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/signal_decomposition.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/preparation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/training.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/stability_audit.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/preparation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/training.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/test_admission_summary.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/alpha_research.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/test_lr_costs.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/preparation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/training.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/test_lr_neutrality.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/preparation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/training.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/test_lr_pnl_attribution.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/preparation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/training.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/test_lr_ranking.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/preparation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/training.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/test_nested_selection_audit.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/model_registry.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/preparation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/training.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/test_pnl_trace.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/test_short_lr_ranking.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/preparation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/training.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/validate_get_validation_state.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/preparation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/training.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scratch/validation_new.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/build_audit_pack.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/build_universe_top_adv.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/market_data.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/check_data_quality_lineage.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/data_governance.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/check_dual_model_health.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/feature_builder.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/check_risk_limits.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/risk/hard_limits.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/check_tca_health.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/tca_health.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/check_wrds_data_integrity.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_loader.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_universe.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/compare_learned_models.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/debug_daily_signals.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/backtester.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/config.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/signals.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/config.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/default_universe.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/diagnose_tickers.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/__init__.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/weight_model.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/config.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/signals.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/config.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/default_universe.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/market_data.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/export_crsp_to_cache.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_loader.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_universe.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/fetch_fills.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/brokers/alpaca_broker.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/live_trades.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/governance_daily_summary.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/promote_model.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/pull_crsp_history.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_loader.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_universe.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/rebuild_wrds_cache.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/wrds_fundamental_builder.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_loader.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_universe.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/reconcile_model_governance.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/reconcile_positions.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/brokers/alpaca_broker.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/refresh_adv_cache.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/adv_cache.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/rollback_model.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/run_phase2_ablation.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/feature_flags.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/run_rollout_guard.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/trading_control.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/run_shadow_comparison.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/feature_builder.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/run_shadow_monitor.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/feature_builder.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/run_split_validation.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/slo_health_check.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/train_short_weights.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/engine.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/validate_backtest.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/backtester.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/config.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/config.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/default_universe.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/validate_industry_standards.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/validate_model.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/feature_builder.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/validate_short_walkforward.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/validate_wrds_migration.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/feature_pipeline.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_loader.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_universe.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/simulation/__init__.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/simulation/gbm.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/simulation/monte_carlo_portfolio.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/simulation/gbm.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/simulation/monte_carlo_portfolio.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/test_ranker_opt.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/conftest.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/regression_robustness.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/shim_run.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_adv_cache_unit.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/adv_cache.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_analytics_walk_forward.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/analytics.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_backtester_integration_pipeline.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/backtester.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/config.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_check_dual_model_health.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/check_dual_model_health.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_check_tca_health.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_data_contracts.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/data_governance.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_data_quality_lineage.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/check_data_quality_lineage.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/data_governance.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_drawdown_overlay.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/risk/drawdown_overlay.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_ensemble_scoring.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/ensemble_scoring.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_entrypoint_boundaries.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_execution_engine_directional_budgets.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/brokers/execution_engine.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_execution_kill_switch.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/brokers/execution_engine.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_extracted_helpers.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/analytics.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/config.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/regime_multipliers.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/result.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_feature_builder_wrds.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/__init__.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/feature_builder.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/wrds_panel_engine.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_golden_smoke.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_governance_daily_summary.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/governance_daily_summary.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_governance_daily_summary_phase10.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/governance_daily_summary.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_hard_limits.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/risk/hard_limits.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_import_boundaries.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_live_trades.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/live_trades.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_live_var_preflight.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_live_trading.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_metrics.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/config.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/metrics.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_model_selection_alpha_research.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/alpha_research.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/training.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_model_selection_data_config.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_model_selection_economic_objectives.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/economic_objectives.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/training.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_model_selection_factor_subsumption.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/factor_subsumption.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_model_selection_metric_taxonomy.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_model_selection_nested_search.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/research_state.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_model_selection_parallel_config.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/configuration.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/model_registry.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_model_selection_preparation.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/preparation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/training.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_model_selection_research_contract.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/research_contract.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_model_selection_research_state.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/research_state.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_model_selection_residualization.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/residualization.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_model_selection_split_phase2.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_model_selection_training.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/training.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_model_selection_validation.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/__init__.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_nan_propagation.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_oos_windows.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_retrain_baseline.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_optimizer_constraints.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/optimizer.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_overlay_validation.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/quant_utils.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_polarity_institutional.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/alpha_research.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/training.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_portfolio_construction.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_position_sizing.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/position_sizing.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_position_sizing_multiplicative.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/position_sizing.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_promote_model_commit_gate.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/promote_model.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_promote_model_object_store.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/promote_model.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_promote_model_readiness.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/promote_model.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_reconcile_model_governance_integration.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/governance_daily_summary.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/reconcile_model_governance.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/rollback_model.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/run_shadow_monitor.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_regime_exposure.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_regime_multipliers.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_regime_wrds.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/regime.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_robustness_parity.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_robustness_schema.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_rollback_model.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/rollback_model.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_run_context.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/run_context.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_run_daily_pipeline_strict_preflight.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_daily_pipeline.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_run_daily_signals_split_phase3.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_daily_signals.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_run_ops_suite_governance.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_ops_suite.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_run_rollout_guard.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/run_rollout_guard.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_run_shadow_comparison.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/run_shadow_comparison.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_run_split_validation.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/run_split_validation.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_safety_controls.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/brokers/execution_engine.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_shorts.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/config.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/portfolio.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_signal_generation.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/signals.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_slo_health_check.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/scripts/slo_health_check.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_split_model_labels.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/feature_builder.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_tca_health.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/tca_health.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_trading_control.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/trading_control.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_universe_selector.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_universe_wrds_context.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/universe.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_validation_telemetry.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/__init__.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_vol_kill_switch.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/quant_utils.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_vol_sizing.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/quant_utils.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_weight_learning.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/agents/weight_learning_agent/weight_model.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_wrds_data_integrity.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/providers/cache_manager.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/providers/wrds_adapter.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_loader.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_universe.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/test_wrds_fundamental_deterioration.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/features/wrds_fundamental_builder.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/verify_ranker_opt.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tests/verify_vectorization.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tools/audit_unused_files.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tools/capacity_analyzer.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/configuration.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/model_registry.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/preparation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tools/confidence_researcher.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/configuration.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/model_registry.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/preparation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tools/cost_analyzer.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/configuration.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/model_registry.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/preparation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tools/deployability_ranker.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tools/horizon_optimizer.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/configuration.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/model_registry.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/preparation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tools/joint_optimizer.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/configuration.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/model_registry.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/preparation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tools/leg_researcher.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/configuration.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/model_registry.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/preparation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tools/marginal_value_analyzer.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/configuration.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/model_registry.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/preparation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tools/plot_parameter_sweep.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tools/position_sizing_stress.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/position_sizing.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tools/regime_exposure_validation.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/regime_exposure.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tools/regime_researcher.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/configuration.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/model_registry.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/preparation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/model_selection/validation.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tools/run_parameter_sweep_grid.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tools/select_sweep_configs.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tools/viability_analyzer.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/tools/vol_targeting_simulation.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/quant_utils.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/adv_cache.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/market_data.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/artifacts.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/hashes.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/data_governance.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/default_universe.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/ensemble_scoring.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/run_model_selection.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/feature_audit.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/hashes.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/live_trades.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/market_data.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/providers/cache_manager.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/providers/wrds_adapter.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/providers/yahoo_adapter.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/quant_utils.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/market_data.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/run_context.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/signal_threshold.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/tca_health.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/trading_control.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/universe.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_universe.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_data.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_loader.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_universe.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_loader.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_prefetch.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_data.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_loader.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_universe.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/wrds_universe.py": [],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/verify_lean_parity.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/utils/market_data.py"
+    ],
+    "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/verify_qc_parity.py": [
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/backtesting/signals.py",
+      "/Users/sarmad/Desktop/Quant-project/trend_signal_engine/qc_alpha_model.py"
+    ]
+  }
+}

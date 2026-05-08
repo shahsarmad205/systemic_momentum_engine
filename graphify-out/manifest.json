@@ -1,3 +1,22 @@
 {
-  "../Research-paper/Portfolio/research-exploring-techniques-in-multi-factor-index-construction.pdf": 1776196157.787858
+  "model_selection/configuration.py": 1777149924.9795148,
+  "model_selection/objective_comparison.py": 1777170113.2358081,
+  "model_selection/meta_labeling.py": 1777211769.310074,
+  "model_selection/residualization.py": 1776993917.4126563,
+  "model_selection/__init__.py": 1776887212.7452478,
+  "model_selection/alpha_research.py": 1777045149.4079838,
+  "model_selection/regime_conditioning.py": 1777170831.1139407,
+  "model_selection/target_construction.py": 1777169405.9945676,
+  "model_selection/ensemble_weighting.py": 1777210883.991466,
+  "model_selection/statistics.py": 1777136667.1535194,
+  "model_selection/research_diagnostics.py": 1777155444.2792027,
+  "model_selection/feature_redundancy.py": 1777210524.1206717,
+  "model_selection/research_contract.py": 1777169420.1561146,
+  "model_selection/model_registry.py": 1777169978.520173,
+  "model_selection/economic_objectives.py": 1776949316.8040762,
+  "model_selection/training.py": 1777170226.3875427,
+  "model_selection/research_state.py": 1777079162.1366532,
+  "model_selection/factor_subsumption.py": 1777133621.269007,
+  "model_selection/preparation.py": 1777043185.337962,
+  "model_selection/validation.py": 1777150511.927929
 }

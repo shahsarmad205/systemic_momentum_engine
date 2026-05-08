@@ -119,6 +119,7 @@ class TestGovernanceDailySummaryPhase10Integration:
 
         latest = tmp_path / "output" / "live" / "governance" / "governance_daily_summary_latest.json"
         payload = json.loads(latest.read_text(encoding="utf-8"))
+        assert "overall_status" in payload
         # If Phase 10 is integrated, summary should reflect the failure
         # For now, this test ensures we handle Phase 10 without crashing
 
@@ -143,6 +144,7 @@ class TestGovernanceDailySummaryPhase10Integration:
 
         latest = tmp_path / "output" / "live" / "governance" / "governance_daily_summary_latest.json"
         payload = json.loads(latest.read_text(encoding="utf-8"))
+        assert "overall_status" in payload
         # Summary should reflect stale Phase 10 if integrated
 
 
@@ -169,6 +171,7 @@ class TestPhase10SummaryExitCodes:
         _seed_data_quality_report(tmp_path, status="FAIL")
 
         rc = _run(monkeypatch, tmp_path, "--strict")
+        assert rc in {0, 2}
         # Should exit non-zero if Phase 10 is integrated and fails
         # For now, testing that strict mode works
 
@@ -183,6 +186,7 @@ class TestPhase10SummaryExitCodes:
 
         latest = tmp_path / "output" / "live" / "governance" / "governance_daily_summary_latest.json"
         payload = json.loads(latest.read_text(encoding="utf-8"))
+        assert "overall_status" in payload
         # If Phase 10 wiring is complete, path should be in gates
 
 

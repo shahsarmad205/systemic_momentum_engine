@@ -10,12 +10,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from backtesting.backtester import Backtester
 from backtesting.config import load_config
 from config import get_effective_tickers
-from main import TICKERS
+from utils.default_universe import DEFAULT_TICKERS
 
 
 def main():
     cfg = load_config("backtest_config.yaml")
-    tickers = get_effective_tickers(cfg.tickers or [], list(TICKERS))
+    tickers = get_effective_tickers(cfg.tickers or [], list(DEFAULT_TICKERS))
     bt = Backtester(cfg)
     result = bt.run(tickers)
     trades = result.trades

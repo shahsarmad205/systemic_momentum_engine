@@ -6,8 +6,9 @@ Runs a ordered sequence with unified logging:
 
 1. **Preflight** — config paths, learned weights presence, optional Alpaca auth probe.
 2. **Daily pipeline** — delegates to ``run_daily_pipeline.py`` (OHLCV / features, retrain, live).
-3. **Governance summary** — delegates to ``scripts/governance_daily_summary.py --strict``.
-4. **Performance tracker** — delegates to ``run_performance_tracker.py`` (IC, dashboards, alerts).
+3. **WRDS integrity** — validates PIT universe and CRSP delisting metadata.
+4. **Governance summary** — delegates to ``scripts/governance_daily_summary.py --strict``.
+5. **Performance tracker** — delegates to ``run_performance_tracker.py`` (IC, dashboards, alerts).
 
 **Safety:** By default this passes ``--dry-run`` to the daily pipeline (no broker orders).
 Use ``--execute`` only when you intend to place orders.
@@ -208,6 +209,7 @@ def main() -> None:
     )
     parser.add_argument("--skip-preflight", action="store_true")
     parser.add_argument("--skip-pipeline", action="store_true")
+    parser.add_argument("--skip-data-integrity", action="store_true")
     parser.add_argument("--skip-tracker", action="store_true")
     parser.add_argument(
         "--strict-governance",
@@ -283,6 +285,21 @@ def main() -> None:
                 pipeline_ran = True
             else:
                 _emit(logf, "pipeline skipped")
+
+            if ns.strict_governance and not ns.skip_data_integrity:
+                icmd = [
+                    sys.executable,
+                    str(_ROOT / "scripts" / "check_wrds_data_integrity.py"),
+                    "--config",
+                    ns.config,
+                    "--strict",
+                ]
+                irc = _run_subprocess(icmd, logf=logf, label="wrds_data_integrity")
+                if irc != 0:
+                    _emit(logf, "ops_suite ABORT (wrds_data_integrity)")
+                    sys.exit(irc)
+            else:
+                _emit(logf, "WRDS data integrity skipped")
 
             if ns.strict_governance and pipeline_ran:
                 gcmd = [

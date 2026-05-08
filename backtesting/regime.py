@@ -54,10 +54,12 @@ References:
 import logging
 import warnings
 from collections import Counter
-from typing import Optional
 
 import numpy as np
 import pandas as pd
+from typing import Optional
+from utils.market_data import get_ohlcv
+from utils.wrds_data import load_wrds_price_panel, resolve_data_provider
 
 logger = logging.getLogger(__name__)
 
@@ -78,12 +80,28 @@ class MarketRegimeAgent:
     # Gap between fitting window end and production window start (look-ahead buffer)
     HMM_LABEL_BUFFER_DAYS = 252    # 1 year
 
-    def __init__(self):
+    def __init__(
+        self,
+        data_provider: Optional[str] = None,
+        cache_dir: Optional[str] = None,
+        cache_ttl_days: int = 1,
+        wrds_username: Optional[str] = None,
+        wrds_ticker_to_permno: Optional[dict[str, int]] = None,
+    ):
         self._hmm_model = None          # fitted GaussianHMM instance
         self._hmm_state_map = None      # {hmm_state_int: regime_label}
         self._hmm_fit_end_date = None   # last date used in fitting window
         # Probability output: date → {regime: probability}
         self._regime_probs: dict[pd.Timestamp, dict[str, float]] = {}
+        self._data_provider = resolve_data_provider(data_provider)
+        self._cache_dir = cache_dir
+        self._cache_ttl_days = int(cache_ttl_days)
+        self._wrds_username = wrds_username
+        self._wrds_ticker_to_permno = {
+            str(t).upper(): int(p)
+            for t, p in (wrds_ticker_to_permno or {}).items()
+            if t is not None and p is not None
+        }
 
     # ------------------------------------------------------------------ #
     #  Public interface                                                    #
@@ -293,7 +311,6 @@ class MarketRegimeAgent:
         self._hmm_model = model
         self._hmm_state_map = state_map
         scaler = getattr(model, "_feature_scaler", None)
-        last_refit_idx = 0
 
         for i, date in enumerate(prod_dates):
             # Periodic re-estimation on expanding window
@@ -575,7 +592,7 @@ class MarketRegimeAgent:
     @staticmethod
     def _load_from_cache(ticker: str, cache_ticker: str, start, end) -> pd.DataFrame:
         """
-        Try to load OHLCV from local parquet cache before hitting yfinance.
+        Try to load OHLCV from local parquet cache before using the configured provider.
         """
         from pathlib import Path
 
@@ -601,73 +618,79 @@ class MarketRegimeAgent:
                     return df
                 logger.warning("Cache file for %s exists but is empty after filtering.", cache_ticker)
             except Exception as exc:
-                logger.warning("Failed to load %s from cache (%s). Falling back to yfinance.", cache_ticker, exc)
+                logger.warning("Failed to load %s from cache (%s). Using configured provider.", cache_ticker, exc)
         return pd.DataFrame()
 
-    @staticmethod
-    def _download(ticker: str, start, end) -> pd.DataFrame:
-        # 1. Try local parquet cache first
+    def _download(self, ticker: str, start, end) -> pd.DataFrame:
+        if self._data_provider == "wrds":
+            panel = load_wrds_price_panel(
+                [str(ticker).upper()],
+                start_date=start,
+                end_date=end,
+                username=self._wrds_username,
+                cache_dir=self._cache_dir or "data/cache/wrds",
+                cache_ttl_days=self._cache_ttl_days,
+                ticker_to_permno=self._wrds_ticker_to_permno,
+                as_of_date=end,
+            )
+            return panel.get(str(ticker).upper(), pd.DataFrame())
+
         cached = MarketRegimeAgent._load_from_cache(ticker, ticker, start, end)
         if not cached.empty:
             return cached
 
-        # 2. Fall back to yfinance
-        import yfinance as yf
-
-        logger.info("regime._download: %s not in cache — downloading from yfinance.", ticker)
         try:
-            raw = yf.download(ticker, start=start, end=end, progress=False)
-            if isinstance(raw.columns, pd.MultiIndex):
-                raw.columns = raw.columns.get_level_values(0)
-            keep = ["Open", "High", "Low", "Close", "Volume"]
-            result = raw[keep].dropna() if not raw.empty else pd.DataFrame()
-            if result.empty:
-                logger.warning(
-                    "regime._download: yfinance returned empty DataFrame for %s. "
-                    "Regime will default to Sideways for all dates.",
-                    ticker,
-                )
-            return result
+            raw = get_ohlcv(
+                ticker,
+                pd.Timestamp(start).strftime("%Y-%m-%d"),
+                pd.Timestamp(end).strftime("%Y-%m-%d"),
+                provider=self._data_provider,
+                use_cache=True,
+                cache_dir=self._cache_dir,
+                cache_ttl_days=self._cache_ttl_days,
+            )
+            if raw is None or raw.empty:
+                return pd.DataFrame()
+            keep = [c for c in ["Open", "High", "Low", "Close", "Volume"] if c in raw.columns]
+            return raw[keep].dropna(subset=["Close"])
         except Exception as exc:
-            logger.warning("regime._download: yfinance failed for %s (%s).", ticker, exc)
+            logger.warning("regime._download failed for %s (%s).", ticker, exc)
             return pd.DataFrame()
 
-    @staticmethod
-    def _download_vix(start, end, spy_fallback: pd.DataFrame) -> dict:
-        """Try local _VIX cache → yfinance ^VIX → SPY vol proxy (in that order)."""
-        cached = MarketRegimeAgent._load_from_cache("^VIX", "_VIX", start, end)
-        if not cached.empty and "Close" in cached.columns:
-            series = cached["Close"]
-            if hasattr(series, "squeeze"):
-                series = series.squeeze()
-            vix_dict = series.to_dict()
-            if vix_dict:
-                logger.info("VIX loaded from local cache: %d days", len(vix_dict))
-                return vix_dict
-
-        try:
-            import yfinance as yf
-            raw = yf.download("^VIX", start=start, end=end, progress=False)
-            if isinstance(raw.columns, pd.MultiIndex):
-                raw.columns = raw.columns.get_level_values(0)
-            raw.columns = [c.capitalize() if isinstance(c, str) else c for c in raw.columns]
-            if not raw.empty and "Close" in raw.columns:
-                series = raw["Close"]
+    def _download_vix(self, start, end, spy_fallback: pd.DataFrame) -> dict:
+        """Use direct VIX data when available; otherwise derive a stress proxy from SPY."""
+        if self._data_provider != "wrds":
+            cached = MarketRegimeAgent._load_from_cache("^VIX", "_VIX", start, end)
+            if not cached.empty and "Close" in cached.columns:
+                series = cached["Close"]
                 if hasattr(series, "squeeze"):
                     series = series.squeeze()
                 vix_dict = series.to_dict()
                 if vix_dict:
-                    logger.info("VIX downloaded from yfinance: %d days", len(vix_dict))
+                    logger.info("VIX loaded from local cache: %d days", len(vix_dict))
                     return vix_dict
-        except Exception as exc:
-            logger.warning("VIX yfinance download failed (%s).", exc)
+
+            try:
+                raw = get_ohlcv(
+                    "^VIX",
+                    pd.Timestamp(start).strftime("%Y-%m-%d"),
+                    pd.Timestamp(end).strftime("%Y-%m-%d"),
+                    provider=self._data_provider,
+                    use_cache=True,
+                    cache_dir=self._cache_dir,
+                    cache_ttl_days=self._cache_ttl_days,
+                )
+                if raw is not None and not raw.empty and "Close" in raw.columns:
+                    return pd.to_numeric(raw["Close"], errors="coerce").dropna().to_dict()
+            except Exception as exc:
+                logger.warning("VIX direct download failed (%s).", exc)
 
         logger.warning(
-            "⚠ Using SPY realized-vol proxy for VIX — regime classification may be less accurate."
+            "Using SPY realized-vol proxy for VIX in %s mode.", self._data_provider
         )
         if spy_fallback.empty:
             return {}
 
-        returns = spy_fallback["Close"].pct_change()
+        returns = pd.to_numeric(spy_fallback["Close"], errors="coerce").pct_change()
         vol_proxy = returns.rolling(20).std() * np.sqrt(252) * 100 * 1.2
         return vol_proxy.to_dict()

@@ -48,8 +48,8 @@ def compute_capm_features(
     pd.DataFrame
         Index aligned to stock_returns. Columns: capm_alpha, capm_beta, capm_residual_vol.
     """
-    # Align SPY to stock index (forward-fill then dropna so we only have common dates)
-    spy_aligned = spy_returns.reindex(stock_returns.index).ffill().bfill().fillna(0.0)
+    # Align SPY causally. Never back-fill market returns into earlier dates.
+    spy_aligned = spy_returns.reindex(stock_returns.index).ffill().fillna(0.0)
     stock = stock_returns.astype(float).fillna(0.0)
 
     n = len(stock)

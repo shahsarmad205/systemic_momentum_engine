@@ -20,7 +20,7 @@ data:
   cache_dir: data/cache
   cache_ohlcv: true
   cache_ttl_days: 0
-  provider: yahoo
+  provider: wrds
 execution:
   commission_per_trade: 1.0
   enable_shorts: false

@@ -1,6 +1,12 @@
 """
-Trend Signal Engine — Multi-Agent Batch Runner (v5)
-=====================================================
+Trend Signal Engine — Legacy Batch Runner
+=========================================
+
+This file is retained as a compatibility launcher for older research scripts.
+It is not the authoritative production entry point. Institutional workflows
+should use ``run_backtest.py``, ``run_model_selection.py``,
+``run_daily_pipeline.py``, or ``LeanCloud/BinaryEdge/`` depending on mandate.
+
 Runs two agents across 50 stock tickers:
 
     1. Trend Agent      → trend score, probability, raw signal
@@ -30,6 +36,7 @@ import os
 
 import numpy as np
 import pandas as pd
+from utils.default_universe import DEFAULT_TICKERS
 
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
 import matplotlib
@@ -40,29 +47,10 @@ import matplotlib.pyplot as plt
 
 
 # ---------------------------------------------------------------------------
-# 1. Ticker universe — 50 stocks across sectors
+# 1. Ticker universe — legacy default 50-name panel
 # ---------------------------------------------------------------------------
 
-TICKERS = [
-    # Technology
-    "AAPL", "NVDA", "TSLA", "META", "AMZN", "MSFT", "GOOG", "AVGO",
-    "ADBE", "CRM", "AMD", "INTC", "ORCL", "CSCO", "IBM",
-
-    # Broad-market & Thematic ETFs
-    "SPY", "QQQ", "IWM", "ARKK", "DIA", "XLK", "VTI",
-
-    # Finance
-    "JPM", "BAC", "GS", "MS", "C", "WFC", "BLK", "SCHW",
-
-    # Healthcare
-    "JNJ", "UNH", "PFE", "ABBV", "MRK", "LLY", "TMO", "ABT",
-
-    # Consumer Staples & Discretionary
-    "KO", "PG", "PEP", "COST", "WMT", "MCD", "NKE", "SBUX",
-
-    # Energy & Industrials
-    "XOM", "CVX", "CAT", "GE",
-]
+TICKERS = list(DEFAULT_TICKERS)
 
 assert len(TICKERS) == 50, f"Expected 50 tickers, got {len(TICKERS)}"
 

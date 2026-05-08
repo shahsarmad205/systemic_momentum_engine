@@ -1,298 +1,155 @@
 # Trend Signal Engine
 
-A production-grade quantitative research and live-trading system for systematic momentum signal generation, ML ensemble scoring, portfolio optimization, and QuantConnect deployment.
+Production-oriented quantitative research and trading stack for point-in-time equity universe construction, momentum and ML alpha scoring, portfolio optimization, risk overlays, execution checks, and QuantConnect deployment.
 
----
+This repository is currently organized as a research-to-production platform, not a single notebook strategy. The important distinction is that alpha research, beta-sensitive deployment views, backtest simulation, and live execution governance are separate stages with different failure modes.
 
-## Current Production Baseline
+## System Flow
 
-**Phase D — All-Time Best (April 2026)**
-
-| Metric | Value |
-|--------|-------|
-| **Sharpe Ratio** | **1.078** |
-| Net Sharpe (HAC-Adjusted) | 0.841 |
-| Sortino Ratio | 0.607 |
-| **CAGR** | **6.74%** |
-| **Max Drawdown** | **-15.14%** |
-| Total Return | +166.13% |
-| Win Rate (held-to-expiry) | **60.7%** |
-| Avg Expiry Return | +2.28% |
-| Trades | 2,399 |
-| Trades per Year | 160 |
-| T-statistic (Lo 2002) | 38.18 (p < 0.001) |
-| Probabilistic Sharpe | 100% |
-| Backtest Period | 2008–2022 (15 years) |
-| Universe | S&P 500 (~493 tickers) |
-
-**Year-by-Year Win Rates:**
-2008: 47.5% | 2009: 66.5% | 2010: 66.7% | 2011: 50.8% | 2012: 58.6% | 2013: 69.7% | 2014: 61.9% | 2015: 43.0% | 2016: 67.3% | 2017: 61.1% | 2018: 52.7% | 2019: 59.0% | 2020: 72.6% | 2021: 61.5% | 2022: 73.1%
-
-**Regime breakdown:**
-
-| Regime | Win Rate | Sample |
-|--------|----------|--------|
-| Bull | 60.6% | n=1,663 |
-| Bear | 70.0% | n=10 |
-| Sideways | 62.3% | n=138 |
-| Crisis | 59.8% | n=239 |
-
----
-
-## Quick Start
-
-```bash
-# Install dependencies
-pip install -r requirements.txt
-
-# Run full backtest (2008–2022, S&P 500 universe)
-python run_backtest.py
-
-# Run walk-forward OOS validation
-python run_backtest.py --walk-forward
-
-# Run ML model selection (trains VotingRegressor ensemble)
-python run_model_selection.py
-
-# Run ML model selection with risk-adjusted target (C3)
-python run_model_selection.py --risk-adj-target
-
-# Run ML model selection + regime-specific models (C2)
-python run_model_selection.py --regime-models
-
-# Auto-retrain (respects signal_mode from config — ml or learned)
-python run_auto_retrain.py
+```text
+WRDS / cached market data
+  -> point-in-time universe and delisting-aware price panels
+  -> feature matrix and cross-sectional normalization
+  -> ML / multi-alpha signal generation
+  -> factor neutralization and liquidity-aware portfolio construction
+  -> drawdown, VaR, hard-limit, and TCA gates
+  -> backtest reports, live paper execution, or QuantConnect deployment
 ```
 
----
+## Main Entry Points
+
+Authoritative paths are separated by mandate:
+- Research selection: `run_model_selection.py`
+- Historical portfolio simulation: `run_backtest.py`
+- Daily live/paper orchestration: `run_daily_pipeline.py`
+- QuantConnect deployment package: `LeanCloud/BinaryEdge/`
+
+Compatibility-only facades:
+- `main.py` is a legacy batch runner and default-universe holder for older scripts.
+- Root `qc_main.py` and `qc_alpha_model.py` now re-export the LEAN package and are not deployment sources of truth.
+
+| Command | Purpose |
+| --- | --- |
+| `python run_backtest.py` | Run the local historical backtest from `backtest_config.yaml`. |
+| `python run_backtest.py --walk-forward` | Run walk-forward backtest validation. |
+| `python run_model_selection.py` | Run ML walk-forward model selection. Default selection uses formal `oos_deflated_sharpe`. |
+| `python run_model_selection.py --run_sim_test` | Fast self-test for portfolio simulation semantics. |
+| `python run_daily_signals.py` | Generate daily signal snapshots. |
+| `python run_live_trading.py` | Dry-run broker target generation and preflight checks. |
+| `python run_live_trading.py --execute` | Submit paper/live orders after governance gates pass. |
+| `python run_daily_pipeline.py --strict-preflight` | Operational pipeline with strict governance preflight. |
+| `python run_ops_suite.py` | End-to-end daily ops suite with governance summary. |
 
 ## Architecture
 
-### Signal Pipeline
+| Area | Key paths | Role |
+| --- | --- | --- |
+| Configuration | `backtest_config.yaml`, `backtesting/config.py`, `config.py` | YAML parsing, defaults, dev-mode controls, universe and risk settings. |
+| Universe and data | `utils/wrds_universe.py`, `utils/wrds_data.py`, `utils/wrds_loader.py`, `utils/market_data.py`, `utils/universe.py` | WRDS point-in-time universe, CRSP delisting-aware prices, cache management, legacy provider fallback. |
+| Feature generation | `agents/weight_learning_agent/feature_builder.py`, `features/cross_sectional.py`, `features/feature_pipeline.py`, `features/wrds_fundamental_builder.py` | Technical, sector-relative, panel-normalization, liquidity, and fundamental features used by research and live scoring. |
+| Signal generation | `backtesting/signals.py`, `backtesting/multi_alpha.py`, `utils/ensemble_scoring.py` | Learned weights, ML model scoring, short-model scoring, and multi-alpha combination. |
+| Portfolio construction | `backtesting/optimizer.py`, `backtesting/risk_model.py`, `backtesting/cross_sectional.py`, `backtesting/position_sizing.py`, `backtesting/trade_scheduler.py` | Rank selection, continuous optimization, factor constraints, liquidity caps, sizing, and rebalance scheduling. |
+| Backtesting | `backtesting/backtester.py`, `backtest/engine.py`, `backtesting/analytics.py`, `backtesting/metrics.py` | Historical simulation, mark-to-market analytics, trade logs, walk-forward reports, and plots. |
+| Risk overlays | `risk/drawdown_overlay.py`, `risk/hard_limits.py`, `risk/var.py`, `backtesting/regime.py` | Unified drawdown scaling, exposure limits, VaR checks, regime detection, and crisis controls. |
+| Execution and governance | `brokers/execution_engine.py`, `brokers/alpaca_broker.py`, `scripts/check_risk_limits.py`, `scripts/check_tca_health.py`, `scripts/run_shadow_monitor.py` | Target-to-order translation, broker reconciliation, hard-limit gates, TCA health, and model drift checks. |
+| Deployment | `LeanCloud/BinaryEdge/`, `verify_qc_parity.py`, `verify_lean_parity.py` | QuantConnect/LEAN algorithm package and local parity checks. Root QC files are compatibility facades only. |
+| Research utilities | `analysis/`, `research/`, `scripts/validate_*` | IC analysis, ablations, robustness checks, calibration, and operational diagnostics. |
+| Tests | `tests/` | Unit and integration tests for model selection, risk gates, WRDS context, execution controls, and signal generation. |
 
+## Model Selection Semantics
+
+The model-selection control plane is being decomposed into dedicated modules:
+- `model_selection/configuration.py` for YAML-to-runtime config translation
+- `model_selection/model_registry.py` for model families and prefit ensembles
+- `model_selection/statistics.py` for formal model-ranking metrics
+- `run_model_selection.py` as orchestration only
+
+This split is intentional: institutional research governance should not live in one giant script.
+
+`run_model_selection.py` now separates research and deployment views:
+
+| Path | Use | Construction |
+| --- | --- | --- |
+| `long_short_spread` | Alpha research and long-model ranking | Long top-ranked names and short bottom-ranked names. |
+| `long_only_overlay` | Beta-sensitive deployment diagnostics | Long top-ranked names only. Reported separately as `overlay_oos_*`. |
+| `short_side` | Dedicated short-model validation | Short bottom-ranked names with PnL sign-flipped. |
+
+Selection is rank-based rather than `score > 0` gated. Chained OOS metrics use the same portfolio rules as per-window runs, and forward returns are horizon-normalized before daily performance metrics are computed.
+
+## Data Notes
+
+- The institutional research path should use WRDS point-in-time universe membership and CRSP delisting-aware returns.
+- `universe.mode: "wrds"` in `backtest_config.yaml` controls point-in-time universe construction.
+- `data/cache/` and `data/cache/wrds/` are generated caches, not source code.
+- Yahoo/yfinance remains present as a legacy or fallback provider in parts of the codebase. For production-grade research, prefer WRDS and treat Yahoo-derived results as non-authoritative.
+
+Required WRDS environment:
+
+```bash
+export WRDS_USERNAME=<your_wrds_username>
 ```
-Market Data (Yahoo/Tiingo)
-    ↓
-Feature Builder (agents/weight_learning_agent/feature_builder.py)
-    23 features: momentum, volatility, CAPM, value, quality
-    + forward_return_risk_adj (C3)
-    ↓
-Cross-Sectional Z-Score Panel (Pillar 29 / A1)
-    Joint panel normalization — matches training distribution exactly
-    ↓
-ML Ensemble Scorer (utils/ensemble_scoring.py)
-    VotingRegressor: XGBRegressor + LGBMRanker + Ridge
-    + C2 Regime Routing: Bear → xgb_regime_bear.pkl
-                         Crisis/HighVol → xgb_regime_highvol.pkl
-    ↓
-Signal Engine (backtesting/signals.py)
-    Adjusted score + short_score_raw (dedicated short model)
-    ↓
-Cross-Sectional Ranking (backtesting/cross_sectional.py)
-    Top-N longs by adjusted_score
-    Shorts ranked by short_score_raw (dedicated short model — A2)
-    ↓
-Backtester (backtesting/backtester.py)
-    Regime-aware sizing, factor neutralization, dynamic holding
-```
-
-### Regime Detection (backtesting/regime.py)
-
-- **Hard labels**: Bull / Bear / Crisis / Sideways (SPY SMA-50/200 + VIX ≥ 30)
-- **Continuous score** (D1): sigmoid on VIX + SMA gap → [0=Bull, 1=Crisis]
-- Linear gross exposure interpolation: 100% in Bull → 25% in Crisis (no cliff edges)
-- Confirmation window: 1-day (configurable hysteresis)
-
-### Risk Controls
-
-| Control | Mechanism |
-|---------|-----------|
-| D1 Continuous Regime Score | Linear gross cap interpolation vs hard label switches |
-| D3 Sharpe Circuit Breaker | 60d rolling Sharpe < 0.0 → halve gross cap; recover at > 0.3 |
-| Factor Neutralization (B1) | Market beta, sector, size neutralization per rebalance day |
-| Bear Regime | Liquidate longs on entry, no new longs, 7-day max hold |
-| Crisis Regime | Accelerated exit for losers, selective entries top-15% score only |
-| Dynamic Holding (B2) | Hold longer for high-conviction signals, exit earlier for weak |
-| Short Stop-Loss | 5% adverse move cap on all short positions |
-
----
-
-## ML Model
-
-### Production Ensemble (`output/models/best_long_model.pkl`)
-
-- **Type**: `VotingRegressor` (sklearn)
-- **Members**: XGBRegressor (60% weight) + LGBMRankerWrapper (cross-sectional lambdarank) + Ridge (40% weight)
-- **Target**: `forward_return` over 10-day horizon (or `forward_return_risk_adj` with `--risk-adj-target`)
-- **Features** (23):
-
-```
-vol_expansion, f_trend, short_term_reversal, ret_20d, ret_1d,
-vol_ratio_5_20, nearness_52w_low, sector_relative_60d,
-nearness_52w_high, cs_momentum_percentile,
-dist_from_52w_high, low_vol_score, momentum_acceleration,
-ret_5d, capm_residual_vol, down_up_vol_ratio, rsi_14,
-capm_alpha, ret_10d, sector_relative_20d, rsi_overbought,
-rolling_vol_20, quality_score
-```
-
-### Regime-Conditional Models (C2)
-
-| Model | Regime | Architecture |
-|-------|--------|--------------|
-| `xgb_regime_bear.pkl` | Bear | XGBClassifier |
-| `xgb_regime_highvol.pkl` | Crisis / HighVol | XGBClassifier |
-| `best_long_model.pkl` | Bull / Sideways / Normal | VotingRegressor |
-
-Routing only activates for Bear/Crisis/HighVol. Bull (82% of days) always uses the superior general ensemble.
-
-### Short Model (`output/models/best_short_model.pkl`)
-
-Dedicated short candidate scorer. Output (`short_score_raw`) is stored per ticker in the signal DataFrame and consumed by `cross_sectional.py` to rank short candidates independently from the long score.
-
----
-
-## Key Implementation Details
-
-### A1 — Training/Inference Feature Parity
-Training uses cross-sectional z-scores across the daily panel (`_apply_cross_sectional_zscore_columns`). Inference now applies the same transformation via `Pillar 29` joint-panel vectorization in `backtester.py:844–888` before calling `generate_signals`.
-
-### A2 — Short Model Wiring
-`cross_sectional.py` checks for non-zero `short_score_raw` values in the signal DataFrame. If present, shorts are ranked by the dedicated short model score rather than the bottom of the long-rank list.
-
-### B3 — Walk-Forward Ensemble
-`run_auto_retrain.py` respects `signal_mode` from config. In `ml` mode it runs OOS evaluation without overwriting model files. In `learned` mode it applies exponential time-decay blending (λ=0.7) across walk-forward windows.
-
-### C3 — Risk-Adjusted Target
-`forward_return_risk_adj = forward_return / (vol_20d × √holding_period)` — rewards high-return, low-volatility stocks. Enabled via `python run_model_selection.py --risk-adj-target`.
-
----
 
 ## Configuration
 
-Key settings in `backtest_config.yaml`:
+Most behavior is controlled in `backtest_config.yaml`:
 
-```yaml
-signals:
-  mode: ml
-  ml_long_model_path: output/models/best_long_model.pkl
-  ml_short_model_path: output/models/best_short_model.pkl
-  ml_regime_models_dir: output/models   # C2: regime routing
+- `backtest.use_continuous_optimization`: enables the continuous optimizer path.
+- `backtest.factor_model`: market, sector, size, and momentum exposure constraints.
+- `backtest.liquidity`: ADV-based universe and position constraints.
+- `risk.drawdown_overlay`: shared drawdown scaling policy.
+- `risk.var_check`: live/backtest VaR preflight behavior.
+- `signals.mode`: signal source, usually `ml` for model artifacts.
+- `signals.ml_long_model_path` and `signals.ml_short_model_path`: production model artifacts.
+- `model_selection`: walk-forward horizon, position counts, and ensemble selection settings.
 
-regime:
-  confirmation_days: 1
-  continuous_score_enabled: true        # D1: linear gross cap
-  score_bull_gross_cap: 1.0
-  score_crisis_gross_cap: 0.25
+## Outputs and Artifacts
 
-risk:
-  max_drawdown_pct: 0.20                # hard circuit breaker
-  sharpe_circuit_breaker:               # D3: rolling Sharpe CB
-    enabled: true
-    window_days: 60
-    threshold: 0.0
-    recovery_threshold: 0.3
-    exposure_scale: 0.5
+| Path | Contents |
+| --- | --- |
+| `output/backtests/` | Latest backtest equity, trades, plots, and summary. |
+| `output/models/` | Model comparison reports, selected model artifacts, manifests, and promotion state. |
+| `output/live/` | Live signal, target, risk gate, TCA, and execution logs. |
+| `output/experiments/` | Timestamped research run snapshots. |
+| `data/cache/` | Provider price caches and WRDS extracts. |
+| `graphify-out/` | Local code knowledge graph. Regenerate after code edits when required by `AGENTS.md`. |
+
+Generated artifacts can become large. Do not commit local `.venv`, provider caches, `__pycache__`, `.ruff_cache`, or ad hoc output snapshots unless a specific artifact is intentionally versioned.
+
+## Validation
+
+Useful fast checks:
+
+```bash
+python -m py_compile run_model_selection.py
+python run_model_selection.py --run_sim_test
+python -m pytest tests/test_model_selection_split_phase2.py -q
+python -m pytest tests/test_optimizer_constraints.py tests/test_drawdown_overlay.py -q
 ```
 
----
+Broader checks:
+
+```bash
+python -m pytest
+python scripts/validate_wrds_migration.py --config backtest_config.yaml
+python scripts/check_risk_limits.py --config backtest_config.yaml --strict
+python scripts/check_tca_health.py --config backtest_config.yaml --strict
+```
 
 ## QuantConnect Deployment
 
-The strategy is deployed to QuantConnect via `LeanCloud/BinaryEdge/`:
+The LEAN package lives in `LeanCloud/BinaryEdge/` and is the deployment source of truth. Validate local parity before promoting a model into QC:
 
-```
-LeanCloud/BinaryEdge/
-├── main.py                 # QC algorithm (regime detection, D3 Sharpe CB)
-├── qc_alpha_model.py       # Alpha model (24-feature inference, C2 routing, D1 scaling)
-├── best_long_model.pkl     # VotingRegressor ensemble (13MB)
-├── xgb_regime_bear.pkl     # C2: Bear regime specialist
-├── xgb_regime_highvol.pkl  # C2: Crisis/HighVol specialist
-└── config.json
-```
-
-**Sync local → QC:**
 ```bash
-lean cloud push
-lean backtest "LeanCloud/BinaryEdge"
+python verify_qc_parity.py
+python verify_lean_parity.py
 ```
 
-**Key QC implementation notes:**
-- `LGBMRankerWrapper` is defined in `qc_alpha_model.py` and injected into `__main__` before unpickling (required for VotingRegressor deserialization)
-- `sector_relative_20d/60d` approximated as stock return minus universe mean return (no sector feed in QC)
-- `earnings_surprise` removed from model (was always 0.0 in QC — training/inference gap eliminated)
-- D3 Sharpe CB implemented in `OnEndOfDay` — reduces `top_n` when 60d Sharpe < 0
+Then use the LEAN CLI from the `LeanCloud/` workspace as appropriate for cloud backtests and deployment.
 
----
+## Operating Principles
 
-## Phases Implemented
-
-| Phase | Item | Status | Impact |
-|-------|------|--------|--------|
-| A | A1 CS z-score at inference | ✅ Wired | Closes training/inference gap |
-| A | A2 Short model wiring | ✅ Wired | Dedicated short ranking |
-| A | A3 Sector mapping (500 tickers) | ✅ Wired | sector_relative features valid |
-| B | B1 Factor neutralization | ✅ Wired | Reduces regime-driven drawdowns |
-| B | B2 Dynamic holding period | ✅ Wired | Higher conviction → longer hold |
-| B | B3 Walk-forward ensemble | ✅ Wired | ML mode: OOS eval; Learned mode: decay blend |
-| C | C1 Earnings surprise | ✅ Training + Inference | Yfinance per-ticker, cached |
-| C | C2 Regime-conditional models | ✅ Wired | Bear/Crisis specialist routing |
-| C | C3 Risk-adjusted target | ✅ Wired | `--risk-adj-target` flag |
-| D | D1 Continuous regime score | ✅ Wired | Linear gross cap interpolation |
-| D | D2 Short book sizing (0.7×) | ✅ Wired | Snap profit raised to 5% |
-| D | D3 Sharpe circuit breaker | ✅ Wired | 60d Sharpe → halve exposure |
-
----
-
-## Next Steps
-
-1. **Retrain model** — `earnings_surprise` removed from all layers; retrain to get a clean 23-feature model:
-   ```bash
-   python run_model_selection.py --risk-adj-target
-   ```
-2. **Run local backtest** — confirm Sharpe ≥ 1.0 with shorts disabled + new model
-3. **Sync + QC backtest** — `lean cloud push && lean backtest "LeanCloud/BinaryEdge"`
-4. **Walk-forward OOS validation** — confirm Sharpe ≥ 0.7 across all OOS windows
-5. **Retrain regime models as regressors** — current `xgb_regime_*.pkl` are classifiers; matching the general VotingRegressor architecture would improve C2 quality
-6. **Live paper trading** — deploy after QC validation
-
----
-
-## Project Structure
-
-```
-trend_signal_engine/
-├── backtesting/
-│   ├── backtester.py           # Main simulation loop
-│   ├── signals.py              # Signal engine + ML inference
-│   ├── cross_sectional.py      # CS ranking, short model routing (A2)
-│   ├── regime.py               # Regime detection + continuous score (D1)
-│   └── config.py               # BacktestConfig dataclass
-├── agents/weight_learning_agent/
-│   ├── feature_builder.py      # 24-feature panel builder, C1/C3
-│   └── weight_model.py         # LearnedWeights (legacy learned mode)
-├── utils/
-│   └── ensemble_scoring.py     # Model loading + ensemble inference
-├── research/
-│   └── factor_neutralization.py
-├── run_model_selection.py       # ML training: VotingRegressor, C2, C3
-├── run_auto_retrain.py          # Auto-retrain respecting signal_mode
-├── run_backtest.py              # Backtest entry point
-├── backtest_config.yaml         # All configuration
-├── LeanCloud/BinaryEdge/        # QuantConnect deployment
-│   ├── main.py
-│   ├── qc_alpha_model.py
-│   ├── best_long_model.pkl
-│   ├── xgb_regime_bear.pkl
-│   └── xgb_regime_highvol.pkl
-└── output/
-    ├── models/                  # Trained model artifacts
-    ├── backtests/               # Equity curves, trades, summaries
-    └── experiments/             # Timestamped experiment snapshots
-```
-
----
-
-## Disclaimer
-
-This system is a research tool. Nothing here constitutes investment advice. Past backtest performance does not guarantee future results.
+- Research metrics must be out-of-sample and aligned with the traded portfolio construction.
+- Live deployment metrics must be separated from alpha research metrics.
+- WRDS/CRSP point-in-time and delisting-aware data should be the source of truth for institutional research.
+- Risk overlays must be shared across research and live paths where possible.
+- Generated data and reports are reproducibility artifacts, not core source code.

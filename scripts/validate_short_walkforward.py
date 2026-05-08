@@ -16,12 +16,11 @@ Usage:
 import argparse
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import yaml
 
 logging.basicConfig(
     level=logging.INFO,
@@ -79,10 +78,6 @@ def run_walkforward_split(
         test_start = train_end
         test_end = date_min + timedelta(days=(i + 2) * period_len)
         
-        train_trades = trades[
-            (trades["entry_date"] >= train_start)
-            & (trades["entry_date"] < train_end)
-        ]
         test_trades = trades[
             (trades["entry_date"] >= test_start)
             & (trades["entry_date"] < test_end)

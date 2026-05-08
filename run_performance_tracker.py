@@ -94,11 +94,13 @@ def _load_data_settings() -> tuple[str, str]:
         with open(path, encoding="utf-8") as fh:
             cfg = yaml.safe_load(fh) or {}
         data = cfg.get("data", {}) or {}
-        provider = str(data.get("provider", "yahoo"))
+        provider = str(data.get("provider") or "").strip()
+        if not provider:
+            raise RuntimeError("data.provider must be explicit in backtest_config.yaml")
         cache_dir = str(data.get("cache_dir", "data/cache/ohlcv"))
         ttl = int(data.get("cache_ttl_days", 0) or 0)
     except Exception:
-        provider, cache_dir, ttl = "yahoo", "data/cache/ohlcv", 0
+        provider, cache_dir, ttl = "wrds", "data/cache/wrds", 0
     return provider, cache_dir, ttl
 
 

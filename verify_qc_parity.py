@@ -1,6 +1,5 @@
 # verify_qc_parity.py
 import pandas as pd
-import numpy as np
 import os
 import logging
 from backtesting.signals import SignalEngine

@@ -206,9 +206,8 @@ def d2_delisting_coverage(db, permnos: list[int], start: str, end: str):
 def d3_pit_universe(db, start: str, end: str):
     header("D3: Point-in-Time Universe — no hindsight inclusions")
 
-    from utils.wrds_universe import build_backtest_universe, WRDSUniverse
+    from utils.wrds_universe import build_backtest_universe
 
-    universe = WRDSUniverse(db)
     # Sample 5 random dates across the backtest window
     date_range = pd.bdate_range(start=start, end=end)
     sample_dates = date_range[::max(1, len(date_range) // 5)][:5]

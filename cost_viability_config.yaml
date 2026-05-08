@@ -1,0 +1,267 @@
+# Cost Viability Engine Configuration
+# ====================================
+# Single source of truth for all cost parameters, classification thresholds,
+# stress test scenarios, and promotion gates.
+#
+# This file replaces hardcoded values scattered across:
+#   - horizon_eligibility.py
+#   - validation.py
+#   - market_impact.py
+#   - configuration.py
+#   - utils/signal_threshold.py
+#   - adaptive_params.py
+
+# ---------------------------------------------------------------------------
+# 1. BASE COST PARAMETERS
+# ---------------------------------------------------------------------------
+# These define the "base" cost scenario used for all standard evaluations.
+# Stress scenarios override specific fields below.
+
+cost_model:
+  mode: sqrt_impact          # "simple_bps" | "sqrt_impact"
+  
+  # Fixed costs (per leg, in bps)
+  commission_bps: 1.0        # All-in commission (DMA / prime brokerage)
+  spread_bps: 1.0            # Full bid-ask spread
+  borrow_bps_annual: 50.0    # Annual borrow cost for shorts
+  
+  # Almgren-Chriss square-root impact
+  impact_eta: 0.142          # Temporary impact coefficient
+  impact_alpha: 0.314        # Permanent impact coefficient
+  impact_gamma: 0.6          # Participation rate exponent (0.5 = pure sqrt)
+  
+  # Defaults when panel data is missing
+  default_adv_usd: 50_000_000
+  default_daily_vol: 0.02    # 2% daily vol
+  
+  # Execution constraints
+  max_participation_rate: 0.10    # Max 10% of daily ADV
+  max_impact_bps: 150.0           # Sanity cap on impact
+  min_adv_usd: 5_000_000          # Below this, flag as illiquid
+  
+  # Permanent impact decay
+  permanent_impact_decay_days: 5
+  
+  # Financing (for leveraged books)
+  financing_rate_annual: 0.00    # Additional financing cost (e.g., margin)
+
+# ---------------------------------------------------------------------------
+# 2. ALPHA ESTIMATION PARAMETERS
+# ---------------------------------------------------------------------------
+alpha_estimation:
+  # Gross alpha approximation: |IC| * sigma * sqrt(h / 252)
+  # sigma is computed from panel data (forward return std), not hardcoded.
+  # This section controls fallback behavior.
+  
+  default_sigma_annual: 0.20   # Fallback when panel sigma unavailable
+  min_observations: 100        # Minimum obs for IC computation
+  min_dates: 30                # Minimum dates for IC series
+
+# ---------------------------------------------------------------------------
+# 3. CLASSIFICATION THRESHOLDS
+# ---------------------------------------------------------------------------
+# Each candidate is classified into exactly ONE cost status.
+# Classification is evaluated in priority order (first match wins).
+
+classification:
+  # Primary viability threshold
+  min_alpha_cost_ratio_viable: 1.5      # Must exceed this to be "cost_viable"
+  min_alpha_cost_ratio_marginal: 1.0    # Above this but below viable = "marginal"
+                                        # Below this = some form of dominated
+  
+  # Net alpha thresholds (in bps)
+  min_net_alpha_bps: 0.0                # Net alpha must be positive
+  
+  # Turnover thresholds
+  max_expected_turnover: 0.80           # Above this = "turnover_dominated"
+  max_turnover_to_ic_ratio: 50.0        # turnover / |IC| above this = problematic
+  
+  # Impact thresholds
+  max_impact_fraction_of_cost: 0.75     # If impact > 75% of total cost = "impact_dominated"
+  
+  # Borrow thresholds
+  max_borrow_fraction_of_cost: 0.50     # If borrow > 50% of total cost = "borrow_dominated"
+  
+  # Liquidity thresholds
+  min_adv_usd_viable: 10_000_000        # Below this = "liquidity_insufficient"
+  max_participation_for_viable: 0.05    # If participation > 5% = "liquidity_insufficient"
+  
+  # Alpha strength thresholds
+  min_gross_alpha_bps: 3.0              # Below this = "alpha_too_weak"
+  min_ic_absolute: 0.005               # Below this = "alpha_too_weak"
+  
+  # Capacity thresholds
+  min_capacity_score: 1.0               # Below this = "capacity_insufficient"
+  
+  # Stability thresholds
+  min_cost_data_coverage: 0.80          # If < 80% of dates have cost data = "unstable_cost_estimate"
+
+# ---------------------------------------------------------------------------
+# 4. PROMOTION GATES
+# ---------------------------------------------------------------------------
+# Candidates must pass ALL gates to be promoted to production.
+
+promotion_gates:
+  min_alpha_cost_ratio: 1.5            # Must exceed classification threshold
+  min_net_expected_alpha_bps: 0.0      # Net alpha must be positive
+  min_halflife_days: 5.0               # Rank persistence halflife
+  max_turnover: 0.80                   # Expected daily turnover
+  min_capacity_score: 1.0              # Capacity score
+  min_bh_significant: true             # Must pass BH multiple-testing correction
+  min_breadth: 50                      # Minimum cross-sectional breadth
+  min_dates: 252                       # Minimum observation dates
+  survive_base_stress: true            # Must survive base cost stress test
+  survive_high_stress: false           # Surviving high stress is advisory only
+
+# ---------------------------------------------------------------------------
+# 5. STRESS TEST SCENARIOS
+# ---------------------------------------------------------------------------
+# Each scenario overrides specific cost parameters from the base model.
+# The engine evaluates every candidate under each scenario.
+
+stress_scenarios:
+  low_cost:
+    label: "Low Cost (Optimistic)"
+    overrides:
+      commission_bps: 0.5
+      spread_bps: 0.5
+      impact_eta: 0.100
+      borrow_bps_annual: 25.0
+  
+  base_cost:
+    label: "Base Cost (Expected)"
+    overrides: {}   # Uses base cost_model values
+  
+  high_cost:
+    label: "High Cost (Conservative)"
+    overrides:
+      commission_bps: 2.0
+      spread_bps: 3.0
+      impact_eta: 0.250
+      borrow_bps_annual: 100.0
+  
+  stressed_spread:
+    label: "Stressed Spread (Widened Markets)"
+    overrides:
+      spread_bps: 10.0
+  
+  stressed_impact:
+    label: "Stressed Impact (Low Liquidity)"
+    overrides:
+      impact_eta: 0.400
+      impact_gamma: 0.7
+  
+  stressed_liquidity:
+    label: "Stressed Liquidity (ADV Halved)"
+    overrides:
+      default_adv_usd: 25_000_000   # Half of base
+  
+  stressed_borrow:
+    label: "Stressed Borrow (Hard-to-Borrow)"
+    overrides:
+      borrow_bps_annual: 300.0
+  
+  crisis:
+    label: "Crisis (All Costs Elevated)"
+    overrides:
+      commission_bps: 3.0
+      spread_bps: 15.0
+      impact_eta: 0.500
+      borrow_bps_annual: 500.0
+      max_participation_rate: 0.03
+
+# ---------------------------------------------------------------------------
+# 6. ALPHA-TO-TRADE DECISION
+# ---------------------------------------------------------------------------
+# Controls the explicit trade approval layer.
+
+alpha_to_trade:
+  enabled: true
+  
+  # Margin of safety: incremental alpha must exceed cost by this factor
+  min_alpha_to_trade_ratio: 1.5
+  
+  # Minimum incremental alpha to justify any trade (bps)
+  min_incremental_alpha_bps: 1.0
+  
+  # Maximum acceptable turnover for a single rebalance
+  max_single_rebalance_turnover: 0.20
+  
+  # Rejection reason codes (do not modify — used in logging)
+  rejection_codes:
+    alpha_below_cost: "Expected incremental alpha below incremental cost"
+    alpha_below_margin: "Alpha below margin of safety threshold"
+    turnover_too_high: "Expected turnover exceeds maximum"
+    impact_too_high: "Market impact exceeds acceptable level"
+    liquidity_too_low: "Insufficient liquidity for trade size"
+    borrow_cost_too_high: "Borrow cost exceeds alpha budget"
+    signal_decay_too_fast: "Signal decay rate incompatible with holding period"
+    insufficient_breadth: "Cross-sectional breadth too low for reliable signal"
+
+# ---------------------------------------------------------------------------
+# 7. NO-TRADE BANDS
+# ---------------------------------------------------------------------------
+# Adaptive no-trade band width computation.
+# If current weight is inside the band around target, do not trade.
+# If outside, trade only to the nearest boundary.
+
+no_trade_bands:
+  enabled: true
+  
+  # Base band width (fraction of portfolio weight)
+  base_band_width: 0.010    # 1.0% per-name default
+  
+  # Adaptive scaling factors
+  # Band widens when:
+  #   - Costs are high (don't trade for small alpha)
+  #   - Volatility is high (more noise in signal)
+  #   - Liquidity is low (trading is expensive)
+  # Band narrows when:
+  #   - Signal strength is high (more conviction)
+  #   - Costs are low (cheaper to trade)
+  
+  cost_scaling_factor: 2.0       # Band width multiplier per unit of cost_bps
+  vol_scaling_factor: 0.5        # Band width multiplier per unit of daily vol
+  liquidity_scaling_factor: 0.3  # Band width multiplier per unit of (1/ADV)
+  signal_scaling_factor: -0.01   # Band width reduction per unit of |IC|
+  
+  # Bounds on adaptive band width
+  min_band_width: 0.002          # 0.2% minimum
+  max_band_width: 0.050          # 5.0% maximum
+  
+  # Portfolio-wide drift limit
+  max_total_drift: 0.05          # 5% total portfolio weight change
+
+# ---------------------------------------------------------------------------
+# 8. REPORTING
+# ---------------------------------------------------------------------------
+reporting:
+  output_dir: "output/models/cost_viability"
+  
+  # Reports to generate
+  scorecard_enabled: true
+  stress_test_enabled: true
+  turnover_attribution_enabled: true
+  cost_dominated_report_enabled: true
+  
+  # Scorecard columns (order matters)
+  scorecard_columns:
+    - candidate_id
+    - feature
+    - family
+    - sleeve
+    - horizon
+    - regime
+    - ic
+    - icir
+    - t_stat
+    - halflife
+    - expected_turnover
+    - expected_alpha_bps
+    - expected_cost_bps
+    - decay_adjusted_alpha_bps
+    - net_expected_alpha_bps
+    - alpha_cost_ratio
+    - capacity_score
+    - cost_status
+    - rejection_reason

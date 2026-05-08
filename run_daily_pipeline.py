@@ -474,8 +474,10 @@ def main() -> None:
         pass
     log_path = pipeline_log_path(cfg, _ROOT)
     cache_dir = ohlcv_cache_dir(cfg, _ROOT)
-    bt = cfg.get("backtest", cfg) or {}
-    provider = str(bt.get("provider", "yahoo") or "yahoo")
+    data_cfg = cfg.get("data", {}) or {}
+    provider = str(data_cfg.get("provider") or "").strip()
+    if not provider:
+        raise RuntimeError("data.provider must be explicit for the daily pipeline")
 
     with open_log(log_path) as logf:
         log_line(logf, "=" * 60)

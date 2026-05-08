@@ -70,9 +70,9 @@ def _resolve_tickers(cfg, cli_tickers: list[str] | None) -> list[str]:
     # Fall back to main.TICKERS if config.tickers is empty
     if not tickers:
         try:
-            from main import TICKERS  # type: ignore
+            from utils.default_universe import DEFAULT_TICKERS  # type: ignore
 
-            tickers = list(TICKERS)
+            tickers = list(DEFAULT_TICKERS)
         except Exception:
             tickers = []
     return get_effective_tickers(tickers, tickers)
@@ -280,4 +280,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

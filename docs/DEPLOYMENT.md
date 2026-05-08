@@ -22,6 +22,24 @@ Choose **one** primary runtime; both options assume `trend_signal_engine/` as th
 
 **Rollback:** Revert to previous image **or** restore weight files from release directory as in (A).
 
+## C. QuantConnect / Lean
+
+`LeanCloud/BinaryEdge/` is the deployment source of truth for QuantConnect. Root-level
+`qc_main.py` and `qc_alpha_model.py` are legacy compatibility entry points and should not
+be used for new deployments.
+
+Those root modules now act as thin facades only. Any new QC logic belongs under
+`LeanCloud/BinaryEdge/`.
+
+Before deleting the legacy root files, run a real local Lean validation from `LeanCloud/`:
+
+```bash
+lean backtest BinaryEdge --no-update
+```
+
+Then run the configured local paper-trading deployment path. Only remove the legacy files
+after both gates pass with the promoted model registry metadata available to the algorithm.
+
 ## Paper → live checklist (before removing paper-only gates)
 
 1. Kill switch tested (`TRADING_HALTED=1` with `--execute` places no orders).

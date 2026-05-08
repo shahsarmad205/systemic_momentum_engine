@@ -13,11 +13,9 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Any
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from backtesting.analytics import annualized_vol, build_returns_matrix
 from backtesting.regime_multipliers import (

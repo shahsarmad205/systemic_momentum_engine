@@ -509,6 +509,180 @@ class MultiAlphaEngine:
         return "\n".join(lines)
 
     # ------------------------------------------------------------------
+    # §10  IC decay curve per alpha
+    # ------------------------------------------------------------------
+
+    def compute_alpha_ic_decay(
+        self,
+        price_data: dict,
+        lags: list[int] | None = None,
+    ) -> dict:
+        """
+        Compute IC at multiple horizons for each of the three alphas.
+
+        Measures how predictive each alpha is at 1d, 2d, 3d, 5d, 10d, 20d
+        forward total returns. Uses *total* (not idiosyncratic) forward returns
+        so the IC reflects actual portfolio P&L, not factor-neutralized returns.
+
+        Parameters
+        ----------
+        price_data : dict
+            Same price_data dict passed to precompute().
+        lags : list of int
+            Forward horizons in trading days. Default: [1, 2, 3, 5, 10, 20].
+
+        Returns
+        -------
+        dict with keys:
+            "lags"      : list[int]
+            "alpha1_ic" : list[float]  # idio reversal
+            "alpha2_ic" : list[float]  # core-ML (main_forecasts passed to MAE)
+            "alpha3_ic" : list[float]  # idio momentum
+            "half_life" : dict with alpha name → estimated half-life in days
+        """
+        if lags is None:
+            lags = [1, 2, 3, 5, 10, 20]
+
+        if self._alpha1_df is None or self._alpha3_df is None or self._ret_1d_df is None:
+            logger.warning("compute_alpha_ic_decay: precompute() not called yet.")
+            return {"lags": lags, "alpha1_ic": [], "alpha2_ic": [], "alpha3_ic": [], "half_life": {}}
+
+        # ── Build total forward-return DataFrame from price_data ──────────
+        close_dict = {}
+        for t, df in price_data.items():
+            if df is None or df.empty:
+                continue
+            for col in ("Close", "AdjClose", "close"):
+                if col in df.columns:
+                    px = pd.to_numeric(df[col], errors="coerce")
+                    if px.notna().sum() >= max(20 + 1, 30):
+                        close_dict[t] = px
+                    break
+
+        if len(close_dict) < 5:
+            logger.warning("compute_alpha_ic_decay: insufficient price data.")
+            return {"lags": lags, "alpha1_ic": [], "alpha2_ic": [], "alpha3_ic": [], "half_life": {}}
+
+        prices = pd.DataFrame(close_dict).sort_index()
+        prices.index = pd.to_datetime(prices.index)
+
+        alpha1_ic_list: list[float] = []
+        alpha3_ic_list: list[float] = []
+
+        for lag in lags:
+            # Forward L-day total return: fwd_ret[t] = price[t+L]/price[t] - 1
+            fwd_ret = prices.pct_change(lag, fill_method=None).shift(-lag)
+
+            def _compute_lag_ic(alpha_df: pd.DataFrame) -> float:
+                scores, returns = [], []
+                common_tickers = [c for c in alpha_df.columns if c in fwd_ret.columns]
+                common_dates = alpha_df.index.intersection(fwd_ret.index)
+                if len(common_dates) < 20:
+                    return 0.0
+                a_vals = alpha_df.reindex(index=common_dates, columns=common_tickers).values.astype(float)
+                r_vals = fwd_ret.reindex(index=common_dates, columns=common_tickers).values.astype(float)
+                # Flatten and mask NaN pairs
+                mask = np.isfinite(a_vals) & np.isfinite(r_vals)
+                if mask.sum() < 20:
+                    return 0.0
+                a_flat = a_vals[mask]
+                r_flat = r_vals[mask]
+                try:
+                    from scipy.stats import spearmanr
+                    rho, _ = spearmanr(a_flat, r_flat)
+                    return float(rho) if np.isfinite(rho) else 0.0
+                except Exception:
+                    corr = float(pd.Series(a_flat).corr(pd.Series(r_flat)))
+                    return corr if np.isfinite(corr) else 0.0
+
+            alpha1_ic_list.append(_compute_lag_ic(self._alpha1_df))
+            alpha3_ic_list.append(_compute_lag_ic(self._alpha3_df))
+
+        # α₂ (core-ML) = the main_forecasts passed to current_forecasts().
+        # These are the ForecastEngine-smoothed adjusted_scores. Since MAE does
+        # not store them directly, we proxy α₂ IC using the stored IC history
+        # from _ic_raw[1], which is updated each day during simulation.
+        # If available, interpolate from the stored 1-day IC to multi-horizon.
+        alpha2_ic_list: list[float] = []
+        if list(self._ic_raw[1]):
+            ic_1d = float(np.mean(self._ic_raw[1]))
+            # Empirical decay model: IC(L) ≈ IC(1) × exp(-L / τ₂)
+            # where τ₂ = α₂ decay constant = 7 days
+            tau2 = float(_TAU[1])
+            for lag in lags:
+                ic_l = ic_1d * float(np.exp(-lag / tau2))
+                alpha2_ic_list.append(round(ic_l, 5))
+        else:
+            alpha2_ic_list = [0.0] * len(lags)
+
+        # ── Estimate half-lives ───────────────────────────────────────────
+        def _half_life(ic_curve: list[float], lags: list[int]) -> float:
+            """Lag where IC drops to 50% of its peak magnitude."""
+            if not ic_curve:
+                return float("nan")
+            peak = float(np.max(np.abs(ic_curve)))
+            if peak < 1e-9:
+                return float("nan")
+            half = peak * 0.5
+            for i, (ic, lag) in enumerate(zip(ic_curve, lags)):
+                if abs(ic) <= half:
+                    if i == 0:
+                        return float(lags[0])
+                    # linear interpolation between lag[i-1] and lag[i]
+                    prev_lag, prev_ic = lags[i - 1], abs(ic_curve[i - 1])
+                    cur_lag = lag
+                    if prev_ic - abs(ic) < 1e-12:
+                        return float(cur_lag)
+                    frac = (prev_ic - half) / (prev_ic - abs(ic))
+                    return prev_lag + frac * (cur_lag - prev_lag)
+            return float(lags[-1])  # decay slower than last lag
+
+        half_lives = {
+            "alpha1_reversal": _half_life(alpha1_ic_list, lags),
+            "alpha2_core_ml":  _half_life(alpha2_ic_list, lags),
+            "alpha3_momentum": _half_life(alpha3_ic_list, lags),
+        }
+
+        return {
+            "lags": lags,
+            "alpha1_ic": alpha1_ic_list,
+            "alpha2_ic": alpha2_ic_list,
+            "alpha3_ic": alpha3_ic_list,
+            "half_life": half_lives,
+        }
+
+    def print_ic_decay_table(self, price_data: dict, lags: list[int] | None = None) -> None:
+        """Print a formatted IC decay table and half-life recommendations."""
+        result = self.compute_alpha_ic_decay(price_data, lags)
+        if not result["alpha1_ic"]:
+            print("IC decay: no data (precompute first).")
+            return
+        lags = result["lags"]
+        print("\n" + "=" * 65)
+        print("  IC DECAY CURVE (Rank IC at each forward horizon)")
+        print("=" * 65)
+        print(f"  {'Lag':>5}  {'α₁ Reversal':>14}  {'α₂ Core-ML':>14}  {'α₃ Momentum':>14}")
+        print("  " + "-" * 60)
+        for i, lag in enumerate(lags):
+            a1 = result["alpha1_ic"][i] if i < len(result["alpha1_ic"]) else float("nan")
+            a2 = result["alpha2_ic"][i] if i < len(result["alpha2_ic"]) else float("nan")
+            a3 = result["alpha3_ic"][i] if i < len(result["alpha3_ic"]) else float("nan")
+            print(f"  {lag:>5}d  {a1:>+14.4f}  {a2:>+14.4f}  {a3:>+14.4f}")
+        print("=" * 65)
+        print("  HALF-LIFE ESTIMATES (days where IC drops to 50% of peak)")
+        for name, hl in result["half_life"].items():
+            hl_str = f"{hl:.1f}d" if np.isfinite(hl) else "N/A"
+            print(f"    {name:<25} : {hl_str}")
+        print("  RECOMMENDATION:")
+        a1_hl = result["half_life"].get("alpha1_reversal", float("nan"))
+        a3_hl = result["half_life"].get("alpha3_momentum", float("nan"))
+        if np.isfinite(a1_hl) and a1_hl < 4:
+            print(f"    α₁ decays at {a1_hl:.1f}d → horizon_days ≤ {int(a1_hl) + 1}")
+        if np.isfinite(a3_hl) and a3_hl > 5:
+            print(f"    α₃ decays at {a3_hl:.1f}d → horizon_days ≥ {int(a3_hl) - 2}")
+        print("=" * 65)
+
+    # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
 

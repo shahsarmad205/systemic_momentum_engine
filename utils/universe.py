@@ -3,6 +3,41 @@ import requests
 import os
 from datetime import datetime, timedelta
 
+
+def _set_config_attr(config, key: str, value) -> None:
+    """Set config metadata on either a dict-like config or BacktestConfig object."""
+    if isinstance(config, dict):
+        config[key] = value
+    else:
+        setattr(config, key, value)
+
+
+def _get_config_attr(config, key: str, default=None):
+    if isinstance(config, dict):
+        return config.get(key, default)
+    return getattr(config, key, default)
+
+
+def _get_backtest_attr(config, key: str, default=None):
+    """Resolve backtest-scoped config while preserving legacy top-level keys."""
+    if isinstance(config, dict):
+        if key in config:
+            return config.get(key, default)
+        bt = config.get("backtest", {}) or {}
+        return bt.get(key, default) if isinstance(bt, dict) else default
+    if hasattr(config, key):
+        return getattr(config, key)
+    bt = getattr(config, "backtest", None)
+    if isinstance(bt, dict):
+        return bt.get(key, default)
+    return getattr(bt, key, default) if bt is not None else default
+
+
+def _is_missing_wrds_username(raw: str | None) -> bool:
+    user = str(raw or "").strip().lower()
+    return user in {"", "your_wrds_username", "wrds_username", "username"}
+
+
 def get_sp500_tickers(cache_path="config/sp500_tickers.txt", max_age_days=7):
     """
     Fetch S&P 500 tickers with local cache fallback.
@@ -63,11 +98,11 @@ def get_sp500_tickers(cache_path="config/sp500_tickers.txt", max_age_days=7):
                 print(f"Using stale cache fallback: {len(tickers)} tickers")
                 return tickers
         
-        print("Pillar 29: Falling back to hardcoded institutional tickers...")
-        return [
-            "AAPL", "MSFT", "AMZN", "NVDA", "GOOGL", "META", "TSLA",
-            "JPM", "V", "JNJ", "WMT", "PG", "XOM", "UNH", "HD", "AVGO"
-        ]
+        raise RuntimeError(
+            "Unable to resolve S&P 500 universe: Wikipedia fetch failed and no cached ticker list exists. "
+            "For production research, set universe.mode='wrds' to use a point-in-time CRSP universe. "
+            "For research-only fallback, pre-populate config/sp500_tickers.txt or set universe.mode='file'."
+        )
 
 def _load_wrds_universe(config, universe_cfg: dict) -> list[str]:
     """
@@ -79,15 +114,15 @@ def _load_wrds_universe(config, universe_cfg: dict) -> list[str]:
     """
     import os
     wrds_user = os.environ.get("WRDS_USERNAME")
-    if not wrds_user:
+    if _is_missing_wrds_username(wrds_user):
+        print("WRDS_USERNAME is missing or still set to a placeholder.")
         return []
 
     try:
         from utils.wrds_universe import WRDSUniverse, build_backtest_universe, connect_wrds
 
-        start_date = getattr(config, "start_date", None) or (
-            config.get("start_date") if isinstance(config, dict) else None
-        )
+        start_date = _get_backtest_attr(config, "start_date", None)
+        end_date = _get_backtest_attr(config, "end_date", start_date)
         if not start_date:
             return []
 
@@ -100,22 +135,71 @@ def _load_wrds_universe(config, universe_cfg: dict) -> list[str]:
         db = connect_wrds(wrds_user)
         universe = WRDSUniverse(db)
 
-        # Build investable universe at the backtest start date
-        permnos = build_backtest_universe(
+        start_ts = pd.Timestamp(start_date)
+        end_ts = pd.Timestamp(end_date) if end_date else start_ts
+
+        # Build the day-0 investable universe for immediate liquidity sanity.
+        # The ticker-addressed research pipeline should not silently re-admit
+        # low-liquidity historical members after the configured investability
+        # screen. The full PIT membership panel remains attached for audit and
+        # downstream eligibility checks.
+        start_permnos = build_backtest_universe(
             db,
             date=start_date,
             min_price=float(min_price),
             min_dollar_vol=float(min_dollar_vol),
         )
-        if not permnos:
+        panel = universe.get_sp500_panel(start_ts, end_ts)
+        if panel.empty and not start_permnos:
             return []
 
-        # Map PERMNOs → tickers (point-in-time)
-        permno_to_tick = universe.permno_to_ticker_map(permnos, start_date)
-        tickers = [permno_to_tick[p] for p in permnos if p in permno_to_tick]
+        panel_permnos = sorted(panel["permno"].astype(int).unique().tolist()) if not panel.empty else []
+        include_full_membership_panel = bool(universe_cfg.get("include_full_membership_panel", False))
+        if include_full_membership_panel:
+            all_permnos = sorted(set(int(p) for p in start_permnos) | set(panel_permnos))
+            permno_policy = "full_membership_with_start_liquidity_context"
+        else:
+            all_permnos = sorted(set(int(p) for p in start_permnos))
+            permno_policy = "start_date_liquid"
+        if not all_permnos:
+            return []
+        permno_to_tick = universe.permno_to_ticker_map(all_permnos, end_ts)
+        if not permno_to_tick and start_permnos:
+            permno_to_tick = universe.permno_to_ticker_map(start_permnos, start_ts)
+        selected_permnos = set(all_permnos)
+        permno_to_tick = {
+            int(p): str(t)
+            for p, t in permno_to_tick.items()
+            if int(p) in selected_permnos
+        }
+
+        membership_ranges: dict[str, list[tuple[pd.Timestamp, pd.Timestamp]]] = {}
+        if not panel.empty:
+            for _, row in panel.iterrows():
+                permno = int(row["permno"])
+                ticker = permno_to_tick.get(permno)
+                if not ticker:
+                    continue
+                rng = membership_ranges.setdefault(ticker, [])
+                rng.append(
+                    (
+                        pd.Timestamp(row["effective_start"]).normalize(),
+                        pd.Timestamp(row["effective_end"]).normalize(),
+                    )
+                )
+
+        # Stable ticker universe keyed by the end-date identifier for each PERMNO.
+        tickers = [permno_to_tick[p] for p in all_permnos if p in permno_to_tick]
+        ticker_to_permno = {t: p for p, t in permno_to_tick.items() if p in selected_permnos}
+        _set_config_attr(config, "wrds_ticker_to_permno", ticker_to_permno)
+        _set_config_attr(config, "pit_membership_ranges", membership_ranges)
+        _set_config_attr(config, "pit_universe_mode", "wrds")
+        _set_config_attr(config, "pit_universe_window", {"start_date": str(start_ts.date()), "end_date": str(end_ts.date())})
         print(
-            f"WRDS universe at {start_date}: {len(permnos)} PERMNOs → {len(tickers)} tickers "
-            f"(price≥${min_price}, dvol≥${min_dollar_vol/1e6:.0f}M, no delistings)"
+            f"WRDS PIT universe {start_ts.date()}→{end_ts.date()}: "
+            f"{len(all_permnos)} PERMNOs → {len(tickers)} tradeable symbols "
+            f"(membership records={len(panel)}, start-date liquid={len(start_permnos)}, "
+            f"permno_policy={permno_policy})"
         )
         return tickers
 
@@ -154,8 +238,14 @@ def load_universe(config):
             exclude = universe_cfg.get('exclude', [])
             max_t = universe_cfg.get('max_tickers', 500)
             return [t for t in tickers if t not in exclude][:max_t]
-        # Fall through to sp500 mode on WRDS failure
-        print("WRDS universe load failed — falling back to Wikipedia S&P 500 list.")
+        if not bool(universe_cfg.get("allow_fallback", False)):
+            raise RuntimeError(
+                "WRDS universe mode requested but no point-in-time WRDS universe could be loaded. "
+                "Check WRDS_USERNAME/WRDS access, CRSP dsp500list availability, and data.cache_dir. "
+                "Set universe.allow_fallback: true only for non-production research fallbacks."
+            )
+        # Explicit research-only fallback.
+        print("WRDS universe load failed — falling back to Wikipedia S&P 500 list because universe.allow_fallback=true.")
         mode = 'sp500'
 
     if mode == 'sp500':

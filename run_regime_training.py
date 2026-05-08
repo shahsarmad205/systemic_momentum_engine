@@ -200,7 +200,6 @@ def _walk_forward_regime(
 
             X_tr = _sanitize(tr[feat_cols].values)
             y_tr = tr["forward_return"].replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(-0.3, 0.3).values.astype(float)
-            X_te = _sanitize(te[feat_cols].values)
             y_te = te["forward_return"].replace([np.inf, -np.inf], np.nan).fillna(0.0).values.astype(float)
 
             X_tr_clean, active = _drop_singular(X_tr, feat_cols)

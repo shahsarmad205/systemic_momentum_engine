@@ -153,7 +153,6 @@ def check_risk_management(config: dict) -> dict:
     """Verify risk parameters follow institutional standards."""
     
     risk = config.get("risk", {})
-    execution = config.get("execution", {})
     
     checks = {
         "max_gross_exposure": risk.get("max_gross_exposure", 1.5),

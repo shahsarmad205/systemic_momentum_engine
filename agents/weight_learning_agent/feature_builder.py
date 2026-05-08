@@ -37,10 +37,17 @@ weights.  All features use only past data (no look-ahead bias).
 
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import timedelta
+import logging
 
 import numpy as np
 import pandas as pd
 
+from features.cross_sectional import (
+    apply_cross_sectional_zscore_columns,
+    attach_cross_sectional_zscore_suffix_block,
+    compute_sector_relative_shifted_cs_long,
+    cross_sectional_zscore,
+)
 from features.feature_pipeline import calculate_core_trend_features as build_features
 from agents.volatility_agent.volatility_model import (
     compute_rolling_confidence,
@@ -52,84 +59,70 @@ from execution.cost_model import TransactionCostModel
 from backtesting.signals import CONFIDENCE_MULTIPLIER, compute_rolling_trend_scores
 from utils.market_data import get_ohlcv
 from utils.quant_utils import get_sector
+from utils.wrds_data import load_wrds_price_panel, resolve_data_provider
 
 HISTORY_BUFFER_DAYS = 400
 MARKET_TICKER = "SPY"  # for rolling correlation feature
+logger = logging.getLogger(__name__)
 
 
-def _fetch_fundamental_cols(ticker: str, dates: pd.DatetimeIndex) -> dict:
+def _timeseries_zscore(s: pd.Series, window: int = 252, min_periods: int = 60) -> pd.Series:
+    mean = s.rolling(window, min_periods=min_periods).mean()
+    std = s.rolling(window, min_periods=min_periods).std(ddof=0).replace(0, np.nan)
+    return ((s - mean) / std).replace([np.inf, -np.inf], np.nan)
+
+
+def _fetch_fundamental_cols(ticker: str, dates: pd.DatetimeIndex, *, strict: bool = False) -> dict:
     """
     Return a dict of fundamental feature Series for the given ticker and dates.
-    Keys: f_score, accruals_ratio, roa, delta_roa, delta_leverage
+    Keys include legacy Piotroski fields and WRDS/Compustat short-book
+    deterioration fields when available.
     Falls back to 0.0 on any error — never blocks training.
     """
+    zero_cols = [
+        "f_score",
+        "accruals_ratio",
+        "roa",
+        "delta_roa",
+        "delta_leverage",
+        "gross_margin",
+        "delta_gross_margin",
+        "operating_margin",
+        "delta_operating_margin",
+        "margin_deterioration",
+        "debt_to_assets",
+        "total_debt_to_assets",
+        "weak_profitability",
+        "share_issuance_growth",
+        "dilution_pressure",
+        "filing_delay_days",
+        "late_filing_flag",
+        "restatement_like_flag",
+        "fundamental_deterioration_score",
+        "short_interest_ratio",
+        "days_to_cover",
+        "borrow_crowding_risk",
+    ]
     try:
         from features.fundamental_router import fetch_fundamental_features
-        fund_df = fetch_fundamental_features(ticker, dates)
+        fund_df = fetch_fundamental_features(ticker, dates, strict=strict)
+        fund_df = fund_df.reindex(columns=zero_cols, fill_value=0.0)
         return {col: fund_df[col] for col in fund_df.columns}
     except Exception:
-        return {
-            "f_score": pd.Series(0.0, index=dates),
-            "accruals_ratio": pd.Series(0.0, index=dates),
-            "roa": pd.Series(0.0, index=dates),
-            "delta_roa": pd.Series(0.0, index=dates),
-            "delta_leverage": pd.Series(0.0, index=dates),
-        }
+        if strict:
+            raise
+        return {col: pd.Series(0.0, index=dates) for col in zero_cols}
 
 
 def _fetch_earnings_surprise(ticker: str, dates: pd.DatetimeIndex) -> pd.Series:
     """
-    C1: Pull quarterly EPS surprise from yfinance and forward-fill within each quarter.
+    Legacy placeholder retained for compatibility only.
 
-    Surprise = (Reported EPS - EPS Estimate) / |EPS Estimate|, clipped to [-2, 2].
-    Lagged 1 trading day to avoid same-day lookahead (announcements are after close).
-    Returns a Series aligned to `dates`; NaN where data is unavailable.
+    The production research stack no longer uses Yahoo earnings-surprise data.
+    Returning NaNs here prevents accidental reintroduction of a non-WRDS
+    historical dependency into the training pipeline.
     """
-    try:
-        import yfinance as yf
-
-        t = yf.Ticker(ticker)
-        ed = t.get_earnings_dates(limit=20)
-        if ed is None or ed.empty:
-            return pd.Series(np.nan, index=dates)
-
-        surprise_col = next(
-            (c for c in ed.columns if "surprise" in c.lower()), None
-        )
-        if surprise_col is None:
-            return pd.Series(np.nan, index=dates)
-
-        # Normalize index to timezone-naive
-        idx = ed.index
-        if hasattr(idx, "tz") and idx.tz is not None:
-            idx = idx.tz_localize(None)
-
-        raw_vals = pd.to_numeric(ed[surprise_col], errors="coerce").values
-        # yfinance returns surprise as a percentage (e.g. 5.2 = 5.2%); convert to fraction
-        surprise = pd.Series(raw_vals / 100.0, index=idx)
-        surprise = surprise.dropna().clip(-2.0, 2.0).sort_index()
-
-        if surprise.empty:
-            return pd.Series(np.nan, index=dates)
-
-        # Normalize feature dates to timezone-naive for alignment
-        dates_naive = dates
-        if hasattr(dates, "tz") and dates.tz is not None:
-            dates_naive = dates.tz_localize(None)
-
-        # Build a daily business-day calendar spanning both series
-        cal_start = min(dates_naive.min(), surprise.index.min())
-        cal_end = max(dates_naive.max(), surprise.index.max())
-        all_bdates = pd.date_range(cal_start, cal_end, freq="B")
-
-        # Shift 2 days: earnings are announced after close on day T; the signal
-        # is tradeable at open on T+1 at the earliest, but yfinance timestamps are
-        # sometimes market-open (not after-close), so shift(1) risks same-day leakage.
-        # shift(2) guarantees a full trading-day buffer regardless of timestamp alignment.
-        s = surprise.reindex(all_bdates).shift(2).ffill()
-        return s.reindex(dates_naive)
-    except Exception:
-        return pd.Series(np.nan, index=dates)
+    return pd.Series(np.nan, index=dates)
 
 # Re-export: canonical ticker→sector lives in utils.sectors (covers full learning universe).
 # Use get_sector(ticker) in workers; SECTOR_MAP is the static mapping dict.
@@ -157,80 +150,10 @@ _CS_Z_PANEL_INPLACE_COLS = frozenset(
     }
 )
 
-
-def cross_sectional_zscore(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Cross-sectional z-score: tickers as columns, dates as index.
-    (x - row_mean) / row_std; std=0 → NaN.
-    """
-    row_mean = df.mean(axis=1)
-    row_std = df.std(axis=1).replace(0, np.nan)
-    return df.sub(row_mean, axis=0).div(row_std, axis=0)
-
-
-def cross_sectional_zscore_ddof0(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Same as cross_sectional z-score but population std (ddof=0), matching
-    ``groupby('date')[col].transform(lambda x: (x - x.mean()) / x.std(ddof=0))``.
-    """
-    row_mean = df.mean(axis=1, skipna=True)
-    row_std = df.std(axis=1, ddof=0, skipna=True).replace(0, np.nan)
-    return df.sub(row_mean, axis=0).div(row_std, axis=0)
-
-
-def _apply_cross_sectional_zscore_columns(
-    result: pd.DataFrame,
-    columns: list[str],
-) -> pd.DataFrame:
-    """
-    Replace each column with cross-sectional z-scores across tickers on each date.
-    Missing pivot cells become NaN then 0 after merge.
-    """
-    out = result
-    for col in columns:
-        if col not in out.columns:
-            continue
-        pivot = out.pivot(index="date", columns="ticker", values=col)
-        z = cross_sectional_zscore_ddof0(pivot)
-        z_long = z.stack(future_stack=True).reset_index()
-        z_long.columns = ["date", "ticker", col]
-        out = out.drop(columns=[col], errors="ignore")
-        out = out.merge(z_long, on=["date", "ticker"], how="left")
-        out[col] = pd.to_numeric(out[col], errors="coerce").fillna(0.0)
-    return out
-
-
-def compute_sector_relative_shifted_cs_long(long_df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Sector-relative momentum: for each (date, ticker),
-      raw = ret_Nd - median(ret_Nd | same date & sector),
-    then pivot → shift(1) along time → cross-sectional z-score across tickers.
-
-    Input columns: date, ticker, ret_20d, ret_60d, sector.
-    Output adds: sector_relative_20d, sector_relative_60d (CS z-scored, lagged 1 day).
-    """
-    need = {"date", "ticker", "ret_20d", "ret_60d", "sector"}
-    if not need.issubset(long_df.columns):
-        out = long_df.copy()
-        out["sector_relative_20d"] = 0.0
-        out["sector_relative_60d"] = 0.0
-        return out
-    out = long_df.copy()
-    out["date"] = pd.to_datetime(out["date"])
-    m20 = out.groupby(["date", "sector"])["ret_20d"].transform("median")
-    m60 = out.groupby(["date", "sector"])["ret_60d"].transform("median")
-    out["_sr20_raw"] = out["ret_20d"] - m20
-    out["_sr60_raw"] = out["ret_60d"] - m60
-    for raw_col, out_col in [("_sr20_raw", "sector_relative_20d"), ("_sr60_raw", "sector_relative_60d")]:
-        pivot = out.pivot(index="date", columns="ticker", values=raw_col)
-        z = cross_sectional_zscore(pivot).shift(1)
-        z_long = z.stack().reset_index()
-        z_long.columns = ["date", "ticker", out_col]
-        out = out.drop(columns=[out_col], errors="ignore")
-        out = out.merge(z_long, on=["date", "ticker"], how="left")
-        out[out_col] = pd.to_numeric(out[out_col], errors="coerce").fillna(0.0)
-    out = out.drop(columns=["_sr20_raw", "_sr60_raw"], errors="ignore")
-    return out
+# Compatibility aliases: older tests and internal monkeypatch hooks still target
+# the private helper names while the implementation now lives in features.cross_sectional.
+_apply_cross_sectional_zscore_columns = apply_cross_sectional_zscore_columns
+_attach_cross_sectional_zscore_suffix_block = attach_cross_sectional_zscore_suffix_block
 
 
 def sector_relative_features_by_ticker(
@@ -373,17 +296,47 @@ def _attach_mr_cross_sectional_zscore_shifted(result: pd.DataFrame) -> pd.DataFr
     return result
 
 
-def _download(ticker: str, start, end) -> pd.DataFrame:
+def _download(
+    ticker: str,
+    start,
+    end,
+    *,
+    provider: str | None = None,
+    cache_dir: str | None = None,
+    cache_ttl_days: int = 1,
+    wrds_username: str | None = None,
+    wrds_ticker_to_permno: dict[str, int] | None = None,
+) -> pd.DataFrame:
     """
     Download OHLCV for a single ticker using the shared market_data layer with caching.
     """
+    provider = resolve_data_provider(provider)
+    ticker = str(ticker).upper()
+    if provider == "wrds":
+        panel = load_wrds_price_panel(
+            [ticker],
+            start_date=start,
+            end_date=end,
+            username=wrds_username,
+            cache_dir=cache_dir or "data/cache/wrds",
+            cache_ttl_days=cache_ttl_days,
+            ticker_to_permno=wrds_ticker_to_permno,
+            as_of_date=end,
+        )
+        df = panel.get(ticker, pd.DataFrame())
+        if df is None or df.empty:
+            return pd.DataFrame()
+        keep = ["Open", "High", "Low", "Close", "Volume"]
+        return df[keep].dropna()
+
     df = get_ohlcv(
         ticker,
         start.strftime("%Y-%m-%d"),
         end.strftime("%Y-%m-%d"),
-        provider="yahoo",
+        provider=provider,
         use_cache=True,
-        cache_ttl_days=1,
+        cache_dir=cache_dir,
+        cache_ttl_days=cache_ttl_days,
     )
     if df is None or df.empty:
         return pd.DataFrame()
@@ -392,21 +345,20 @@ def _download(ticker: str, start, end) -> pd.DataFrame:
     return df[keep].dropna()
 
 
-def _build_features_for_ticker(
+def _build_features_from_data(
     ticker: str,
-    dl_start: pd.Timestamp,
-    dl_end: pd.Timestamp,
+    data: pd.DataFrame,
+    *,
     start_ts: pd.Timestamp,
     end_ts: pd.Timestamp,
     holding_period: int,
     market_ret: pd.Series | None,
+    strict_fundamentals: bool = False,
 ) -> pd.DataFrame:
     """
-    Worker helper: build feature chunk for a single ticker.
-    Returns an empty DataFrame on failure so that the caller can skip it.
+    Build a single ticker's feature chunk from a preloaded OHLCV frame.
     """
     try:
-        data = _download(ticker, dl_start, dl_end)
         if data.empty or len(data) < 210:
             return pd.DataFrame()
 
@@ -461,7 +413,6 @@ def _build_features_for_ticker(
         jump_indicator = vol_struct["jump_indicator"]
 
         # Per-ticker volatility regime: 20d realised vol / 252d realised vol.
-        # Values > 1.2 indicate a high-volatility stock-specific regime.
         vol20 = daily_ret.rolling(20).std()
         vol252 = daily_ret.rolling(252).std()
         vol_regime_ratio = (vol20 / vol252).replace([np.inf, -np.inf], np.nan)
@@ -473,24 +424,19 @@ def _build_features_for_ticker(
         rv_mean = relative_volume_raw.rolling(252, min_periods=60).mean()
         rv_std = relative_volume_raw.rolling(252, min_periods=60).std().replace(0, np.nan).fillna(1.0)
         relative_volume = (relative_volume_raw - rv_mean) / rv_std
-        # Volume z-score: (volume - mean) / std over 20d (no look-ahead).
-        # This also serves as a "volume surprise" indicator.
         vol_std20 = volume.rolling(20).std()
         volume_zscore = (volume - vol_ma20) / vol_std20.replace(0, np.nan)
         volume_zscore = volume_zscore.replace([np.inf, -np.inf], np.nan)
 
-        # Cross-ticker: rolling 20d correlation with market (SPY)
         rolling_corr_market_20 = pd.Series(np.nan, index=features.index)
         capm_alpha = pd.Series(np.nan, index=features.index)
         capm_beta = pd.Series(1.0, index=features.index)
         capm_residual_vol = pd.Series(np.nan, index=features.index)
-        idio_momentum_20d = pd.Series(0.0, index=features.index)  # default: no market data
-        # Raw 20d realised vol (std of daily returns) — used for cross-sectional vol_rank (ARE 1.3).
+        idio_momentum_20d = pd.Series(0.0, index=features.index)
         vol_20_simple = daily_ret.rolling(20).std()
         if market_ret is not None:
-            market_aligned = market_ret.reindex(features.index).ffill().bfill().fillna(0.0)
+            market_aligned = market_ret.reindex(features.index).ffill().fillna(0.0)
             rolling_corr_market_20 = daily_ret.rolling(20).corr(market_aligned)
-            # CAPM: rolling 60d beta, alpha, residual vol; alpha z-scored over 252d
             try:
                 from features.capm_features import compute_capm_features
                 stock_ret = daily_ret.astype(float).fillna(0.0)
@@ -500,17 +446,11 @@ def _build_features_for_ticker(
                 capm_residual_vol = capm_df["capm_residual_vol"]
             except Exception:
                 pass
-            # Idiosyncratic momentum: stock 20d return minus beta-adjusted market 20d return.
-            # Isolates pure alpha component from market-factor contribution.
-            # Computed after capm_beta is available (may still be default 1.0 if CAPM failed).
             spy_ret_20d = (1.0 + market_aligned).rolling(20, min_periods=10).apply(
                 np.prod, raw=True
             ) - 1.0
             idio_momentum_20d = (ret_20d - capm_beta * spy_ret_20d).clip(-0.5, 0.5).fillna(0.0)
 
-        # ------------------------------------------------------------------
-        # Mean-reversion raw inputs (CS z-score + shift(1) applied in build_feature_matrix)
-        # ------------------------------------------------------------------
         delta = close.diff()
         gain = delta.clip(lower=0)
         loss = -delta.clip(upper=0)
@@ -536,55 +476,32 @@ def _build_features_for_ticker(
         mr_bb_raw = (close - bb_lower) / bb_width
 
         forward_ret = close.shift(-holding_period) / close - 1
-
-        # C3: risk-adjusted return — forward return scaled by entry-day realized vol
-        # over the holding horizon. Rewards low-vol momentum: a 2% gain on a 5% vol
-        # stock is a stronger signal than 2% on a 20% vol stock.
         _holding_period_vol = vol_20_raw * np.sqrt(holding_period)
         forward_ret_risk_adj = (
             forward_ret / _holding_period_vol.clip(lower=0.001)
         ).clip(-10.0, 10.0)
 
-        # Short-predictive features
         rsi_14 = mr_rsi_raw.shift(1)
         ret_1d = daily_ret.shift(1)
         vol_ratio_5_20 = (vol_5_raw / vol_20_raw.replace(0, np.nan)).replace(
             [np.inf, -np.inf], np.nan
         ).shift(1)
 
-        # AR-1.5: dist_from_52w_high (252-day range)
         max_52w = close.rolling(252, min_periods=100).max()
         dist_from_52w_high = (close - max_52w) / max_52w.replace(0, np.nan)
-
-        # AR-1.5: rsi_overbought (using 14d RSI)
         rsi_overbought = (mr_rsi_raw > 70).astype(float)
-
-        # AR-1.5: vol_expansion (vol_5 / vol_20)
         vol_expansion = (vol_5_raw / vol_20_raw.replace(0, np.nan)).replace([np.inf, -np.inf], np.nan)
-
-        # AR-1.5: momentum_acceleration (ret_5d - ret_10d)
         momentum_acceleration = ret_5d - ret_10d
-
-        # AR-1.5: down_up_vol_ratio (lagged by 1d to avoid lookahead at market open)
         d_ret_lag = daily_ret.shift(1)
         down_v = volume.where(d_ret_lag < 0, 0).rolling(20).sum()
         up_v = volume.where(d_ret_lag > 0, 0).rolling(20).sum()
         down_up_vol_ratio = (down_v / up_v.replace(0, np.nan)).fillna(1.0)
 
-        # All-weather features: value, quality, low-vol anomaly, mean-reversion
-        # These provide signal in Bear/Crisis where pure momentum breaks down.
-
-        # Short-term reversal (contrarian; lagged 1d)
         short_term_reversal = (-ret_5d.shift(1)).clip(-0.5, 0.5)
-
-        # 52w low proximity (value proxy: 1.0 = at 52w low, ~0 = far above)
         min_52w = close.rolling(252, min_periods=60).min().replace(0, np.nan)
         dist_from_52w_low = ((close - min_52w) / min_52w.clip(lower=1e-6)).clip(0, 10).shift(1)
         nearness_52w_low = 1.0 / (1.0 + dist_from_52w_low)
 
-        # Liquidity stress: Parkinson intraday range estimator (Bear/Crisis regime feature)
-        # (High - Low) / Close z-scored vs own 252d history. Spikes in bear/crisis when
-        # market makers widen spreads and intraday swings increase.
         high = data["High"].reindex(features.index)
         low = data["Low"].reindex(features.index)
         parkinson_raw = ((high - low) / close.replace(0, np.nan)).clip(0, 0.25)
@@ -592,48 +509,48 @@ def _build_features_for_ticker(
         pk_std = parkinson_raw.rolling(252, min_periods=60).std(ddof=0).replace(0, np.nan).fillna(1e-6)
         liquidity_stress = ((parkinson_raw - pk_mean) / pk_std).clip(-4, 4).shift(1)
 
-        # Beta-adjusted momentum: rewards low-beta stocks that hold up in bear regimes.
-        # ret_20d divided by capm_beta — defensive names (beta < 1) get a higher score.
         beta_safe = capm_beta.clip(lower=0.3, upper=3.0)
         beta_adj_momentum = (ret_20d / beta_safe).clip(-2, 2).shift(1)
-
-        # 52w high proximity (momentum signal: George & Hwang 2004).
-        # 1.0 = stock AT 52w high (strong trend continuation signal for longs).
-        # max_52w already computed above for dist_from_52w_high.
         nearness_52w_high = (close / max_52w.replace(0, np.nan)).clip(0.0, 1.0).fillna(0.5)
-
-        # Low-volatility score (low vol → high score; negated percentile rank)
         vol_20_lv = daily_ret.rolling(20, min_periods=10).std()
         low_vol_score = (1.0 - vol_20_lv.rolling(252, min_periods=60).rank(pct=True)).fillna(0.5)
-
-        # Quality score: rolling 60d Sharpe ratio proxy
         roll_mean_60 = daily_ret.rolling(60, min_periods=20).mean()
         roll_std_60 = daily_ret.rolling(60, min_periods=20).std().replace(0, np.nan).fillna(1e-6)
         quality_score = (roll_mean_60 / roll_std_60 * np.sqrt(252)).clip(-5.0, 5.0)
 
-        # ------------------------------------------------------------------
-        # ShortLogic features — Medhat-Schmeling (2022) + RRLP (2023) + JLST (2025)
-        # ------------------------------------------------------------------
-        # 1. EOM-adjusted 1-month return: skip last 5 trading days to reduce
-        #    end-of-month liquidity noise (MS Table III: +22% vs +16.4% annualized)
         momentum_1m_skip_eom = (close.shift(5) / close.shift(26).replace(0, np.nan) - 1).clip(-1.0, 4.0).fillna(0.0)
-
-        # 2. Turnover percentile rank (63-day rolling; centered to [-1,+1])
+        adv_dollar_20 = (close * volume).rolling(20, min_periods=5).mean().shift(1)
         to_20d = (volume / volume.rolling(252, min_periods=60).mean().replace(0, np.nan)).clip(0.0, 20.0)
         to_pct_rank = to_20d.rolling(63, min_periods=21).rank(pct=True).fillna(0.5)
         turnover_pct_rank = to_pct_rank.clip(0.0, 1.0)
-        to_centered = (to_pct_rank * 2.0 - 1.0)  # rescale to [-1, 1]
-
-        # 3. Short-term momentum score: return × turnover (MS double-sort)
-        #    Negative = high-TO loser = strongest short candidate
+        to_centered = (to_pct_rank * 2.0 - 1.0)
         short_term_momentum_score = (momentum_1m_skip_eom * to_centered).clip(-2.0, 2.0).fillna(0.0)
-
-        # 4. High-volatility reversal flag (RRLP Fig.1: top tercile → faster reversal)
         _vol_pct = vol_20_raw.rolling(252, min_periods=60).rank(pct=True)
         high_vol_reversal_flag = (_vol_pct > 0.67).astype(float).fillna(0.0)
-
-        # 5. 12M-1M momentum (Jegadeesh-Titman 1993; JLST: inversely related to reversal alpha)
         momentum_12m_skip1 = close.shift(21).pct_change(231).clip(-0.95, 10.0).fillna(0.0)
+        fundamental_cols = _fetch_fundamental_cols(ticker, features.index, strict=bool(strict_fundamentals))
+
+        near_high_risk = nearness_52w_high.shift(1).fillna(0.5).clip(0.0, 1.0)
+        positive_momentum_risk = (ret_20d.shift(1).clip(lower=0.0, upper=0.50) / 0.50).fillna(0.0)
+        vol_expansion_risk = ((vol_expansion.shift(1) - 1.0) / 3.0).clip(0.0, 1.0).fillna(0.0)
+        volume_pressure_risk = ((relative_volume.shift(1).fillna(0.0) + 4.0) / 8.0).clip(0.0, 1.0)
+        crowding_risk = pd.to_numeric(
+            fundamental_cols.get("borrow_crowding_risk", pd.Series(0.0, index=features.index)),
+            errors="coerce",
+        ).reindex(features.index).fillna(0.0).clip(0.0, 1.0)
+        short_interest_risk = pd.to_numeric(
+            fundamental_cols.get("short_interest_ratio", pd.Series(0.0, index=features.index)),
+            errors="coerce",
+        ).reindex(features.index).fillna(0.0).clip(0.0, 1.0)
+        short_squeeze_risk = (
+            0.25 * near_high_risk
+            + 0.20 * positive_momentum_risk
+            + 0.20 * vol_expansion_risk
+            + 0.15 * volume_pressure_risk
+            + 0.10 * crowding_risk
+            + 0.10 * short_interest_risk
+        ).clip(0.0, 1.0)
+        hard_short_squeeze_filter = (short_squeeze_risk > 0.75).astype(float)
 
         chunk = pd.DataFrame(
             {
@@ -662,7 +579,6 @@ def _build_features_for_ticker(
                 "capm_alpha": capm_alpha,
                 "capm_beta": capm_beta,
                 "capm_residual_vol": capm_residual_vol,
-                # Mean-reversion raw (panel CS z + shift(1) applied in build_feature_matrix)
                 "mr_rsi_raw": mr_rsi_raw,
                 "mr_bb_raw": mr_bb_raw,
                 "mr_dist_high_raw": mr_dist_high_raw,
@@ -676,19 +592,17 @@ def _build_features_for_ticker(
                 "ma_crossover": features["ma_crossover_signal"] if "ma_crossover_signal" in features else 0.0,
                 "cs_momentum_raw": cs_mom_raw,
                 "daily_return": daily_ret,
+                "adv_dollar_20": adv_dollar_20,
                 "vol_20_simple": vol_20_simple,
                 "rsi_14": rsi_14,
                 "ret_1d": ret_1d,
                 "vol_ratio_5_20": vol_ratio_5_20,
-                # Short features
                 "dist_from_52w_high": dist_from_52w_high,
                 "rsi_overbought": rsi_overbought,
                 "vol_expansion": vol_expansion,
                 "momentum_acceleration": momentum_acceleration,
                 "down_up_vol_ratio": down_up_vol_ratio,
-                # Fundamental features (Piotroski F-score + accruals) — point-in-time lagged 45d
-                **_fetch_fundamental_cols(ticker, features.index),
-                # All-weather features (value, quality, low-vol, mean-reversion)
+                **fundamental_cols,
                 "short_term_reversal": short_term_reversal,
                 "nearness_52w_low": nearness_52w_low,
                 "dist_from_52w_low": dist_from_52w_low,
@@ -696,25 +610,23 @@ def _build_features_for_ticker(
                 "idio_momentum_20d": idio_momentum_20d,
                 "low_vol_score": low_vol_score,
                 "quality_score": quality_score,
-                # Bear/Crisis regime-specific features
                 "liquidity_stress": liquidity_stress,
                 "beta_adj_momentum": beta_adj_momentum,
-                # ShortLogic features (Medhat-Schmeling 2022, RRLP 2023, JLST 2025)
                 "momentum_1m_skip_eom": momentum_1m_skip_eom,
                 "turnover_pct_rank": turnover_pct_rank,
                 "short_term_momentum_score": short_term_momentum_score,
                 "high_vol_reversal_flag": high_vol_reversal_flag,
                 "momentum_12m_skip1": momentum_12m_skip1,
-                # industry_relative_reversal is added at panel level (requires sector_relative_20d)
+                "short_squeeze_risk": short_squeeze_risk,
+                "hard_short_squeeze_filter": hard_short_squeeze_filter,
                 "forward_return": forward_ret,
-                "forward_return_risk_adj": forward_ret_risk_adj,  # C3: risk-adjusted target
+                "forward_return_risk_adj": forward_ret_risk_adj,
             },
             index=features.index,
         )
 
         chunk.index.name = "date"
         chunk = chunk.reset_index()
-
         chunk["volume_zscore"] = chunk["volume_zscore"].fillna(0)
         chunk["rolling_corr_market_20"] = chunk["rolling_corr_market_20"].fillna(0)
 
@@ -737,7 +649,49 @@ def _build_features_for_ticker(
         chunk["sector"] = get_sector(ticker)
         return chunk
     except Exception:
-        # Let caller handle logging; here we just return empty on failure
+        return pd.DataFrame()
+
+
+def _build_features_for_ticker(
+    ticker: str,
+    dl_start: pd.Timestamp,
+    dl_end: pd.Timestamp,
+    start_ts: pd.Timestamp,
+    end_ts: pd.Timestamp,
+    holding_period: int,
+    market_ret: pd.Series | None,
+    provider: str | None = None,
+    cache_dir: str | None = None,
+    cache_ttl_days: int = 1,
+    wrds_username: str | None = None,
+    wrds_ticker_to_permno: dict[str, int] | None = None,
+    strict_fundamentals: bool = False,
+) -> pd.DataFrame:
+    """
+    Worker helper: build feature chunk for a single ticker.
+    Returns an empty DataFrame on failure so that the caller can skip it.
+    """
+    try:
+        data = _download(
+            ticker,
+            dl_start,
+            dl_end,
+            provider=provider,
+            cache_dir=cache_dir,
+            cache_ttl_days=cache_ttl_days,
+            wrds_username=wrds_username,
+            wrds_ticker_to_permno=wrds_ticker_to_permno,
+        )
+        build_kwargs = {
+            "start_ts": start_ts,
+            "end_ts": end_ts,
+            "holding_period": holding_period,
+            "market_ret": market_ret,
+        }
+        if strict_fundamentals:
+            build_kwargs["strict_fundamentals"] = True
+        return _build_features_from_data(ticker, data, **build_kwargs)
+    except Exception:
         return pd.DataFrame()
 
 
@@ -747,6 +701,12 @@ def build_feature_matrix(
     end_date: str,
     holding_period: int = 5,
     feature_subset: list[str] | None = None,
+    data_provider: str | None = None,
+    cache_dir: str | None = None,
+    cache_ttl_days: int = 1,
+    wrds_username: str | None = None,
+    wrds_ticker_to_permno: dict[str, int] | None = None,
+    strict_fundamentals: bool = False,
 ) -> pd.DataFrame:
     """
     Build a DataFrame of (ticker, date, features, target) rows suitable
@@ -761,10 +721,34 @@ def build_feature_matrix(
     Returns:
         DataFrame with columns listed in the module docstring.
     """
+    provider = resolve_data_provider(data_provider)
+    if provider == "wrds":
+        from features.wrds_panel_engine import build_wrds_feature_matrix_batched
+
+        return build_wrds_feature_matrix_batched(
+            tickers,
+            start_date=start_date,
+            end_date=end_date,
+            holding_period=holding_period,
+            feature_subset=feature_subset,
+            cache_dir=cache_dir,
+            cache_ttl_days=cache_ttl_days,
+            wrds_username=wrds_username,
+            wrds_ticker_to_permno=wrds_ticker_to_permno,
+            strict_fundamentals=bool(strict_fundamentals),
+            market_ticker=MARKET_TICKER,
+        )
+
     dl_start = pd.Timestamp(start_date) - timedelta(days=HISTORY_BUFFER_DAYS)
     dl_end = pd.Timestamp(end_date) + timedelta(days=holding_period * 2)
     start_ts = pd.Timestamp(start_date)
     end_ts = pd.Timestamp(end_date)
+    wrds_ticker_to_permno = {
+        str(t).upper(): int(p)
+        for t, p in (wrds_ticker_to_permno or {}).items()
+        if t is not None and p is not None
+    }
+    cache_dir = cache_dir or ("data/cache/wrds" if provider == "wrds" else None)
 
     # Market series for cross-ticker feature (no look-ahead: historical SPY returns only)
     market_ret = None
@@ -772,25 +756,57 @@ def build_feature_matrix(
     vix_zscore = pd.Series(dtype=float)
     vol_spike = pd.Series(dtype=float)
     vix_term_zscore_series = pd.Series(dtype=float)
+    vol_risk_premium = pd.Series(dtype=float)  # P4: VRP = implied vol - realized vol
+
+    credit_spread_proxy = pd.Series(dtype=float)   # HYG vs IEF: widening = risk-off
+    yield_curve_slope   = pd.Series(dtype=float)   # 10y - 3m yield: inverted = recession
+    wrds_panel: dict[str, pd.DataFrame] = {}
+    if provider == "wrds":
+        try:
+            wrds_panel = load_wrds_price_panel(
+                list(dict.fromkeys([*(str(t).upper() for t in tickers), MARKET_TICKER, "HYG", "IEF", "SHY"])),
+                start_date=dl_start,
+                end_date=dl_end,
+                username=wrds_username,
+                cache_dir=cache_dir or "data/cache/wrds",
+                cache_ttl_days=cache_ttl_days,
+                ticker_to_permno=wrds_ticker_to_permno,
+                as_of_date=dl_end,
+            )
+        except Exception:
+            logger.exception("WRDS preload failed in feature_builder")
+            wrds_panel = {}
+
     try:
-        spy = _download(MARKET_TICKER, dl_start, dl_end)
+        if provider == "wrds":
+            spy = wrds_panel.get(MARKET_TICKER, pd.DataFrame())
+        else:
+            spy = _download(
+                MARKET_TICKER,
+                dl_start,
+                dl_end,
+                provider=provider,
+                cache_dir=cache_dir,
+                cache_ttl_days=cache_ttl_days,
+                wrds_username=wrds_username,
+                wrds_ticker_to_permno=wrds_ticker_to_permno,
+            )
         if not spy.empty and len(spy) >= 25:
-            market_ret = spy["Close"].pct_change()
+            market_ret = pd.to_numeric(spy["Close"], errors="coerce").pct_change()
     except Exception:
         spy = None
         market_ret = None
 
-    # Regime-specific macro features — date-level, identical across tickers per date.
-    # Point-in-time safe: all shift(1) before attaching to result.
-    credit_spread_proxy = pd.Series(dtype=float)   # HYG vs IEF: widening = risk-off
-    yield_curve_slope   = pd.Series(dtype=float)   # 10y - 3m yield: inverted = recession
     try:
-        hyg = _download("HYG", dl_start, dl_end)   # iShares High Yield Corp Bond ETF
-        ief = _download("IEF", dl_start, dl_end)   # iShares 7-10y Treasury ETF
+        if provider == "wrds":
+            hyg = wrds_panel.get("HYG", pd.DataFrame())
+            ief = wrds_panel.get("IEF", pd.DataFrame())
+        else:
+            hyg = _download("HYG", dl_start, dl_end, provider=provider, cache_dir=cache_dir, cache_ttl_days=cache_ttl_days)
+            ief = _download("IEF", dl_start, dl_end, provider=provider, cache_dir=cache_dir, cache_ttl_days=cache_ttl_days)
         if not hyg.empty and not ief.empty:
-            hyg_ret = hyg["Close"].pct_change()
-            ief_ret = ief["Close"].pct_change()
-            # IEF outperforming HYG = credit spreads widening = bear/crisis signal
+            hyg_ret = pd.to_numeric(hyg["Close"], errors="coerce").pct_change()
+            ief_ret = pd.to_numeric(ief["Close"], errors="coerce").pct_change()
             spread = (ief_ret - hyg_ret).reindex(hyg_ret.index.union(ief_ret.index)).ffill()
             cs_m = spread.rolling(60, min_periods=20).mean()
             cs_s = spread.rolling(60, min_periods=20).std(ddof=0).replace(0, np.nan).fillna(1e-6)
@@ -799,96 +815,112 @@ def build_feature_matrix(
         pass
 
     try:
-        tnx_raw = get_ohlcv(
-            "^TNX", dl_start.strftime("%Y-%m-%d"), dl_end.strftime("%Y-%m-%d"),
-            provider="yahoo", use_cache=True, cache_ttl_days=1,
-        )
-        irx_raw = get_ohlcv(
-            "^IRX", dl_start.strftime("%Y-%m-%d"), dl_end.strftime("%Y-%m-%d"),
-            provider="yahoo", use_cache=True, cache_ttl_days=1,
-        )
-        if tnx_raw is not None and irx_raw is not None and not tnx_raw.empty and not irx_raw.empty:
-            tnx = pd.to_numeric(tnx_raw["Close"], errors="coerce").dropna()
-            irx = pd.to_numeric(irx_raw["Close"], errors="coerce").dropna()
-            slope_raw = (tnx - irx.reindex(tnx.index).ffill())  # 10y minus 3m (pct)
-            yc_m = slope_raw.rolling(252, min_periods=60).mean()
-            yc_s = slope_raw.rolling(252, min_periods=60).std(ddof=0).replace(0, np.nan).fillna(1e-6)
-            yield_curve_slope = ((slope_raw - yc_m) / yc_s).clip(-4, 4).shift(1)
+        if provider == "wrds":
+            shy = wrds_panel.get("SHY", pd.DataFrame())
+            ief = wrds_panel.get("IEF", pd.DataFrame())
+            if not shy.empty and not ief.empty:
+                shy_ret = pd.to_numeric(shy["Close"], errors="coerce").pct_change()
+                ief_ret = pd.to_numeric(ief["Close"], errors="coerce").pct_change()
+                slope_raw = (ief_ret - shy_ret).reindex(ief_ret.index.union(shy_ret.index)).ffill()
+                yield_curve_slope = _timeseries_zscore(slope_raw).clip(-4, 4).shift(1)
+        else:
+            tnx_raw = get_ohlcv(
+                "^TNX",
+                dl_start.strftime("%Y-%m-%d"),
+                dl_end.strftime("%Y-%m-%d"),
+                provider=provider,
+                use_cache=True,
+                cache_dir=cache_dir,
+                cache_ttl_days=cache_ttl_days,
+            )
+            irx_raw = get_ohlcv(
+                "^IRX",
+                dl_start.strftime("%Y-%m-%d"),
+                dl_end.strftime("%Y-%m-%d"),
+                provider=provider,
+                use_cache=True,
+                cache_dir=cache_dir,
+                cache_ttl_days=cache_ttl_days,
+            )
+            if tnx_raw is not None and irx_raw is not None and not tnx_raw.empty and not irx_raw.empty:
+                tnx = pd.to_numeric(tnx_raw["Close"], errors="coerce").dropna()
+                irx = pd.to_numeric(irx_raw["Close"], errors="coerce").dropna()
+                slope_raw = (tnx - irx.reindex(tnx.index).ffill())
+                yield_curve_slope = _timeseries_zscore(slope_raw).clip(-4, 4).shift(1)
     except Exception:
         pass
 
-    # Macro inputs (VIX + SPY realised vol ratios) for learned-weight GBR.
-    # These are shifted by 1 to avoid look-ahead (values for date t
-    # only use information available after day t-1).
     try:
         if spy is not None and not spy.empty and "Close" in spy.columns:
             spy_close = pd.to_numeric(spy["Close"], errors="coerce").dropna().sort_index()
             spy_ret = spy_close.pct_change()
             vol5 = spy_ret.rolling(5).std() * np.sqrt(252.0)
+            vol20 = spy_ret.rolling(20).std() * np.sqrt(252.0)
             vol60 = spy_ret.rolling(60).std() * np.sqrt(252.0)
             vol_spike = (vol5 / vol60).replace([np.inf, -np.inf], np.nan).shift(1)
-
-        vix_raw = get_ohlcv(
-            "^VIX",
-            dl_start.strftime("%Y-%m-%d"),
-            dl_end.strftime("%Y-%m-%d"),
-            provider="yahoo",
-            use_cache=True,
-            cache_ttl_days=1,
-        )
-        if vix_raw is not None and not vix_raw.empty and "Close" in vix_raw.columns:
-            vix_close = pd.to_numeric(vix_raw["Close"], errors="coerce").dropna().sort_index()
-            vix_mean_252 = vix_close.rolling(252).mean()
-            vix_std_252 = vix_close.rolling(252).std(ddof=0).replace(0, np.nan)
-            vix_zscore = ((vix_close - vix_mean_252) / vix_std_252).shift(1)
-
-            vix3m_raw = get_ohlcv(
-                "^VIX3M",
-                dl_start.strftime("%Y-%m-%d"),
-                dl_end.strftime("%Y-%m-%d"),
-                provider="yahoo",
-                use_cache=True,
-                cache_ttl_days=1,
-            )
-            if vix3m_raw is not None and not vix3m_raw.empty and "Close" in vix3m_raw.columns:
-                vix3m_close = pd.to_numeric(vix3m_raw["Close"], errors="coerce").dropna().sort_index()
-                vix3m_aligned = vix3m_close.reindex(vix_close.index).ffill()
-                # Lagged spot/3M ratio (no same-day look-ahead), then TS z-score vs 252d history, lagged 1d.
-                vix_ratio_lag = (vix_close / vix3m_aligned.replace(0.0, np.nan)).replace(
-                    [np.inf, -np.inf], np.nan
-                ).shift(1)
-                vt_m = vix_ratio_lag.rolling(252, min_periods=60).mean()
-                vt_s = vix_ratio_lag.rolling(252, min_periods=60).std(ddof=0).replace(0, np.nan)
-                vix_term_zscore_series = (
-                    ((vix_ratio_lag - vt_m) / vt_s).replace([np.inf, -np.inf], np.nan).shift(1)
+            if provider == "wrds":
+                vix_zscore = _timeseries_zscore(vol20 * 100.0).shift(1)
+                realized_term = (vol20 / vol60.replace(0, np.nan)).replace([np.inf, -np.inf], np.nan)
+                vix_term_zscore_series = _timeseries_zscore(realized_term).shift(1)
+            else:
+                vix_raw = get_ohlcv(
+                    "^VIX",
+                    dl_start.strftime("%Y-%m-%d"),
+                    dl_end.strftime("%Y-%m-%d"),
+                    provider=provider,
+                    use_cache=True,
+                    cache_dir=cache_dir,
+                    cache_ttl_days=cache_ttl_days,
                 )
+                if vix_raw is not None and not vix_raw.empty and "Close" in vix_raw.columns:
+                    vix_close = pd.to_numeric(vix_raw["Close"], errors="coerce").dropna().sort_index()
+                    vix_zscore = _timeseries_zscore(vix_close).shift(1)
+                    vix3m_raw = get_ohlcv(
+                        "^VIX3M",
+                        dl_start.strftime("%Y-%m-%d"),
+                        dl_end.strftime("%Y-%m-%d"),
+                        provider=provider,
+                        use_cache=True,
+                        cache_dir=cache_dir,
+                        cache_ttl_days=cache_ttl_days,
+                    )
+                    if vix3m_raw is not None and not vix3m_raw.empty and "Close" in vix3m_raw.columns:
+                        vix3m_close = pd.to_numeric(vix3m_raw["Close"], errors="coerce").dropna().sort_index()
+                        vix3m_aligned = vix3m_close.reindex(vix_close.index).ffill()
+                        vix_ratio_lag = (vix_close / vix3m_aligned.replace(0.0, np.nan)).replace(
+                            [np.inf, -np.inf], np.nan
+                        ).shift(1)
+                        vix_term_zscore_series = _timeseries_zscore(vix_ratio_lag).shift(1)
+                    # P4: Volatility risk premium = implied vol (VIX close) - realized vol (SPY 20d annualized)
+                    # High VRP signals risk aversion; low/negative VRP signals complacency.
+                    if "vix_close" in locals() and not vix_close.empty:
+                        vix_level = vix_close.reindex(vol20.index)
+                        vol_risk_premium = (vix_level - vol20 * 100.0).shift(1)
+                    else:
+                        vol_risk_premium = _timeseries_zscore(vol20 * 100.0 - vol20.rolling(60).mean() * 100.0).shift(1)
     except Exception:
-        # If downloads/derivations fail, keep defaults (features will be 0.0 later).
         pass
 
     chunks: list[pd.DataFrame] = []
 
-    # Parallelise per-ticker feature construction.
-    with ProcessPoolExecutor() as executor:
-        future_to_ticker = {
-            executor.submit(
-                _build_features_for_ticker,
-                ticker,
-                dl_start,
-                dl_end,
-                start_ts,
-                end_ts,
-                holding_period,
-                market_ret,
-            ): (i, ticker)
-            for i, ticker in enumerate(tickers, 1)
-        }
-
-        for fut in as_completed(future_to_ticker):
-            i, ticker = future_to_ticker[fut]
+    if provider == "wrds":
+        for i, ticker in enumerate(tickers, 1):
+            ticker = str(ticker).upper()
             print(f"  [{i}/{len(tickers)}] {ticker}…", end=" ")
             try:
-                chunk = fut.result()
+                build_kwargs = {
+                    "start_ts": start_ts,
+                    "end_ts": end_ts,
+                    "holding_period": holding_period,
+                    "market_ret": market_ret,
+                }
+                if strict_fundamentals:
+                    build_kwargs["strict_fundamentals"] = True
+                chunk = _build_features_from_data(
+                    ticker,
+                    wrds_panel.get(ticker, pd.DataFrame()),
+                    **build_kwargs,
+                )
                 if chunk is None or chunk.empty:
                     print("no valid rows")
                     continue
@@ -896,6 +928,40 @@ def build_feature_matrix(
                 print(f"{len(chunk)} rows")
             except Exception as exc:
                 print(f"ERROR: {exc}")
+    else:
+        with ProcessPoolExecutor() as executor:
+            future_to_ticker = {
+                executor.submit(
+                    _build_features_for_ticker,
+                    ticker,
+                    dl_start,
+                    dl_end,
+                    start_ts,
+                    end_ts,
+                    holding_period,
+                    market_ret,
+                    provider,
+                    cache_dir,
+                    cache_ttl_days,
+                    wrds_username,
+                    wrds_ticker_to_permno,
+                    strict_fundamentals,
+                ): (i, ticker)
+                for i, ticker in enumerate(tickers, 1)
+            }
+
+            for fut in as_completed(future_to_ticker):
+                i, ticker = future_to_ticker[fut]
+                print(f"  [{i}/{len(tickers)}] {ticker}…", end=" ")
+                try:
+                    chunk = fut.result()
+                    if chunk is None or chunk.empty:
+                        print("no valid rows")
+                        continue
+                    chunks.append(chunk)
+                    print(f"{len(chunk)} rows")
+                except Exception as exc:
+                    print(f"ERROR: {exc}")
 
     if not chunks:
         return pd.DataFrame()
@@ -965,8 +1031,17 @@ def build_feature_matrix(
         else:
             result["yield_curve_slope"] = 0.0
 
+        # P4: Volatility risk premium (VRP) — attached per date, same across tickers.
+        if not vol_risk_premium.empty:
+            result["vol_risk_premium"] = (
+                result["date"].map(vol_risk_premium.to_dict()).astype(float).fillna(0.0)
+            )
+        else:
+            result["vol_risk_premium"] = 0.0
+
         # Macro levels are identical across tickers per date; CS z collapses to ~0 — kept for spec / symmetry.
-        result = _apply_cross_sectional_zscore_columns(result, ["vix_zscore", "vol_spike"])
+        # vol_risk_premium is already a level (implied - realized); CS z-score preserves relative differences.
+        result = _apply_cross_sectional_zscore_columns(result, ["vix_zscore", "vol_spike", "vol_risk_premium"])
 
     # Sector-relative momentum: (ret - sector median) → shift(1) → CS z-score (panel).
     if {"ret_20d", "ret_60d", "sector", "ticker", "date"}.issubset(result.columns):
@@ -1012,7 +1087,16 @@ def build_feature_matrix(
     # SPY-based volatility regime features: map each date to a SPY-based regime and flag high-volatility days.
     try:
         unique_dates = pd.to_datetime(result["date"].unique())
-        regime_series = get_regime_series_for_dates(unique_dates, start_date, end_date)
+        regime_series = get_regime_series_for_dates(
+            unique_dates,
+            start_date,
+            end_date,
+            data_provider=provider,
+            cache_dir=cache_dir,
+            cache_ttl_days=cache_ttl_days,
+            wrds_username=wrds_username,
+            wrds_ticker_to_permno=wrds_ticker_to_permno,
+        )
         regime_map = regime_series.to_dict()
         result["regime_label"] = result["date"].map(regime_map).fillna("Normal")
         result["is_high_vol_regime"] = (
@@ -1049,7 +1133,7 @@ def build_feature_matrix(
             result["spy_forward_5d"] = np.nan
             result["forward_return_excess"] = result["forward_return"]
 
-    # Cross-sectional z-scores: for each numeric feature, normalise across tickers per date.
+    # Cross-sectional z-scores: compute the generic ``*_cs_z`` block in one pass.
     # MR + sector-relative + panel-inplace columns are already CS-treated; do not duplicate.
     _precomputed_cs_z = (
         set(_MR_RAW_TO_OUT.values())
@@ -1057,15 +1141,12 @@ def build_feature_matrix(
         | set(_CS_Z_PANEL_INPLACE_COLS)
         | {"vix_term_zscore"}  # already TS z-scored; identical across tickers per date
         | {"vol_rank", "vol_20_simple"}  # vol_rank is percentile; vol_20_simple is raw input only
+        | {"credit_spread_proxy", "yield_curve_slope", "vol_risk_premium"}  # P4: macro features, TS z-scored
     )
-    num_cols = result.select_dtypes(include=["number"]).columns
-    for col in num_cols:
-        if col in _precomputed_cs_z:
-            continue
-        cs = result.groupby("date")[col].transform(
-            lambda x: (x - x.mean()) / (x.std(ddof=0) if x.std(ddof=0) not in (0, 0.0) else 1.0)
-        )
-        result[f"{col}_cs_z"] = cs.fillna(0.0)
+    result = _attach_cross_sectional_zscore_suffix_block(
+        result,
+        exclude_columns=frozenset(_precomputed_cs_z),
+    )
 
     # Phase 1 / Phase 2 ablation: zero disabled COMPOUND columns (TSE_ABLATION_STEP env).
     _zero_cols = feature_columns_to_zero_for_ablation()
@@ -1082,6 +1163,11 @@ def build_feature_matrix(
             "ticker",
             "sector",
             "regime_label",
+            "daily_return",
+            "adv_dollar_20",
+            "realised_vol_20d",
+            "capm_beta",
+            "expected_round_trip_cost_frac",
             "forward_return",
             "forward_return_risk_adj",  # C3: risk-adjusted target
             "forward_return_excess",

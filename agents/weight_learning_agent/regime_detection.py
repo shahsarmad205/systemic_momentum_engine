@@ -16,6 +16,8 @@ When multiple conditions could apply, HighVol takes precedence, then Bull/Bear.
 
 
 import pandas as pd
+from utils.market_data import get_ohlcv
+from utils.wrds_data import load_wrds_price_panel, resolve_data_provider
 
 SPY_TICKER = "SPY"
 LOOKBACK_DAYS = 250  # 200 MA + buffer
@@ -24,7 +26,16 @@ LONG_TERM_VOL_WINDOW = 200
 HIGH_VOL_MULTIPLIER = 1.5  # 20d vol > this × long-term avg → HighVol
 
 
-def detect_regimes(start_date: str, end_date: str) -> pd.Series:
+def detect_regimes(
+    start_date: str,
+    end_date: str,
+    *,
+    data_provider: str | None = None,
+    cache_dir: str | None = None,
+    cache_ttl_days: int = 1,
+    wrds_username: str | None = None,
+    wrds_ticker_to_permno: dict[str, int] | None = None,
+) -> pd.Series:
     """
     Detect market regime for each trading day in [start_date, end_date].
 
@@ -33,13 +44,32 @@ def detect_regimes(start_date: str, end_date: str) -> pd.Series:
     """
     start = pd.Timestamp(start_date)
     end = pd.Timestamp(end_date)
-    import yfinance as yf  # lazy: avoids pulling websockets stack at import time
-
     dl_start = start - pd.Timedelta(days=LOOKBACK_DAYS)
     dl_end = end + pd.Timedelta(days=5)
+    provider = resolve_data_provider(data_provider)
 
-    raw = yf.download(SPY_TICKER, start=dl_start, end=dl_end, progress=False)
-    if raw.empty:
+    if provider == "wrds":
+        raw = load_wrds_price_panel(
+            [SPY_TICKER],
+            start_date=dl_start,
+            end_date=dl_end,
+            username=wrds_username,
+            cache_dir=cache_dir or "data/cache/wrds",
+            cache_ttl_days=cache_ttl_days,
+            ticker_to_permno=wrds_ticker_to_permno,
+            as_of_date=dl_end,
+        ).get(SPY_TICKER, pd.DataFrame())
+    else:
+        raw = get_ohlcv(
+            SPY_TICKER,
+            dl_start.strftime("%Y-%m-%d"),
+            dl_end.strftime("%Y-%m-%d"),
+            provider=provider,
+            use_cache=True,
+            cache_dir=cache_dir,
+            cache_ttl_days=cache_ttl_days,
+        )
+    if raw is None or raw.empty:
         return pd.Series(dtype=object)
     if isinstance(raw.columns, pd.MultiIndex):
         raw.columns = raw.columns.get_level_values(0)
@@ -68,10 +98,15 @@ def detect_regimes(start_date: str, end_date: str) -> pd.Series:
     return regime[mask].copy()
 
 
-def get_regime_series_for_dates(dates: pd.DatetimeIndex, start_date: str, end_date: str) -> pd.Series:
+def get_regime_series_for_dates(
+    dates: pd.DatetimeIndex,
+    start_date: str,
+    end_date: str,
+    **kwargs,
+) -> pd.Series:
     """
     Return a Series mapping each date in *dates* to its regime.
     Uses detect_regimes(start_date, end_date) and reindexes to *dates*.
     """
-    full = detect_regimes(start_date, end_date)
+    full = detect_regimes(start_date, end_date, **kwargs)
     return full.reindex(dates).fillna("Normal")

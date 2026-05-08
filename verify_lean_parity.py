@@ -6,7 +6,6 @@ data compared to the legacy Yahoo Finance provider.
 """
 
 import pandas as pd
-import numpy as np
 from utils.market_data import get_ohlcv
 
 def verify_parity(ticker="AAPL", days=100):

@@ -54,7 +54,14 @@ def _ensure_options_columns(trades: pd.DataFrame, risk_free_rate: float = 0.04, 
         ed = pd.Timestamp(row["entry_date"])
         sigma = 0.20
         try:
-            df = get_ohlcv(tk, start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"), use_cache=True, cache_ttl_days=0)
+            df = get_ohlcv(
+                tk,
+                start.strftime("%Y-%m-%d"),
+                end.strftime("%Y-%m-%d"),
+                provider=os.environ.get("TREND_DATA_PROVIDER") or "wrds",
+                use_cache=True,
+                cache_ttl_days=0,
+            )
             if df is not None and not df.empty and "Close" in df.columns:
                 series = df["Close"].loc[df.index <= ed]
                 if len(series) >= 2:

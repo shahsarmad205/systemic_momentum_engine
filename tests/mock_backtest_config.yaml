@@ -1,0 +1,23 @@
+backtest:
+  start_date: '2022-06-01'
+  end_date: '2023-01-30'
+  holding_period_days: 5
+data:
+  cache_dir: data/cache/wrds
+  provider: wrds
+research:
+  train_years: 0.5
+  test_years: 0.1
+  walk_forward_windows: 2
+universe:
+  mode: "custom"
+tickers: ["A", "AA", "AAL", "AAP", "AAPL"]
+feature_selection:
+  feature_subset: ["ret_5d", "ret_10d"]
+model_selection:
+  lookahead_horizon_days: 5
+  max_positions: 3
+  min_positions: 1
+execution:
+  long_only: true
+  enable_shorts: false

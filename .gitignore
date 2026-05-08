@@ -78,6 +78,9 @@ output/live/*
 
 # QuantConnect local sample data is large and reproducible from LEAN tooling.
 LeanCloud/data/
+LeanCloud/BinaryEdge/.idea/
+LeanCloud/BinaryEdge/.vscode/
+LeanCloud/BinaryEdge/graphify-out/
 
 # Final allow-list for source and explicitly versioned governance/model-release artifacts.
 !config/*.csv

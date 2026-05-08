@@ -16,7 +16,6 @@ class DummyProbModel:
         self.base = float(base)
 
     def predict_proba(self, x: np.ndarray) -> np.ndarray:
-        n = x.shape[0]
         p = np.clip(self.base + 0.02 * np.tanh(x[:, 0]), 0.01, 0.99)
         return np.column_stack([1.0 - p, p])
 

@@ -114,7 +114,6 @@ def main() -> int:
     slo_summary = _read_json(summary_path)
 
     now_utc = datetime.now(timezone.utc)
-    max_age_hours = float(dq_cfg.get("max_age_hours", 36.0))
 
     # Validate SLO if required
     slo_status = "UNKNOWN"

@@ -156,8 +156,6 @@ def main() -> int:
         if st != "PASS":
             failures.append("dual_model_health_not_pass")
 
-    status = "PASS" if not failures else "FAIL"
-
     if failures and bool(rg.get("auto_halt_on_fail", True)):
         latch_path = set_trading_halt_latch(
             cfg,

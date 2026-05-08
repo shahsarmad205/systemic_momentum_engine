@@ -7,7 +7,6 @@ except ImportError:
 # endregion
 
 import pickle
-import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -20,7 +19,14 @@ import pandas as pd
 class EnsembleModelSpec:
     path: str
     weight: float
-    model_type: str  # "classifier" | "regressor"
+    model_type: str  # "classifier"|"regressor"|"short_classifier"|"short_regressor"|"long_alpha"|"overlay_alpha"|"short_alpha"
+
+
+_VALID_MODEL_TYPES = frozenset({
+    "classifier", "regressor",
+    "short_classifier", "short_regressor",
+    "long_alpha", "overlay_alpha", "short_alpha",
+})
 
 
 @dataclass
@@ -30,6 +36,13 @@ class LoadedEnsembleModel:
     model_type: str
     estimator: Any
     feature_columns: list[str] | None
+    # True when the estimator (PrefitWeightedEnsemble) applies FeaturePreprocessor
+    # internally — skip the generic fill/clip so training preprocessing is honoured.
+    preprocessor_handled: bool = False
+    # M1: modal training horizon stored in the artifact (days). None if not present.
+    horizon_days: int | None = None
+    # H1: per-member specs from artifact["ensemble_member_specs"] — used for diagnostics.
+    member_specs: list[dict] | None = None
 
 
 def _minmax(s: pd.Series) -> pd.Series:
@@ -106,7 +119,7 @@ def load_ensemble_models(ensemble_cfg: dict[str, Any]) -> list[LoadedEnsembleMod
             continue
         w = float(m.get("weight", 0.0) or 0.0)
         t = str(m.get("type") or "classifier").strip().lower()
-        if t not in ("classifier", "regressor", "short_classifier", "short_regressor"):
+        if t not in _VALID_MODEL_TYPES:
             t = "classifier"
         pp = Path(p)
         if not pp.is_absolute():
@@ -122,6 +135,29 @@ def load_ensemble_models(ensemble_cfg: dict[str, Any]) -> list[LoadedEnsembleMod
             if est is None:
                 print(f"[ensemble] WARN: model file has no estimator, skipping: {pp}")
                 continue
+            # Artifact's model_type is authoritative — it reflects what model_selection
+            # actually trained (e.g. "long_alpha", "overlay_alpha", "short_alpha").
+            artifact_type = str(obj.get("model_type", "")).strip().lower() if isinstance(obj, dict) else ""
+            if artifact_type in _VALID_MODEL_TYPES:
+                t = artifact_type
+            # PrefitWeightedEnsemble applies FeaturePreprocessor internally per member.
+            # Skip the generic fill/clip in _predict_model so training preprocessing wins.
+            preproc_handled = hasattr(est, "feature_preprocessor") or hasattr(est, "estimator_preprocessors")
+
+            # M1: read modal training horizon from artifact.
+            _h_raw = obj.get("horizon_days") if isinstance(obj, dict) else None
+            _horizon_days: int | None = int(_h_raw) if isinstance(_h_raw, (int, float)) and _h_raw > 0 else None
+
+            # H1: read per-member specs for feature_view diagnostics.
+            _specs_raw = obj.get("ensemble_member_specs") if isinstance(obj, dict) else None
+            _member_specs: list[dict] | None = list(_specs_raw) if isinstance(_specs_raw, list) else None
+            if _member_specs:
+                _views: dict[str, int] = {}
+                for _s in _member_specs:
+                    _v = str(_s.get("feature_view", "?") or "?")
+                    _views[_v] = _views.get(_v, 0) + 1
+                print(f"[ensemble] {pp.name}: {len(_member_specs)} members — views={_views} horizon={_horizon_days}d")
+
             out.append(
                 LoadedEnsembleModel(
                     path=str(pp),
@@ -129,6 +165,9 @@ def load_ensemble_models(ensemble_cfg: dict[str, Any]) -> list[LoadedEnsembleMod
                     model_type=t,
                     estimator=est,
                     feature_columns=[str(c) for c in feat_cols] if isinstance(feat_cols, list) else None,
+                    preprocessor_handled=bool(preproc_handled),
+                    horizon_days=_horizon_days,
+                    member_specs=_member_specs,
                 )
             )
         except Exception as exc:  # noqa: BLE001
@@ -139,21 +178,39 @@ def load_ensemble_models(ensemble_cfg: dict[str, Any]) -> list[LoadedEnsembleMod
 
 def _predict_model(model: LoadedEnsembleModel, features_df: pd.DataFrame, clip: bool) -> pd.Series:
     cols = model.feature_columns if model.feature_columns else list(features_df.columns)
-    # Aggressive sanitization similar to training pipeline
-    X_df = (
-        features_df.reindex(columns=cols)
-        .replace([np.inf, -np.inf], np.nan)
-        .fillna(0.0)
-        .clip(-10.0, 10.0)
-    )
+
+    # C4: warn when artifact feature_columns diverge from the constructed feature matrix.
+    _missing = [c for c in cols if c not in features_df.columns]
+    if _missing:
+        print(
+            f"[ensemble] WARN: {len(_missing)} feature(s) in artifact not found in model_features "
+            f"(first 5: {_missing[:5]}). Predictions may be degraded."
+        )
+
+    if model.preprocessor_handled:
+        # H1/C2: Pass the full sanitized DataFrame to PrefitWeightedEnsemble.predict().
+        # Each member's FeaturePreprocessor.transform() independently selects its own
+        # active_features (full-view OR program-view) and applies the fitted median/
+        # winsorization stats.  Pre-restricting to model.feature_columns here would hide
+        # features that program-view members need but that weren't in the shared preprocessor.
+        X_df = features_df.replace([np.inf, -np.inf], np.nan)
+    else:
+        X_df = (
+            features_df.reindex(columns=cols)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .clip(-10.0, 10.0)
+        )
+
     est_mod = getattr(model.estimator, "__module__", "") or ""
-    # Use ndarray for sklearn estimators to avoid repetitive feature-name warnings.
-    # Force copy(True) to ensure contiguous memory for BLAS stability on Mac ARM64
-    X = X_df.to_numpy(dtype=float, copy=True) if est_mod.startswith("sklearn.") else X_df
-    
+    # Use ndarray for pure sklearn estimators to avoid feature-name warnings.
+    # For PrefitWeightedEnsemble (preprocessor_handled) pass the DataFrame so the
+    # ensemble's internal transform() receives the column names it was fitted on.
+    X = X_df.to_numpy(dtype=float, copy=True) if (est_mod.startswith("sklearn.") and not model.preprocessor_handled) else X_df
+
     est = model.estimator
     y: np.ndarray
-    
+
     # Silence known spurious BLAS matmul/overflow warnings on Apple Silicon during inference
     with np.errstate(all="ignore"):
         if model.model_type == "classifier":
@@ -170,12 +227,11 @@ def _predict_model(model: LoadedEnsembleModel, features_df: pd.DataFrame, clip: 
             if clip:
                 s = s.clip(-1.0, 1.0)
             return s
-        
+
         if model.model_type == "short_classifier":
             if hasattr(est, "predict_proba"):
                 proba = est.predict_proba(X)
                 p_down = np.asarray(proba)[:, 1] if np.asarray(proba).ndim == 2 else np.asarray(proba)
-                # High P(down) → strongly negative score (bearish)
                 y = -(2.0 * p_down - 1.0)
             else:
                 if hasattr(est, "decision_function"):
@@ -187,18 +243,15 @@ def _predict_model(model: LoadedEnsembleModel, features_df: pd.DataFrame, clip: 
                 s = s.clip(-1.0, 1.0)
             return s
 
-        if model.model_type == "short_regressor":
-            # Regressor predicts expected forward_return directly.
-            # Negative predicted return = expected price decline = strong short candidate.
-            # No negation: cross_sectional.py selects lowest score (most negative) first.
-            #
-            # Backward-compat: if the saved artifact is still the old XGBClassifier
-            # (has predict_proba), convert p_down to a negative score so ascending sort
-            # in cross_sectional.py still picks the strongest short candidates.
+        if model.model_type in ("short_regressor", "short_alpha"):
+            # short_alpha (DateGroupedEconomicModel, objective="short_side"): the gradient
+            # descent objective assigns more-negative scores to expected decliners, so
+            # .predict() already has "lower = stronger short" semantics — same as
+            # short_regressor.  Backward-compat: convert predict_proba if present.
             if hasattr(est, "predict_proba"):
                 proba = est.predict_proba(X)
                 p_down = np.asarray(proba)[:, 1] if np.asarray(proba).ndim == 2 else np.asarray(proba)
-                y = -(2.0 * p_down - 1.0)   # p_down=0.9 → -0.8 (most negative = best short)
+                y = -(2.0 * p_down - 1.0)
             else:
                 y = np.asarray(est.predict(X), dtype=float)
             s = pd.Series(y, index=features_df.index, dtype=float)
@@ -206,14 +259,23 @@ def _predict_model(model: LoadedEnsembleModel, features_df: pd.DataFrame, clip: 
                 s = s.clip(-0.3, 0.3)
             return s
 
-        # Auto-detect classifiers passed with type="regressor".
-        # RandomForestClassifier / GradientBoostingClassifier etc. expose
-        # predict_proba; calling .predict() returns binary {0,1} labels which
-        # discard probability information.  Use predict_proba when available.
+        if model.model_type in ("long_alpha", "overlay_alpha"):
+            # C1: DateGroupedEconomicModel trained with long_short_spread / long_only_overlay
+            # objective.  .predict() returns raw portfolio-utility scores; higher = better long.
+            # Same direction as "regressor" — no sign flip needed.
+            y = np.asarray(est.predict(X), dtype=float)
+            s = pd.Series(y, index=features_df.index, dtype=float)
+            if clip:
+                s = s.clip(-0.3, 0.3)
+            return s
+
+        # Generic fallback for "regressor" and unknown types.
+        # Auto-detect classifiers mislabelled as "regressor": use predict_proba when
+        # available (predict() returns binary {0,1} and discards probability information).
         if hasattr(est, "predict_proba"):
             proba = est.predict_proba(X)
             y = np.asarray(proba)[:, 1] if np.asarray(proba).ndim == 2 else np.asarray(proba)
-            y = 2.0 * y - 1.0  # map [0,1] → [-1,1]
+            y = 2.0 * y - 1.0
         else:
             y = np.asarray(est.predict(X), dtype=float)
 

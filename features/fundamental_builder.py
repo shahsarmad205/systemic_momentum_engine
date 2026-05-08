@@ -37,7 +37,6 @@ from __future__ import annotations
 
 import json
 import time
-import warnings
 from pathlib import Path
 
 import numpy as np
@@ -80,7 +79,7 @@ def _fetch_json(url: str, retries: int = 3) -> dict:
             req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=15) as r:
                 return json.loads(r.read())
-        except Exception as exc:
+        except Exception:
             if attempt == retries - 1:
                 raise
             time.sleep(1.0 * (attempt + 1))
@@ -113,16 +112,6 @@ def _get_cik(ticker: str) -> str | None:
     if ticker.upper() in cik_map:
         return cik_map[ticker.upper()]
 
-    # Fetch from EDGAR
-    try:
-        url = "https://efts.sec.gov/LATEST/search-index?q=%22" + ticker + "%22&forms=10-K&dateRange=custom&startdt=2020-01-01&enddt=2025-12-31"
-        data = _fetch_json(url)
-        # Try company_tickers_exchange endpoint
-        data2 = _fetch_json("https://efts.sec.gov/LATEST/search-index?q=%22" + ticker + "%22&forms=10-Q")
-    except Exception:
-        data = {}
-        data2 = {}
-
     # Try the direct company_tickers endpoint
     try:
         tickers_data = _fetch_json("https://www.sec.gov/files/company_tickers_exchange.json")
@@ -148,7 +137,6 @@ def _get_cik(ticker: str) -> str | None:
             for hit in hits:
                 src = hit.get("_source", {})
                 if src.get("period_of_report") and src.get("entity_id"):
-                    entity_ticker = src.get("file_num", "")
                     cik = str(src.get("entity_id", "")).zfill(10)
                     # Check display name contains ticker
                     if ticker.upper() in src.get("display_names", "").upper():

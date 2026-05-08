@@ -45,13 +45,22 @@ def run(
 
     start = getattr(config, "start_date", "2018-01-01")
     end = getattr(config, "end_date", "2024-01-01")
+    provider = getattr(config, "data_provider", None)
     T = horizon_days / 252.0
     n_steps = max(1, horizon_days)
 
     rows = []
     for ticker in tickers:
         try:
-            df = get_ohlcv(ticker, start, end, use_cache=True, cache_ttl_days=0)
+            df = get_ohlcv(
+                ticker,
+                start,
+                end,
+                provider=provider,
+                cache_dir=getattr(config, "cache_dir", None),
+                use_cache=True,
+                cache_ttl_days=0,
+            )
         except Exception:
             continue
         if df is None or df.empty or "Close" not in df.columns:

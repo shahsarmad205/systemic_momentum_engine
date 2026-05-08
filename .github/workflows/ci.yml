@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  hygiene-and-boundaries:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install CI dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ruff pytest
+
+      - name: Reject new unused imports and variables
+        run: |
+          python -m ruff check --select F401,F841 \
+            --exclude LeanCloud \
+            --exclude graphify-out \
+            .
+
+      - name: Enforce live import boundaries
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m pytest tests/test_import_boundaries.py -q

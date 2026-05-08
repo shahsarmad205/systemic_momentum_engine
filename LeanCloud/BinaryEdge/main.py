@@ -19,10 +19,12 @@ try:
 except ImportError:
     pass
 
-from qc_alpha_model import TrendSignalAlphaModel, LoadProductionModel
+try:
+    from .qc_alpha_model import TrendSignalAlphaModel, LoadProductionModel
+except ImportError:
+    from qc_alpha_model import TrendSignalAlphaModel, LoadProductionModel
 from datetime import timedelta
 import numpy as np
-from System import Decimal
 
 
 class InstitutionalPortfolioConstructionModel(PortfolioConstructionModel):

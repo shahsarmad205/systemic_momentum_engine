@@ -18,6 +18,7 @@ import statsmodels.api as sm
 from statsmodels.regression.linear_model import OLS
 from statsmodels.tools import add_constant
 from scipy.stats import norm, beta as beta_dist
+from typing import Optional
 try:
     import pandas_datareader as pdr
 except ImportError:
@@ -363,50 +364,64 @@ def compute_signal_accuracy(trades: pd.DataFrame) -> float:
 # Information Coefficient (Pearson)
 # ------------------------------------------------------------------
 
+def _compute_asset_return_series(trades: pd.DataFrame) -> pd.Series:
+    """
+    Raw asset return used for IC diagnostics.
+
+    This is intentionally direction-agnostic: a strong short signal should
+    correlate with a negative future asset return, not with a positive
+    direction-adjusted trade return.
+    """
+    if "entry_price" in trades.columns and "exit_price" in trades.columns:
+        entry = pd.to_numeric(trades["entry_price"], errors="coerce")
+        exit_ = pd.to_numeric(trades["exit_price"], errors="coerce")
+        return (exit_ - entry) / (entry + 1e-12)
+
+    # Legacy fallback only for incomplete trade logs.
+    return pd.to_numeric(trades.get("return", pd.Series(index=trades.index, dtype=float)), errors="coerce")
+
+
+def _compute_daily_cross_sectional_ic_series(trades: pd.DataFrame) -> pd.Series:
+    """Daily cross-sectional Spearman IC series using the canonical asset return."""
+    if len(trades) < 3 or "adjusted_score" not in trades.columns or "signal_date" not in trades.columns:
+        return pd.Series(dtype=float)
+
+    ic_df = trades[["signal_date", "adjusted_score"]].copy()
+    ic_df["adjusted_score"] = pd.to_numeric(ic_df["adjusted_score"], errors="coerce")
+    ic_df["asset_return"] = _compute_asset_return_series(trades)
+    ic_df = ic_df.dropna(subset=["signal_date", "adjusted_score", "asset_return"])
+    if ic_df.empty:
+        return pd.Series(dtype=float)
+
+    daily_ic = ic_df.groupby("signal_date").apply(
+        lambda x: x["adjusted_score"].corr(x["asset_return"], method="spearman")
+        if len(x) > 1
+        and x["adjusted_score"].nunique() > 1
+        and x["asset_return"].nunique() > 1
+        else np.nan,
+        include_groups=False,
+    )
+    return daily_ic.dropna()
+
+
 def compute_information_coefficient(trades: pd.DataFrame) -> float:
     """
     Standard IC: spearman correlation between adjusted_score and return.
     Now refactored to calculate daily cross-sectional mean (professional standard).
     """
-    if len(trades) < 3 or "adjusted_score" not in trades.columns or "signal_date" not in trades.columns:
-        return 0.0
-    
-    # Daily cross-sectional IC
     try:
-        def _get_asset_return(df: pd.DataFrame) -> pd.Series:
-            # Correlate score with raw asset change (exit - entry) / entry
-            # regardless of trade direction (Long/Short).
-            if "entry_price" in df.columns and "exit_price" in df.columns:
-                return (df["exit_price"] - df["entry_price"]) / (df["entry_price"] + 1e-12)
-            # Fallback to direction-adjusted return (incorrect sign for IC if Shorts are present)
-            return df["return"]
-
-        daily_ic = trades.groupby("signal_date").apply(
-            lambda x: x["adjusted_score"].corr(_get_asset_return(x), method="spearman") 
-            if len(x) > 1 and x["adjusted_score"].nunique() > 1 and x["return"].nunique() > 1 else np.nan,
-            include_groups=False
-        )
-        # Drop NaNs (dates with <2 trades)
-        valid_ic = daily_ic.dropna()
+        valid_ic = _compute_daily_cross_sectional_ic_series(trades)
         return float(valid_ic.mean()) if not valid_ic.empty else 0.0
     except Exception:
         # Fallback to simple correlation (using corrected return logic)
-        asset_ret = (trades["exit_price"] - trades["entry_price"]) / (trades["entry_price"] + 1e-12)
+        asset_ret = _compute_asset_return_series(trades)
         ic = trades["adjusted_score"].corr(asset_ret, method="spearman")
         return 0.0 if pd.isna(ic) else float(ic)
 
 
 def compute_ic_series(trades: pd.DataFrame) -> pd.Series:
     """Returns the daily cross-sectional IC series for Grinold/Breadth math."""
-    if len(trades) < 3 or "adjusted_score" not in trades.columns or "signal_date" not in trades.columns:
-        return pd.Series(dtype=float)
-    
-    daily_ic = trades.groupby("signal_date").apply(
-        lambda x: x["adjusted_score"].corr(x["return"], method="spearman") 
-        if len(x) > 1 and x["adjusted_score"].nunique() > 1 and x["return"].nunique() > 1 else np.nan,
-        include_groups=False
-    ).dropna()
-    return daily_ic
+    return _compute_daily_cross_sectional_ic_series(trades)
 
 
 def compute_rank_ic(trades: pd.DataFrame) -> float:
@@ -784,6 +799,31 @@ def compute_capm_metrics(
     return out
 
 
+def _compute_trade_gross_pnl(trades: pd.DataFrame) -> pd.Series:
+    """
+    Canonical gross P&L series for attribution.
+
+    Continuous optimization now records per-trade MTM-ledger P&L directly.
+    Fall back to legacy position_size × return only when that ledger is absent.
+    """
+    if trades.empty:
+        return pd.Series(dtype=float)
+
+    if "gross_mtm_pnl" in trades.columns:
+        return pd.to_numeric(trades["gross_mtm_pnl"], errors="coerce").fillna(0.0)
+
+    if "pnl" in trades.columns:
+        return pd.to_numeric(trades["pnl"], errors="coerce").fillna(0.0)
+
+    if "position_size" not in trades.columns:
+        return pd.Series(0.0, index=trades.index, dtype=float)
+
+    ret_col = "gross_return" if "gross_return" in trades.columns else "return"
+    pos = pd.to_numeric(trades["position_size"], errors="coerce").fillna(0.0)
+    ret = pd.to_numeric(trades.get(ret_col, 0.0), errors="coerce").fillna(0.0)
+    return pos * ret
+
+
 # ------------------------------------------------------------------
 # Aggregate helper
 # ------------------------------------------------------------------
@@ -953,20 +993,17 @@ def compute_all_metrics(
         l_trades = trades[trades["direction"] > 0]
         s_trades = trades[trades["direction"] < 0]
         
-        # Use 'gross_return' (pre-slippage) for gross P&L if available
-        l_ret_col = "gross_return" if "gross_return" in trades.columns else "return"
-        s_ret_col = "gross_return" if "gross_return" in trades.columns else "return"
-        
-        long_gross_pnl = (l_trades["position_size"] * l_trades[l_ret_col]).sum()
-        short_gross_pnl = (s_trades["position_size"] * s_trades[s_ret_col]).sum()
+        gross_trade_pnl = _compute_trade_gross_pnl(trades)
+        long_gross_pnl = float(gross_trade_pnl.loc[l_trades.index].sum()) if not l_trades.empty else 0.0
+        short_gross_pnl = float(gross_trade_pnl.loc[s_trades.index].sum()) if not s_trades.empty else 0.0
         
         # Total Fees = Trade Costs (commission/impact) + Daily Borrow Costs (shorting)
         total_trade_costs = trades["total_cost"].sum()
         total_borrow_costs = daily_equity["short_borrow_cost"].sum() if "short_borrow_cost" in daily_equity.columns else 0.0
         total_fees = total_trade_costs + total_borrow_costs
         
-        m["long_pnl_contrib_pct"] = float(long_gross_pnl) / m["starting_capital"]
-        m["short_pnl_contrib_pct"] = float(short_gross_pnl) / m["starting_capital"]
+        m["long_pnl_contrib_pct"] = long_gross_pnl / m["starting_capital"]
+        m["short_pnl_contrib_pct"] = short_gross_pnl / m["starting_capital"]
         m["total_fees_pct"] = float(total_fees) / m["starting_capital"]
         m["long_pnl_contrib"] = m["long_pnl_contrib_pct"] # Legacy naming
         m["short_pnl_contrib"] = m["short_pnl_contrib_pct"]
@@ -1132,7 +1169,7 @@ def compute_institutional_alpha_metrics(trades: pd.DataFrame, daily_equity: pd.D
 # [ADVANCED] Institutional Quantitative Auditing Modules
 # ------------------------------------------------------------------
 
-def compute_effective_n_from_returns(trades: pd.DataFrame, price_data: dict | None = None) -> float:
+def compute_effective_n_from_returns(trades: pd.DataFrame, price_data: Optional[dict] = None) -> float:
     """
     Eigenvalue participation ratio: N_eff = (Σλ)² / Σλ².
 
@@ -1191,8 +1228,8 @@ def compute_effective_n_from_returns(trades: pd.DataFrame, price_data: dict | No
 def compute_grinold_ir_decomposition(
     trades: pd.DataFrame,
     trades_per_year: float,
-    N_eff: float | None = None,
-    price_data: dict | None = None,
+    N_eff: Optional[float] = None,
+    price_data: Optional[dict] = None,
 ):
     """
     Fundamental Law of Active Management: IR = IC × √Breadth.
@@ -1667,7 +1704,7 @@ def bhy_correction(
 def walk_forward_significance_report(
     oos_sharpes: list[float],
     n_days_per_window: int,
-    n_total_trials: int | None = None,
+    n_total_trials: Optional[int] = None,
     alpha: float = 0.05,
 ) -> dict:
     """

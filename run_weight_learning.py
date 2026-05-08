@@ -117,8 +117,8 @@ def _resolve_tickers(args):
             cfg_tickers = []
 
     try:
-        from main import TICKERS
-        fallback = list(TICKERS)
+        from utils.default_universe import DEFAULT_TICKERS
+        fallback = list(DEFAULT_TICKERS)
     except Exception:
         fallback = [
             "AAPL", "MSFT", "NVDA", "AMZN", "GOOG", "META", "TSLA",

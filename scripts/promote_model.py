@@ -13,11 +13,13 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 MODELS_DIR = ROOT / "output" / "models"
@@ -77,6 +79,166 @@ def _append_jsonl(path: Path, payload: dict[str, Any]) -> None:
 
 def _log_promotion_event(payload: dict[str, Any]) -> None:
     _append_jsonl(LOG_PATH, payload)
+
+
+def _remote_join(base_uri: str, *parts: str) -> str:
+    base = str(base_uri or "").rstrip("/")
+    suffix = "/".join(str(p).strip("/") for p in parts if str(p or "").strip("/"))
+    return f"{base}/{suffix}" if suffix else base
+
+
+def _resolve_object_store_uri(
+    object_store_cfg: dict[str, Any],
+    override_uri: str | None,
+) -> str:
+    override = str(override_uri or "").strip()
+    if override:
+        return override
+
+    configured = str(object_store_cfg.get("uri", "") or "").strip()
+    if configured:
+        return configured
+
+    env_name = str(object_store_cfg.get("uri_env", "MODEL_REGISTRY_URI") or "").strip()
+    if env_name:
+        return str(os.getenv(env_name, "") or "").strip()
+    return ""
+
+
+def _upload_file_to_object_store(source: Path, destination_uri: str) -> None:
+    parsed = urlparse(destination_uri)
+    scheme = parsed.scheme.lower()
+    if scheme == "file":
+        if parsed.netloc and parsed.netloc not in {"localhost", ""}:
+            destination = Path(f"/{parsed.netloc}{parsed.path}")
+        else:
+            destination = Path(parsed.path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+        return
+
+    if scheme == "s3":
+        try:
+            import boto3  # type: ignore
+        except ImportError as exc:
+            raise RuntimeError("boto3 is required for s3:// model artifact promotion") from exc
+        bucket = parsed.netloc
+        key = parsed.path.lstrip("/")
+        if not bucket or not key:
+            raise ValueError(f"invalid s3 destination URI: {destination_uri}")
+        boto3.client("s3").upload_file(str(source), bucket, key)
+        return
+
+    if scheme == "gs":
+        try:
+            from google.cloud import storage  # type: ignore
+        except ImportError as exc:
+            raise RuntimeError(
+                "google-cloud-storage is required for gs:// model artifact promotion"
+            ) from exc
+        bucket_name = parsed.netloc
+        blob_name = parsed.path.lstrip("/")
+        if not bucket_name or not blob_name:
+            raise ValueError(f"invalid gs destination URI: {destination_uri}")
+        client = storage.Client()
+        client.bucket(bucket_name).blob(blob_name).upload_from_filename(str(source))
+        return
+
+    raise ValueError(
+        "model artifact object store URI must use file://, s3://, or gs:// "
+        f"(got {destination_uri!r})"
+    )
+
+
+def _publish_model_artifacts(
+    *,
+    manifest: dict[str, Any],
+    manifest_file: Path,
+    resolved_artifacts: dict[str, Path],
+    target_state: str,
+    object_store_cfg: dict[str, Any],
+    override_uri: str,
+    override_version: str,
+    override_family: str,
+) -> dict[str, Any] | None:
+    explicit_uri = str(override_uri or "").strip()
+    enabled = bool(object_store_cfg.get("enabled", False)) or bool(explicit_uri)
+    require_for_production = bool(object_store_cfg.get("require_for_production", False))
+    if not enabled and not (target_state == "production" and require_for_production):
+        return None
+
+    object_store_uri = _resolve_object_store_uri(object_store_cfg, explicit_uri)
+    if not object_store_uri:
+        raise RuntimeError("object_store_uri_missing")
+
+    run_id = str(manifest.get("run_id", "") or "").strip()
+    selected_model = str(manifest.get("selected_model", "") or "").strip()
+    model_family = (
+        str(override_family or "").strip()
+        or str(object_store_cfg.get("family", "") or "").strip()
+        or "ensemble"
+    )
+    artifact_version = (
+        str(override_version or "").strip()
+        or str(object_store_cfg.get("version", "") or "").strip()
+        or run_id
+    )
+    if not artifact_version:
+        raise RuntimeError("artifact_version_missing")
+
+    best_model = resolved_artifacts.get("best_model_path")
+    best_meta = resolved_artifacts.get("best_meta_path")
+    report = resolved_artifacts.get("report_path")
+    if best_model is None or best_meta is None or report is None:
+        raise RuntimeError("missing_resolved_artifact_for_object_store")
+
+    prefix_uri = _remote_join(object_store_uri, model_family, artifact_version)
+    published_at = _utc_now_iso()
+    metadata_path = MODELS_DIR / "artifact_registry" / f"{run_id}_{target_state}_artifact_metadata.json"
+
+    upload_plan = {
+        "model": (best_model, "model.pkl"),
+        "model_metadata": (best_meta, "model_metadata.json"),
+        "manifest": (manifest_file, "manifest.json"),
+        "selection_report": (report, "model_comparison.csv"),
+    }
+    objects: dict[str, dict[str, Any]] = {}
+    for logical_name, (source, remote_name) in upload_plan.items():
+        destination = _remote_join(prefix_uri, remote_name)
+        _upload_file_to_object_store(source, destination)
+        objects[logical_name] = {
+            "uri": destination,
+            "sha256": _sha256_file(source),
+            "bytes": source.stat().st_size,
+        }
+
+    metadata: dict[str, Any] = {
+        "schema_version": 1,
+        "published_at_utc": published_at,
+        "target_state": target_state,
+        "run_id": run_id,
+        "model_name": selected_model,
+        "model_family": model_family,
+        "artifact_version": artifact_version,
+        "prefix_uri": prefix_uri,
+        "source_manifest_path": (
+            str(manifest_file.relative_to(ROOT)) if manifest_file.is_relative_to(ROOT) else str(manifest_file)
+        ),
+        "source_manifest_sha256": _sha256_file(manifest_file),
+        "git": manifest.get("git", {}),
+        "objects": objects,
+    }
+
+    metadata_uri = _remote_join(prefix_uri, "artifact_metadata.json")
+    metadata["local_metadata_path"] = (
+        str(metadata_path.relative_to(ROOT)) if metadata_path.is_relative_to(ROOT) else str(metadata_path)
+    )
+    metadata["objects"]["artifact_metadata"] = {
+        "uri": metadata_uri,
+    }
+    _atomic_write_json(metadata_path, metadata)
+    _upload_file_to_object_store(metadata_path, metadata_uri)
+    return metadata
 
 
 def _resolve_manifest(run_id: str | None, manifest_path: str | None) -> Path:
@@ -313,6 +475,24 @@ def main() -> int:
     parser.add_argument("--actor", type=str, default="manual")
     parser.add_argument("--reason", type=str, default="")
     parser.add_argument("--skip-validator", action="store_true")
+    parser.add_argument(
+        "--object-store-uri",
+        type=str,
+        default="",
+        help="Override model_selection.promotion.object_store.uri/uri_env for artifact publishing.",
+    )
+    parser.add_argument(
+        "--artifact-version",
+        type=str,
+        default="",
+        help="Version prefix used in the model registry object path; defaults to run_id.",
+    )
+    parser.add_argument(
+        "--model-family",
+        type=str,
+        default="",
+        help="Registry family prefix, e.g. ensemble; defaults to promotion config or ensemble.",
+    )
     args = parser.parse_args()
 
     cfg = _read_json(Path("/dev/null"), {})
@@ -326,6 +506,7 @@ def main() -> int:
 
     ms_cfg = (cfg.get("model_selection", {}) or {})
     promo_cfg = (ms_cfg.get("promotion", {}) or {})
+    object_store_cfg = (promo_cfg.get("object_store", {}) or {})
     require_validator_pass = bool(promo_cfg.get("require_validator_pass", True))
     block_dirty_git_for_production = bool(promo_cfg.get("block_dirty_git_for_production", True))
 
@@ -613,6 +794,39 @@ def main() -> int:
             )
             return 1
 
+    object_store_metadata = None
+    try:
+        object_store_metadata = _publish_model_artifacts(
+            manifest=manifest,
+            manifest_file=manifest_file,
+            resolved_artifacts=resolved_artifacts,
+            target_state=target_state,
+            object_store_cfg=object_store_cfg,
+            override_uri=args.object_store_uri,
+            override_version=args.artifact_version,
+            override_family=args.model_family,
+        )
+    except Exception as exc:
+        print(f"ERROR: model artifact object-store publish failed: {exc}")
+        _log_promotion_event(
+            {
+                "at_utc": _utc_now_iso(),
+                "success": False,
+                "action": "promote",
+                "run_id": run_id,
+                "from_state": current_state,
+                "to_state": target_state,
+                "manifest": str(manifest_file),
+                "error": str(exc),
+                "actor": args.actor,
+                "reason": args.reason,
+            }
+        )
+        return 1
+
+    if object_store_metadata is not None:
+        entry["object_store"] = object_store_metadata
+
     entry["current_state"] = target_state
     history = entry.get("state_history", [])
     if not isinstance(history, list):
@@ -645,6 +859,8 @@ def main() -> int:
             "config": manifest.get("config", {}),
             "git": manifest.get("git", {}),
         }
+        if object_store_metadata is not None:
+            pointer["object_store"] = object_store_metadata
         _atomic_write_json(POINTER_PATH, pointer)
         try:
             _atomic_write_json(REGISTRY_PATH, registry)
@@ -670,6 +886,10 @@ def main() -> int:
             "actor": args.actor,
             "reason": args.reason,
             "validator_required": require_validator_pass and not args.skip_validator,
+            "object_store_published": object_store_metadata is not None,
+            "object_store_prefix_uri": (
+                object_store_metadata.get("prefix_uri", "") if object_store_metadata else ""
+            ),
         },
     )
 
@@ -678,6 +898,9 @@ def main() -> int:
     if target_state == "production":
         print(f"Production pointer: {POINTER_PATH}")
     print(f"Promotion log: {LOG_PATH}")
+    if object_store_metadata is not None:
+        print(f"Model registry prefix: {object_store_metadata.get('prefix_uri', '')}")
+        print(f"Artifact metadata: {object_store_metadata.get('local_metadata_path', '')}")
     return 0
 
 

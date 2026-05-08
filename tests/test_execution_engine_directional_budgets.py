@@ -27,6 +27,10 @@ def _base_cfg() -> dict:
             "max_longs": 2,
             "max_shorts": 2,
         },
+        "data": {
+            "provider": "wrds",
+            "cache_dir": "data/cache/wrds",
+        },
         "signals": {
             "signal_confidence_multiplier": 0.0,
         },

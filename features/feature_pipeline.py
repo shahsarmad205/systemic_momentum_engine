@@ -15,6 +15,7 @@ one enriched per-ticker feature matrix.
 
 
 import logging
+import os
 import warnings
 
 import numpy as np
@@ -38,9 +39,6 @@ KNOWN_REDUNDANCIES = {
     "volume_spike": "relative_volume",   # equivalent ratio
 }
 
-
-import pandas_ta as ta
-
 def robust_zscore(series: pd.Series, window: int = 252, min_periods: int = 60) -> pd.Series:
     """Rolling z-score with zero-std protection and clipping to [-10, 10]."""
     roll = series.rolling(window=window, min_periods=min_periods)
@@ -50,6 +48,11 @@ def robust_zscore(series: pd.Series, window: int = 252, min_periods: int = 60) -
     sigma = sigma.clip(lower=1e-6)
     z = (series - mu) / sigma
     return z.clip(-10.0, 10.0).fillna(0.0)
+
+
+def _sma(series: pd.Series, length: int) -> pd.Series:
+    """Simple moving average equivalent to pandas_ta.sma for fixed windows."""
+    return pd.to_numeric(series, errors="coerce").rolling(length, min_periods=length).mean()
 
 def sanitize_dataframe(df: pd.DataFrame, clip_val: float = 10.0) -> pd.DataFrame:
     """Replaces infs, fills NaNs, and clips all numeric columns."""
@@ -319,7 +322,6 @@ def calculate_short_logic_features(df: pd.DataFrame) -> pd.DataFrame:
     #    Rescaled to [-1, 1]: rank=0 → -1 (lowest TO), rank=1 → +1 (highest TO)
     # ------------------------------------------------------------------
     vol = pd.to_numeric(df.get("volume", df.get("Volume", pd.Series(dtype=float))), errors="coerce")
-    shrout_proxy = close * vol  # dollar volume as proxy for share turnover
     to_20d = (vol / vol.rolling(252, min_periods=60).mean().replace(0, np.nan)).clip(0.0, 20.0)
     to_pct_rank = to_20d.rolling(63, min_periods=21).rank(pct=True).fillna(0.5)
     to_centered = (to_pct_rank * 2.0 - 1.0)  # rescale to [-1, 1]
@@ -379,8 +381,8 @@ def calculate_core_trend_features(df: pd.DataFrame) -> pd.DataFrame:
     df["momentum_3m"] = close / close.shift(63) - 1
     df["momentum_6m"] = close / close.shift(126) - 1
     
-    ma50 = ta.sma(close, length=50)
-    ma200 = ta.sma(close, length=200)
+    ma50 = _sma(close, length=50)
+    ma200 = _sma(close, length=200)
     df["ma_50_ratio"] = ((ma50 / close.replace(0.0, np.nan)) - 1.0).fillna(0.0)
     df["ma_200_ratio"] = ((ma200 / close.replace(0.0, np.nan)) - 1.0).fillna(0.0)
     
@@ -485,8 +487,8 @@ def calculate_value_quality_features(df: pd.DataFrame) -> pd.DataFrame:
 
 def detect_market_regime(df: pd.DataFrame) -> pd.DataFrame:
     close = pd.to_numeric(df["close"], errors="coerce")
-    m50_r = df["ma_50_ratio"] if "ma_50_ratio" in df.columns else (ta.sma(close, 50) / close - 1)
-    m200_r = df["ma_200_ratio"] if "ma_200_ratio" in df.columns else (ta.sma(close, 200) / close - 1)
+    m50_r = df["ma_50_ratio"] if "ma_50_ratio" in df.columns else (_sma(close, 50) / close - 1)
+    m200_r = df["ma_200_ratio"] if "ma_200_ratio" in df.columns else (_sma(close, 200) / close - 1)
     
     df["trend_regime"] = "sideways"
     df.loc[(m50_r > 0) & (m200_r > 0) & (m50_r > m200_r), "trend_regime"] = "bull_trend"
@@ -628,7 +630,14 @@ def build_feature_matrix(df: pd.DataFrame, config=None) -> pd.DataFrame:
                 ix = base.index
                 start = ix.min().strftime("%Y-%m-%d") if hasattr(ix.min(), "strftime") else str(ix.min())[:10]
                 end = ix.max().strftime("%Y-%m-%d") if hasattr(ix.max(), "strftime") else str(ix.max())[:10]
-                spy = get_ohlcv("SPY", start, end, use_cache=True, cache_ttl_days=0)
+                spy = get_ohlcv(
+                    "SPY",
+                    start,
+                    end,
+                    provider=os.environ.get("TREND_DATA_PROVIDER") or "wrds",
+                    use_cache=True,
+                    cache_ttl_days=0,
+                )
                 if spy is not None and not spy.empty and "Close" in spy.columns:
                     spy_ret = spy["Close"].pct_change(fill_method=None)
                     stock_ret = base["daily_return"]
@@ -732,4 +741,3 @@ def build_feature_matrix(df: pd.DataFrame, config=None) -> pd.DataFrame:
         )
 
     return sanitize_dataframe(enriched)
-

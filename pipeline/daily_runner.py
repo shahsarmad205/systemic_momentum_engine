@@ -14,10 +14,10 @@ from typing import Any
 
 from backtesting.signals import SignalEngine
 from config import get_effective_tickers, load_config
-from data import MarketDataLoader
 from features import FeatureEngine
 from pipeline.news_scraper import fetch_news_for_ticker
 from pipeline.sentiment_scorer import SentimentScorer
+from utils.market_data import get_ohlcv
 
 logger = logging.getLogger(__name__)
 
@@ -75,12 +75,6 @@ class DailyRunner:
         self.config_path = config_path
         self.cache_dir = cache_dir
         self._config = load_config(config_path)
-        self._market_loader = MarketDataLoader(
-            provider=getattr(self._config, "data_provider", "yahoo"),
-            cache_dir=getattr(self._config, "cache_dir", "data/cache/ohlcv"),
-            use_cache=getattr(self._config, "cache_ohlcv", True),
-            cache_ttl_days=int(getattr(self._config, "cache_ttl_days", 0)),
-        )
         self._signal_engine = SignalEngine(
             weights=getattr(self._config, "signal_weights", None),
             learned_weights=getattr(self._config, "learned_weights", None),
@@ -112,7 +106,15 @@ class DailyRunner:
         for ticker in tickers:
             try:
                 # 1. Load price data
-                df = self._market_loader.load_price_history(ticker, start_date, end_date)
+                df = get_ohlcv(
+                    ticker,
+                    start_date,
+                    end_date,
+                    provider=getattr(self._config, "data_provider", None),
+                    cache_dir=getattr(self._config, "cache_dir", "data/cache/ohlcv"),
+                    use_cache=getattr(self._config, "cache_ohlcv", True),
+                    cache_ttl_days=int(getattr(self._config, "cache_ttl_days", 0)),
+                )
                 n_rows = 0 if df is None or df.empty else len(df)
                 if df is None or df.empty:
                     print(f"  SKIP {ticker}: Insufficient price data (0 rows returned)")
@@ -228,6 +230,7 @@ class DailyRunner:
 
 if __name__ == "__main__":
     from config import setup_logging
+
     setup_logging(verbose=False)
     cfg = load_config("backtest_config.yaml")
     fallback = getattr(cfg, "tickers", None) or DEFAULT_TICKERS

@@ -19,15 +19,22 @@ Key improvements over the EDGAR implementation:
    linktype IN ('LU','LC','LS') and linkprim IN ('P','C') ensures we get the
    primary security link and exclude stale/duplicate links.
 
-3. Same output schema as fundamental_builder.py:
-   f_score, accruals_ratio, roa, delta_roa, delta_leverage
-   Downstream code (feature_pipeline.py) requires no changes.
+3. Institutional short-book deterioration schema:
+   f_score, accruals, profitability, leverage, margin deterioration,
+   dilution, reporting-delay/restatement-like proxies, and optional crowding
+   placeholders.  These features are point-in-time off ``rdq`` and are meant
+   for genuine short alpha rather than price-only momentum/reversal.
 
 Compustat columns used (comp.fundq):
     atq   : Total Assets (quarterly, balance sheet)
     niq   : Net Income (quarterly, income statement)
     oancfy: Net Cash from Operating Activities (YTD; we convert to Q via diff)
+    dlcq  : Debt in Current Liabilities (quarterly, balance sheet)
     dlttq : Long-Term Debt (quarterly, balance sheet)
+    saleq : Sales / revenue
+    cogsq : Cost of goods sold
+    xsgaq : SG&A expense
+    cshoq : Common shares outstanding
     actq  : Current Assets (quarterly, balance sheet)
     lctq  : Current Liabilities (quarterly, balance sheet)
     rdq   : Report Date of Quarterly Earnings (availability date)
@@ -42,12 +49,37 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from utils.wrds_compat import wrds_raw_sql
+
 logger = logging.getLogger(__name__)
 
 CACHE_DIR = Path("data/cache/wrds/fundamentals")
 CACHE_TTL_DAYS = 30
 
-_OUTPUT_COLS = ["f_score", "accruals_ratio", "roa", "delta_roa", "delta_leverage"]
+_OUTPUT_COLS = [
+    "f_score",
+    "accruals_ratio",
+    "roa",
+    "delta_roa",
+    "delta_leverage",
+    "gross_margin",
+    "delta_gross_margin",
+    "operating_margin",
+    "delta_operating_margin",
+    "margin_deterioration",
+    "debt_to_assets",
+    "total_debt_to_assets",
+    "weak_profitability",
+    "share_issuance_growth",
+    "dilution_pressure",
+    "filing_delay_days",
+    "late_filing_flag",
+    "restatement_like_flag",
+    "fundamental_deterioration_score",
+    "short_interest_ratio",
+    "days_to_cover",
+    "borrow_crowding_risk",
+]
 
 
 def _zeros(dates: pd.DatetimeIndex) -> pd.DataFrame:
@@ -91,7 +123,7 @@ def _get_gvkey(
         LIMIT 1
     """
     try:
-        df = db.raw_sql(sql)
+        df = wrds_raw_sql(db, sql)
         gvkey = str(df["gvkey"].iloc[0]).strip() if not df.empty else ""
     except Exception as exc:
         logger.warning("CRSP-Compustat link query failed for permno=%s: %s", permno, exc)
@@ -115,7 +147,8 @@ def _fetch_compustat_quarterly(
     """
     Pull comp.fundq for a single GVKEY and return a cleaned DataFrame.
 
-    Columns: datadate, rdq, atq, niq, oancfy, dlttq, actq, lctq.
+    Columns include datadate, rdq, accounting profitability/cash-flow inputs,
+    debt, sales/margin inputs, shares outstanding, and liquidity fields.
 
     ``rdq`` is the key — it is the earnings announcement date (the day the
     data became public).  We use it as the point-in-time availability date.
@@ -135,7 +168,8 @@ def _fetch_compustat_quarterly(
 
         sql = f"""
             SELECT gvkey, datadate, rdq, fqtr, fyearq,
-                   atq, niq, oancfy, dlttq, actq, lctq
+                   atq, niq, oancfy, dlcq, dlttq, saleq, cogsq, xsgaq,
+                   cshoq, actq, lctq
             FROM comp.fundq
             WHERE gvkey = '{gvkey}'
               AND datafmt = 'STD'
@@ -144,7 +178,7 @@ def _fetch_compustat_quarterly(
             ORDER BY datadate
         """
         try:
-            df = db.raw_sql(sql, date_cols=["datadate", "rdq"])
+            df = wrds_raw_sql(db, sql, date_cols=["datadate", "rdq"])
         except Exception as exc:
             logger.warning("comp.fundq query failed for gvkey=%s: %s", gvkey, exc)
             return pd.DataFrame()
@@ -192,7 +226,7 @@ def _compute_features_from_quarterly(
 
     def _pit_forward_fill(series: pd.Series, avail_dates: pd.Index) -> pd.Series:
         """Forward-fill a quarterly series indexed by avail_date onto daily dates."""
-        s = series.copy()
+        s = pd.Series(series).copy()
         s.index = avail_dates
         s = s[~s.index.duplicated(keep="first")].sort_index()
         full_range = pd.date_range(
@@ -207,8 +241,15 @@ def _compute_features_from_quarterly(
     niq = _pit_forward_fill(quarterly["niq"].values, avail)
     ocf = _pit_forward_fill(quarterly["ocf_q"].values, avail)
     dlttq = _pit_forward_fill(quarterly["dlttq"].fillna(0.0).values, avail)
+    dlcq = _pit_forward_fill(quarterly.get("dlcq", pd.Series(0.0, index=quarterly.index)).fillna(0.0).values, avail)
+    saleq = _pit_forward_fill(quarterly.get("saleq", pd.Series(np.nan, index=quarterly.index)).values, avail)
+    cogsq = _pit_forward_fill(quarterly.get("cogsq", pd.Series(np.nan, index=quarterly.index)).values, avail)
+    xsgaq = _pit_forward_fill(quarterly.get("xsgaq", pd.Series(0.0, index=quarterly.index)).fillna(0.0).values, avail)
+    cshoq = _pit_forward_fill(quarterly.get("cshoq", pd.Series(np.nan, index=quarterly.index)).values, avail)
     actq = _pit_forward_fill(quarterly["actq"].values, avail)
     lctq = _pit_forward_fill(quarterly["lctq"].replace(0, np.nan).values, avail)
+    filing_delay_raw = (quarterly["avail_date"] - quarterly["datadate"]).dt.days.astype(float).clip(lower=0.0)
+    filing_delay_days = _pit_forward_fill(filing_delay_raw.values, avail).clip(0.0, 365.0)
 
     # ── Core ratios ──────────────────────────────────────────────────────────
     ta_safe = atq.replace(0, np.nan)
@@ -219,9 +260,41 @@ def _compute_features_from_quarterly(
 
     leverage = (dlttq / ta_safe).clip(0.0, 10.0)
     delta_leverage = leverage.diff()
+    total_debt = (dlttq.fillna(0.0) + dlcq.fillna(0.0)).clip(lower=0.0)
+    total_debt_to_assets = (total_debt / ta_safe).clip(0.0, 10.0)
+    delta_total_leverage = total_debt_to_assets.diff()
 
     current_ratio = (actq / lctq).clip(0.0, 20.0)
     delta_liquidity = current_ratio.diff()
+    sales_safe = saleq.replace(0, np.nan)
+    gross_margin = ((saleq - cogsq) / sales_safe).clip(-5.0, 5.0)
+    operating_margin = ((saleq - cogsq - xsgaq) / sales_safe).clip(-5.0, 5.0)
+    delta_gross_margin = gross_margin.diff()
+    delta_operating_margin = operating_margin.diff()
+    margin_deterioration = (-0.5 * delta_gross_margin - 0.5 * delta_operating_margin).clip(-5.0, 5.0)
+    weak_profitability = (-roa).clip(-5.0, 5.0)
+    share_issuance_growth = cshoq.pct_change().replace([np.inf, -np.inf], np.nan).clip(-1.0, 5.0)
+    dilution_pressure = share_issuance_growth.clip(lower=0.0, upper=5.0)
+    late_filing_flag = (filing_delay_days > 60.0).astype(float)
+    restatement_like_flag = (
+        (filing_delay_days > 90.0)
+        | (accruals.diff().abs() > 0.25)
+        | (share_issuance_growth > 0.10)
+    ).astype(float)
+
+    def _rolling_rank(s: pd.Series) -> pd.Series:
+        clean = s.replace([np.inf, -np.inf], np.nan)
+        return clean.rolling(12, min_periods=4).rank(pct=True).fillna(0.5)
+
+    fundamental_deterioration_score = (
+        0.20 * _rolling_rank(accruals)
+        + 0.15 * _rolling_rank(margin_deterioration)
+        + 0.15 * _rolling_rank(delta_total_leverage.clip(lower=0.0))
+        + 0.15 * _rolling_rank(weak_profitability)
+        + 0.15 * _rolling_rank(dilution_pressure)
+        + 0.10 * late_filing_flag
+        + 0.10 * restatement_like_flag
+    ).clip(0.0, 1.0)
 
     # ── Piotroski F-score (5 components) ────────────────────────────────────
     f1 = (roa > 0).astype(float)
@@ -237,6 +310,23 @@ def _compute_features_from_quarterly(
         "roa": roa,
         "delta_roa": delta_roa,
         "delta_leverage": delta_leverage,
+        "gross_margin": gross_margin,
+        "delta_gross_margin": delta_gross_margin,
+        "operating_margin": operating_margin,
+        "delta_operating_margin": delta_operating_margin,
+        "margin_deterioration": margin_deterioration,
+        "debt_to_assets": leverage,
+        "total_debt_to_assets": total_debt_to_assets,
+        "weak_profitability": weak_profitability,
+        "share_issuance_growth": share_issuance_growth,
+        "dilution_pressure": dilution_pressure,
+        "filing_delay_days": filing_delay_days,
+        "late_filing_flag": late_filing_flag,
+        "restatement_like_flag": restatement_like_flag,
+        "fundamental_deterioration_score": fundamental_deterioration_score,
+        "short_interest_ratio": 0.0,
+        "days_to_cover": 0.0,
+        "borrow_crowding_risk": 0.0,
     }, index=dates)
 
     return result.fillna(0.0)

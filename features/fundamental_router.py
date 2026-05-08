@@ -18,7 +18,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-import numpy as np
 import pandas as pd
 
 if TYPE_CHECKING:
@@ -31,9 +30,10 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 _wrds_db = None
 _ticker_to_permno: dict[str, int] = {}
+_strict_wrds = False
 
 
-def configure_wrds(db, ticker_to_permno: dict[str, int]) -> None:
+def configure_wrds(db, ticker_to_permno: dict[str, int], *, strict: bool = False) -> None:
     """
     Register a WRDS connection and ticker→PERMNO map so the router can use
     Compustat fundamentals instead of EDGAR.
@@ -44,9 +44,10 @@ def configure_wrds(db, ticker_to_permno: dict[str, int]) -> None:
         from features.fundamental_router import configure_wrds
         configure_wrds(db, universe.permno_to_ticker_map(...))
     """
-    global _wrds_db, _ticker_to_permno
+    global _wrds_db, _ticker_to_permno, _strict_wrds
     _wrds_db = db
     _ticker_to_permno = ticker_to_permno
+    _strict_wrds = bool(strict)
     logger.info(
         "fundamental_router: WRDS configured — %d tickers mapped to PERMNOs.",
         len(ticker_to_permno),
@@ -61,6 +62,8 @@ def is_wrds_configured() -> bool:
 def fetch_fundamental_features(
     ticker: str,
     dates: pd.DatetimeIndex,
+    *,
+    strict: bool | None = None,
 ) -> pd.DataFrame:
     """
     Return fundamental features for ``ticker`` on ``dates``.
@@ -69,27 +72,60 @@ def fetch_fundamental_features(
       1. WRDS / Compustat path (if configured and ticker has a PERMNO)
       2. EDGAR XBRL fallback (always available, no credentials needed)
 
-    Output columns: f_score, accruals_ratio, roa, delta_roa, delta_leverage.
+    Output columns include the legacy quality fields plus WRDS/Compustat
+    deterioration features used by short-alpha research.
     Returns 0.0 on any error — never raises, never blocks the pipeline.
     """
-    _ZERO_COLS = ["f_score", "accruals_ratio", "roa", "delta_roa", "delta_leverage"]
+    _ZERO_COLS = [
+        "f_score",
+        "accruals_ratio",
+        "roa",
+        "delta_roa",
+        "delta_leverage",
+        "gross_margin",
+        "delta_gross_margin",
+        "operating_margin",
+        "delta_operating_margin",
+        "margin_deterioration",
+        "debt_to_assets",
+        "total_debt_to_assets",
+        "weak_profitability",
+        "share_issuance_growth",
+        "dilution_pressure",
+        "filing_delay_days",
+        "late_filing_flag",
+        "restatement_like_flag",
+        "fundamental_deterioration_score",
+        "short_interest_ratio",
+        "days_to_cover",
+        "borrow_crowding_risk",
+    ]
 
+    strict_mode = _strict_wrds if strict is None else bool(strict)
     if _wrds_db is not None:
         permno = _ticker_to_permno.get(ticker)
         if permno is not None:
             try:
                 from features.wrds_fundamental_builder import fetch_fundamental_features as _wrds
-                return _wrds(_wrds_db, permno, dates)
+                return _wrds(_wrds_db, permno, dates).reindex(columns=_ZERO_COLS, fill_value=0.0)
             except Exception as exc:
+                if strict_mode:
+                    raise RuntimeError(
+                        f"WRDS fundamental fetch failed for {ticker} (permno={permno})"
+                    ) from exc
                 logger.warning(
                     "WRDS fundamental fetch failed for %s (permno=%s): %s — falling back to EDGAR.",
                     ticker, permno, exc,
                 )
+        elif strict_mode:
+            raise RuntimeError(f"WRDS fundamental strict mode: no PERMNO mapping for {ticker}")
+    elif strict_mode:
+        raise RuntimeError("WRDS fundamental strict mode requested but WRDS is not configured")
 
     # EDGAR fallback
     try:
         from features.fundamental_builder import fetch_fundamental_features as _edgar
-        return _edgar(ticker, dates)
+        return _edgar(ticker, dates).reindex(columns=_ZERO_COLS, fill_value=0.0)
     except Exception as exc:
         logger.debug("EDGAR fundamental fetch failed for %s: %s", ticker, exc)
 

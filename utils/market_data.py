@@ -1,201 +1,111 @@
 # region imports
 from __future__ import annotations
 try:
-    from AlgorithmImports import *
+    from AlgorithmImports import *  # noqa: F403
 except ImportError:
     pass
 # endregion
+"""Explicit market-data provider facade.
+
+This module intentionally keeps the historical ``get_ohlcv`` import path alive,
+but provider selection is now explicit. Research and production code must pass
+``provider=...`` or set ``TREND_DATA_PROVIDER``/``DATA_PROVIDER``. The facade
+does not fall back from WRDS/Lean/etc. to Yahoo.
 """
-Market Data Layer
-==================
-Fetch OHLCV data from multiple providers with optional local caching.
-Supports Yahoo Finance (default), Alpaca, and Finnhub.
-
-Usage:
-    from utils.market_data import get_ohlcv
-
-    df = get_ohlcv("AAPL", "2020-01-01", "2024-01-01", provider="yahoo", use_cache=True)
-
-Per-ticker cache/download traces use ``logging`` at DEBUG for ``utils.market_data``
-(e.g. ``logging.getLogger("utils.market_data").setLevel(logging.DEBUG)``).
-"""
-
 
 import logging
 import os
-import re
 import zipfile
-import io
-from datetime import datetime
+from dataclasses import dataclass
 from pathlib import Path
 
 import pandas as pd
-import numpy as np
+
+from providers.cache_manager import (
+    DEFAULT_CACHE_DIR,
+    OHLCV_COLUMNS,
+    cache_path as _cache_path,
+    clear_provider_cache,
+    df_overlaps_window as _df_overlaps_window,
+    load_cached as _load_cached,
+    save_cache as _save_cache,
+)
+from providers.wrds_adapter import WRDSProvider
+from providers.yahoo_adapter import YahooProvider
 
 logger = logging.getLogger(__name__)
 
-
-# Default cache directory (under project root)
-# We cache one Parquet file per ticker under this directory, then slice by date.
-DEFAULT_CACHE_DIR = "data/cache"
-OHLCV_COLUMNS = ["Open", "High", "Low", "Close", "Volume"]
+SUPPORTED_PROVIDERS = {"wrds", "yahoo", "alpaca", "finnhub", "lean"}
 
 
-def _safe_filename(ticker: str) -> str:
-    """Sanitize ticker for use in file paths."""
-    return re.sub(r"[^\w\-.]", "_", ticker.upper())
+@dataclass(frozen=True)
+class ProviderConfig:
+    """Explicit provider configuration for OHLCV requests."""
+
+    provider: str
+    cache_dir: str = DEFAULT_CACHE_DIR
+    use_cache: bool = True
+    cache_ttl_days: int = 0
+    wrds_username: str | None = None
+    ticker_to_permno: dict[str, int] | None = None
+    as_of_date: str | pd.Timestamp | None = None
 
 
-def _cache_path(cache_dir: str, ticker: str, provider: str = "yahoo") -> Path:
-    """
-    Path for per-ticker cache (Parquet). Suffix with provider to isolate caches (except legacy Yahoo).
-    """
-    prov_str = provider.lower() if provider else "yahoo"
-    if prov_str == "yahoo":
-        return Path(cache_dir) / f"{_safe_filename(ticker)}.parquet"
-    return Path(cache_dir) / f"{_safe_filename(ticker)}_{prov_str}.parquet"
+def resolve_data_provider(provider: str | None = None) -> str:
+    """Resolve a configured provider without implicit Yahoo degradation."""
+    raw = provider or os.environ.get("TREND_DATA_PROVIDER") or os.environ.get("DATA_PROVIDER")
+    if raw is None or not str(raw).strip():
+        raise ValueError(
+            "data provider must be explicit: set data.provider in config or pass provider='wrds'/'yahoo'"
+        )
+    resolved = str(raw).strip().lower()
+    if resolved not in SUPPORTED_PROVIDERS:
+        supported = ", ".join(sorted(SUPPORTED_PROVIDERS))
+        raise ValueError(f"unknown data provider '{resolved}'. Supported providers: {supported}")
+    return resolved
 
 
-def _load_cached(path: Path, cache_ttl_days: int) -> pd.DataFrame | None:
-    if not path.exists():
-        return None
-    if cache_ttl_days > 0:
-        mtime = path.stat().st_mtime
-        if (datetime.now().timestamp() - mtime) > cache_ttl_days * 86400:
-            return None
-    try:
-        df = pd.read_parquet(path)
-        # Require at least the core OHLCV columns; allow extra (AdjClose, Dividends, etc.).
-        if not all(col in df.columns for col in OHLCV_COLUMNS):
-            return None
-        # Ensure DatetimeIndex
-        if not isinstance(df.index, pd.DatetimeIndex):
-            df.index = pd.to_datetime(df.index)
-        return df.sort_index()
-    except Exception:
-        return None
-
-
-def _save_cache(path: Path, df: pd.DataFrame) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # Persist all columns so adjusted/auxiliary fields are available on reload.
-    df.to_parquet(path)
-
-
-def _df_overlaps_window(df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> bool:
-    """True if df's index intersects [start, end] (inclusive)."""
-    if df is None or df.empty:
-        return False
-    mn = pd.Timestamp(df.index.min())
-    mx = pd.Timestamp(df.index.max())
-    return not (mx < start or mn > end)
-
-
-def _download_yahoo(ticker: str, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
-    import yfinance as yf
-
-    def _fetch(period=None, start_=None, end_=None):
-        if period:
-            raw = yf.download(
-                ticker,
-                period=period,
-                progress=False,
-                auto_adjust=False,
-                actions=True,
-            )
-        else:
-            raw = yf.download(
-                ticker,
-                start=start_,
-                end=end_,
-                progress=False,
-                auto_adjust=False,
-                actions=True,
-            )
-        if raw.empty:
-            return pd.DataFrame(columns=OHLCV_COLUMNS)
-        if isinstance(raw.columns, pd.MultiIndex):
-            raw.columns = raw.columns.get_level_values(0)
-        for col in OHLCV_COLUMNS:
-            if col not in raw.columns:
-                return pd.DataFrame(columns=OHLCV_COLUMNS)
-        df = raw[OHLCV_COLUMNS].dropna()
-        # Preserve adjusted close and corporate actions when available
-        if "Adj Close" in raw.columns:
-            df["AdjClose"] = raw["Adj Close"].reindex(df.index)
-            # Align with WRDS canonical convention: Close = adjusted price.
-            # Store unadjusted as raw_price so downstream always reads Close
-            # as the split/dividend-adjusted series regardless of data source.
-            df["raw_price"] = df["Close"]
-            df["Close"] = df["AdjClose"]
-        if "Dividends" in raw.columns:
-            df["Dividends"] = raw["Dividends"].reindex(df.index)
-        if "Stock Splits" in raw.columns:
-            df["StockSplits"] = raw["Stock Splits"].reindex(df.index)
-        return df
-
-    # First try date range
-    df = _fetch(start_=start, end_=end)
-    if not _df_overlaps_window(df, start, end):
-        df = pd.DataFrame(columns=OHLCV_COLUMNS)
-
-    # If sparse, retry with period — but NEVER keep data that doesn't overlap the
-    # requested window (yfinance often returns *recent* bars for period="6mo"/"1y",
-    # which corrupts backtests for 2018–2024 requests).
-    if len(df) < 30:
-        df_6mo = _fetch(period="6mo")
-        if _df_overlaps_window(df_6mo, start, end) and len(df_6mo) > len(df):
-            df = df_6mo
-    if len(df) < 30:
-        df_1y = _fetch(period="1y")
-        if _df_overlaps_window(df_1y, start, end) and len(df_1y) > len(df):
-            df = df_1y
-
-    if not df.empty:
-        df = df.sort_index()
-        df = df.loc[(df.index >= start) & (df.index <= end)]
-    return df
+def get_provider(config: ProviderConfig):
+    """Build the explicit provider adapter for a request."""
+    provider = resolve_data_provider(config.provider)
+    if provider == "wrds":
+        return WRDSProvider(
+            username=config.wrds_username,
+            cache_dir=config.cache_dir if "wrds" in str(config.cache_dir).lower() else "data/cache/wrds",
+            cache_ttl_days=config.cache_ttl_days,
+            ticker_to_permno=config.ticker_to_permno,
+            as_of_date=config.as_of_date,
+        )
+    if provider == "yahoo":
+        return YahooProvider()
+    return None
 
 
 def _attach_delisted_date(df: pd.DataFrame, end: pd.Timestamp) -> pd.DataFrame:
-    """
-    Attach a best-effort delisted_date column and drop rows after it.
-
-    Many providers (including Yahoo via yfinance) simply stop returning
-    data once a ticker is delisted. We treat the last available trading
-    date before the requested end as the effective delisted_date and
-    add it as a constant column. If the last date is >= end, the ticker
-    is assumed to be live and delisted_date is NaT.
-    """
+    """Attach a best-effort delisted_date for non-WRDS providers."""
     if df.empty:
         return df
     df = df.sort_index()
     last_date = df.index.max()
-    # If the last available bar is strictly before the requested end date,
-    # consider this our effective delisting date.
     delisted_date = last_date if last_date < end else pd.NaT
-    df = df.loc[:last_date].copy()
-    df["delisted_date"] = delisted_date
-    return df
+    out = df.loc[:last_date].copy()
+    out["delisted_date"] = delisted_date
+    return out
 
 
 def _download_alpaca(ticker: str, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
-    """Fetch OHLCV from Alpaca. Requires ALPACA_API_KEY and ALPACA_SECRET_KEY (or PAPER_KEY/SECRET)."""
+    """Fetch OHLCV from Alpaca. Requires ALPACA_API_KEY and ALPACA_SECRET_KEY."""
     try:
         from alpaca.data.historical import StockHistoricalDataClient
         from alpaca.data.requests import StockBarsRequest
         from alpaca.data.timeframe import TimeFrame
-    except ImportError:
-        raise RuntimeError(
-            "Alpaca provider requires alpaca-py. Install with: pip install alpaca-py"
-        ) from None
+    except ImportError as exc:
+        raise RuntimeError("Alpaca provider requires alpaca-py to be installed") from exc
 
     api_key = os.environ.get("ALPACA_API_KEY") or os.environ.get("APCA_API_KEY_ID")
     secret = os.environ.get("ALPACA_SECRET_KEY") or os.environ.get("APCA_API_SECRET_KEY")
     if not api_key or not secret:
-        raise RuntimeError(
-            "Alpaca provider requires ALPACA_API_KEY and ALPACA_SECRET_KEY (or APCA_* env vars)"
-        )
+        raise RuntimeError("Alpaca provider requires ALPACA_API_KEY and ALPACA_SECRET_KEY")
 
     client = StockHistoricalDataClient(api_key, secret)
     request = StockBarsRequest(
@@ -209,7 +119,7 @@ def _download_alpaca(ticker: str, start: pd.Timestamp, end: pd.Timestamp) -> pd.
         return pd.DataFrame(columns=OHLCV_COLUMNS)
 
     b = bars.data[ticker]
-    df = pd.DataFrame(
+    return pd.DataFrame(
         {
             "Open": [x.open for x in b],
             "High": [x.high for x in b],
@@ -218,32 +128,26 @@ def _download_alpaca(ticker: str, start: pd.Timestamp, end: pd.Timestamp) -> pd.
             "Volume": [x.volume for x in b],
         },
         index=pd.DatetimeIndex([x.timestamp for x in b], name="Date"),
-    )
-    return df.sort_index()
+    ).sort_index()
 
 
 def _download_finnhub(ticker: str, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
     """Fetch daily candles from Finnhub. Requires FINNHUB_API_KEY."""
     try:
         import finnhub
-    except ImportError:
-        raise RuntimeError(
-            "Finnhub provider requires finnhub-python. Install with: pip install finnhub-python"
-        ) from None
+    except ImportError as exc:
+        raise RuntimeError("Finnhub provider requires finnhub-python to be installed") from exc
 
     api_key = os.environ.get("FINNHUB_API_KEY")
     if not api_key:
-        raise RuntimeError("Finnhub provider requires FINNHUB_API_KEY environment variable")
+        raise RuntimeError("Finnhub provider requires FINNHUB_API_KEY")
 
     client = finnhub.Client(api_key=api_key)
-    _from = int(start.timestamp())
-    _to = int(end.timestamp())
-    # candle: o, h, l, c, v, t
-    data = client.stock_candles(ticker, "D", _from, _to)
+    data = client.stock_candles(ticker, "D", int(start.timestamp()), int(end.timestamp()))
     if not data or "c" not in data or not data["c"]:
         return pd.DataFrame(columns=OHLCV_COLUMNS)
 
-    df = pd.DataFrame(
+    return pd.DataFrame(
         {
             "Open": data["o"],
             "High": data["h"],
@@ -251,167 +155,57 @@ def _download_finnhub(ticker: str, start: pd.Timestamp, end: pd.Timestamp) -> pd
             "Close": data["c"],
             "Volume": data.get("v", [0] * len(data["c"])),
         },
-        index=pd.DatetimeIndex(
-            pd.to_datetime(data["t"], unit="s"),
-            name="Date",
-        ),
-    )
-    return df.sort_index()
-
-
-    return res.sort_index()
+        index=pd.DatetimeIndex(pd.to_datetime(data["t"], unit="s"), name="Date"),
+    ).sort_index()
 
 
 def _download_lean(ticker: str, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
-    """
-    Fetch daily OHLCV from local Lean data storage.
-    Lean daily equities are scaled by 10,000.
-    """
-    ticker = ticker.lower()
-    # Typical Lean directory structure in your workspace
-    lean_data_path = Path("LeanCloud/data/equity/usa/daily") / f"{ticker}.zip"
-    
+    """Fetch daily OHLCV from local Lean data storage. No external fallback."""
+    symbol = str(ticker).lower()
+    lean_data_path = Path("LeanCloud/data/equity/usa/daily") / f"{symbol}.zip"
     if not lean_data_path.exists():
-        logger.debug("[_download_lean] %s: No Lean zip found at %s", ticker, lean_data_path)
-        return pd.DataFrame(columns=OHLCV_COLUMNS)
+        raise RuntimeError(f"Lean provider selected but no local Lean zip exists for {ticker}")
 
-    try:
-        with zipfile.ZipFile(lean_data_path, 'r') as z:
-            # Lean daily files usually have the same name as the zip inside
-            csv_name = f"{ticker}.csv"
-            if csv_name not in z.namelist():
-                # fallback to first file in zip
-                csv_name = z.namelist()[0]
-                
-            with z.open(csv_name) as f:
-                # Format: YYYYMMDD HH:mm,Open,High,Low,Close,Volume
-                df = pd.read_csv(f, header=None, names=["DateTime", "Open", "High", "Low", "Close", "Volume"])
-                
-        # Parse Dates: 19980102 00:00 -> 1998-01-02
-        df["Date"] = pd.to_datetime(df["DateTime"].str.split(" ").str[0], format="%Y%m%d")
-        df.set_index("Date", inplace=True)
-        
-        # Rescale Prices: Lean scales by 10,000
-        for col in ["Open", "High", "Low", "Close"]:
-            df[col] = df[col] / 10000.0
-            
-        # Filter by requested window
-        df = df.loc[(df.index >= start) & (df.index <= end)]
-        
-        return df[OHLCV_COLUMNS].sort_index()
-    except Exception as e:
-        logger.error("[_download_lean] %s: Failed to parse zip: %s", ticker, e)
-        return pd.DataFrame(columns=OHLCV_COLUMNS)
+    with zipfile.ZipFile(lean_data_path, "r") as zf:
+        csv_name = f"{symbol}.csv"
+        if csv_name not in zf.namelist():
+            csv_name = zf.namelist()[0]
+        with zf.open(csv_name) as fh:
+            df = pd.read_csv(
+                fh,
+                header=None,
+                names=["DateTime", "Open", "High", "Low", "Close", "Volume"],
+            )
+
+    df["Date"] = pd.to_datetime(df["DateTime"].str.split(" ").str[0], format="%Y%m%d")
+    df = df.set_index("Date")
+    for col in ["Open", "High", "Low", "Close"]:
+        df[col] = df[col] / 10000.0
+    return df.loc[(df.index >= start) & (df.index <= end), OHLCV_COLUMNS].sort_index()
 
 
-def _download_crypto_ccxt(
-    symbol: str,
-    start: pd.Timestamp,
-    end: pd.Timestamp,
-    exchange_id: str = "binance",
-) -> pd.DataFrame:
-    """
-    Fetch daily OHLCV for crypto using CCXT.
-
-    Notes
-    -----
-    - Assumes symbol in CCXT format, e.g. "BTC/USDT".
-    - Uses 1d candles and respects 24/7 trading (no weekend filtering).
-    """
-    try:
-        import ccxt  # type: ignore
-    except ImportError:
-        raise RuntimeError(
-            "Crypto provider requires ccxt. Install with: pip install ccxt"
-        ) from None
-
-    if not hasattr(ccxt, exchange_id):
-        raise RuntimeError(f"Unknown CCXT exchange '{exchange_id}'")
-
-    exchange = getattr(ccxt, exchange_id)()
-    timeframe = "1d"
-    since = int(start.timestamp() * 1000)
-    ohlcv: list[list] = []
-    limit = 1000
-
-    while True:
-        batch = exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=since, limit=limit)
-        if not batch:
-            break
-        ohlcv.extend(batch)
-        last_ts = batch[-1][0]
-        if last_ts >= int(end.timestamp() * 1000):
-            break
-        since = last_ts + 1_000  # advance 1 second
-
-    if not ohlcv:
-        return pd.DataFrame(columns=OHLCV_COLUMNS)
-
-    df = pd.DataFrame(
-        {
-            "Open": [x[1] for x in ohlcv],
-            "High": [x[2] for x in ohlcv],
-            "Low": [x[3] for x in ohlcv],
-            "Close": [x[4] for x in ohlcv],
-            "Volume": [x[5] for x in ohlcv],
-        },
-        index=pd.DatetimeIndex(pd.to_datetime([x[0] for x in ohlcv], unit="ms"), name="Date"),
-    )
-    return df.sort_index()
-
-
-def _build_continuous_futures(
-    contract_data: dict[str, pd.DataFrame],
-) -> pd.DataFrame:
-    """
-    Construct a simple continuous futures series from per-contract OHLCV.
-
-    Roll logic
-    ----------
-    - Align all contracts on the union of dates.
-    - For each date, pick the contract with the highest recent volume
-      (using a 5-day rolling sum as a proxy for the front contract).
-    - No back-adjustment is performed; prices are spliced.
-    """
+def _build_continuous_futures(contract_data: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """Construct a simple volume-selected continuous futures series."""
     if not contract_data:
         return pd.DataFrame(columns=OHLCV_COLUMNS)
-
-    all_dates: set[pd.Timestamp] = set()
-    for df in contract_data.values():
-        all_dates.update(df.index)
-    if not all_dates:
+    all_idx = pd.DatetimeIndex(sorted({dt for df in contract_data.values() for dt in df.index}), name="Date")
+    if all_idx.empty:
         return pd.DataFrame(columns=OHLCV_COLUMNS)
 
-    all_idx = pd.DatetimeIndex(sorted(all_dates), name="Date")
-
-    vol_roll = {}
-    aligned = {}
-    for symbol, df in contract_data.items():
-        if df.empty:
-            continue
-        df = df.sort_index()
-        aligned_df = df.reindex(all_idx)
-        aligned[symbol] = aligned_df
-        vol_roll[symbol] = aligned_df["Volume"].rolling(5, min_periods=1).sum()
-
+    aligned = {symbol: df.sort_index().reindex(all_idx) for symbol, df in contract_data.items() if not df.empty}
     if not aligned:
         return pd.DataFrame(columns=OHLCV_COLUMNS)
-
-    vol_roll_df = pd.DataFrame(vol_roll)
-    best_contract = vol_roll_df.idxmax(axis=1)
+    vol_roll = pd.DataFrame({symbol: df["Volume"].rolling(5, min_periods=1).sum() for symbol, df in aligned.items()})
+    best_contract = vol_roll.idxmax(axis=1)
 
     out = pd.DataFrame(index=all_idx, columns=OHLCV_COLUMNS, dtype=float)
     for date, contract in best_contract.items():
-        if contract not in aligned:
-            continue
         row = aligned[contract].loc[date]
         if row.isna().all():
             continue
         for col in OHLCV_COLUMNS:
             out.at[date, col] = row[col]
-
-    out = out.dropna(subset=["Close"])
-    return out
+    return out.dropna(subset=["Close"])
 
 
 def get_ohlcv(
@@ -419,162 +213,92 @@ def get_ohlcv(
     start_date: str,
     end_date: str,
     *,
-    provider: str = "yahoo",
+    provider: str | None = None,
     cache_dir: str | None = None,
     use_cache: bool = True,
     cache_ttl_days: int = 0,
     include_delisted: bool = True,
-    asset_type: str = "equity",  # "equity" | "futures" | "crypto"
+    asset_type: str = "equity",
     futures_contracts: list[str] | None = None,
     crypto_exchange: str = "binance",
+    wrds_username: str | None = None,
+    ticker_to_permno: dict[str, int] | None = None,
+    as_of_date: str | pd.Timestamp | None = None,
 ) -> pd.DataFrame:
-    """
-    Fetch OHLCV data for a ticker over a date range.
-
-    Parameters
-    ----------
-    ticker : str
-        Symbol (e.g. "AAPL", "SPY").
-    start_date, end_date : str
-        ISO date strings (inclusive range).
-    provider : str
-        "yahoo" (default), "alpaca", or "finnhub" for equities / ETFs.
-    cache_dir : str, optional
-        Directory for cached files. Default: data/cache/ohlcv.
-    use_cache : bool
-        If True, read from cache when available and write after download.
-    cache_ttl_days : int
-        Cache validity in days; 0 = use cache indefinitely.
-
-    Returns
-    -------
-    pd.DataFrame
-        Index: DatetimeIndex (Date). Columns: Open, High, Low, Close, Volume.
-    """
+    """Fetch OHLCV through the explicitly configured provider."""
     start = pd.Timestamp(start_date)
     end = pd.Timestamp(end_date)
+    provider_name = resolve_data_provider(provider)
+    cache_root = cache_dir or DEFAULT_CACHE_DIR
+    path = _cache_path(cache_root, ticker, provider_name)
+
     logger.debug(
-        "[get_ohlcv] %s: requesting %s → %s",
+        "[get_ohlcv] %s: %s -> %s provider=%s",
         ticker,
         start.strftime("%Y-%m-%d"),
         end.strftime("%Y-%m-%d"),
+        provider_name,
     )
-    
-    provider = (provider or "yahoo").lower()
-    cache_dir = cache_dir or DEFAULT_CACHE_DIR
-    path = _cache_path(cache_dir, ticker, provider)
 
     if use_cache:
         cached = _load_cached(path, cache_ttl_days)
         if cached is not None and not cached.empty:
             cached_start = cached.index.min()
             cached_end = cached.index.max()
-            # If the cached history fully covers the requested window, just slice.
             if start >= cached_start and end <= cached_end:
                 df = cached.loc[(cached.index >= start) & (cached.index <= end)].copy()
-                logger.debug("[get_ohlcv] %s: cache hit, sliced shape=%s", ticker, df.shape)
-                if include_delisted and asset_type == "equity" and not df.empty:
+                if include_delisted and asset_type == "equity" and provider_name != "wrds":
                     df = _attach_delisted_date(df, end)
                 return df
-            # If cache covers the requested END and is only missing a tiny amount
-            # at the START (common off-by-one due to inclusive/exclusive date handling),
-            # prefer using cache instead of re-downloading (which can fail/rate-limit).
-            if end <= cached_end and start < cached_start:
-                gap_days = int((cached_start - start).days)
-                if gap_days <= 5:
-                    df = cached.loc[(cached.index >= cached_start) & (cached.index <= end)].copy()
-                    logger.debug(
-                        "[get_ohlcv] %s: cache near-hit (missing %d day(s) at start), sliced shape=%s",
-                        ticker,
-                        gap_days,
-                        df.shape,
-                    )
-                    if include_delisted and asset_type == "equity" and not df.empty:
-                        df = _attach_delisted_date(df, end)
-                    return df
-            else:
-                # Partial coverage: fall through to download additional history.
-                # We will merge the newly downloaded data with the existing cache
-                # in the save-cache step below.
-                logger.debug(
-                    "[get_ohlcv] %s: cache partial (cached %s → %s, requested %s → %s) — downloading extension",
-                    ticker,
-                    cached_start.date(),
-                    cached_end.date(),
-                    start.date(),
-                    end.date(),
-                )
 
-    # --- Dispatch by asset type ------------------------------------
-    if asset_type == "crypto":
-        df = _download_crypto_ccxt(ticker, start, end, exchange_id=crypto_exchange)
-    elif asset_type == "futures":
+    config = ProviderConfig(
+        provider=provider_name,
+        cache_dir=cache_root,
+        use_cache=use_cache,
+        cache_ttl_days=cache_ttl_days,
+        wrds_username=wrds_username,
+        ticker_to_permno=ticker_to_permno,
+        as_of_date=as_of_date,
+    )
+
+    if asset_type == "futures":
         if not futures_contracts:
             raise ValueError("futures_contracts must be provided when asset_type='futures'")
-        contract_data: dict[str, pd.DataFrame] = {}
-        for contract in futures_contracts:
-            if provider == "yahoo":
-                c_df = _download_yahoo(contract, start, end)
-            elif provider == "alpaca":
-                c_df = _download_alpaca(contract, start, end)
-            elif provider == "finnhub":
-                c_df = _download_finnhub(contract, start, end)
-            elif provider == "tiingo":
-                c_df = _download_tiingo(contract, start, end)
-            else:
-                raise ValueError(f"Unknown provider for futures: {provider}. Use 'yahoo', 'alpaca', 'finnhub', or 'tiingo'.")
-            if not c_df.empty:
-                contract_data[contract] = c_df
+        if provider_name != "yahoo":
+            raise ValueError("continuous futures currently support only explicit provider='yahoo'")
+        adapter = YahooProvider()
+        contract_data = {
+            contract: adapter.fetch_ohlcv(contract, start, end)
+            for contract in futures_contracts
+        }
         df = _build_continuous_futures(contract_data)
+    elif asset_type == "crypto":
+        raise ValueError("crypto OHLCV requires a dedicated provider adapter; no implicit fallback is allowed")
     else:
-        # Default: equities / ETFs
-        if provider == "lean":
-            df = _download_lean(ticker, start, end)
-            if df.empty:
-                logger.info("[get_ohlcv] %s: Lean data missing, falling back to yahoo", ticker)
-                df = _download_yahoo(ticker, start, end)
-        elif provider == "yahoo":
-            df = _download_yahoo(ticker, start, end)
-        elif provider == "alpaca":
+        adapter = get_provider(config)
+        if adapter is not None:
+            df = adapter.fetch_ohlcv(ticker, start, end)
+        elif provider_name == "alpaca":
             df = _download_alpaca(ticker, start, end)
-        elif provider == "finnhub":
+        elif provider_name == "finnhub":
             df = _download_finnhub(ticker, start, end)
-        elif provider == "tiingo":
-            df = _download_tiingo(ticker, start, end)
+        elif provider_name == "lean":
+            df = _download_lean(ticker, start, end)
         else:
-            raise ValueError(f"Unknown provider: {provider}. Use 'yahoo', 'alpaca', 'finnhub', or 'tiingo'.")
+            raise ValueError(f"unsupported provider: {provider_name}")
 
     if df is None or df.empty:
-        logger.debug("[get_ohlcv] %s: download returned EMPTY frame", ticker)
-    else:
-        # Defensive: must overlap requested window (see _download_yahoo period fallback).
-        if not _df_overlaps_window(df, start, end):
-            logger.debug(
-                "[get_ohlcv] %s: rejecting download (no overlap; got %s → %s)",
-                ticker,
-                df.index.min().date(),
-                df.index.max().date(),
-            )
-            df = pd.DataFrame(columns=OHLCV_COLUMNS)
-        else:
-            df = df.loc[(df.index >= start) & (df.index <= end)].copy()
-            logger.debug(
-                "[get_ohlcv] %s: download shape=%s, date range %s → %s",
-                ticker,
-                df.shape,
-                df.index.min(),
-                df.index.max(),
-            )
+        return pd.DataFrame(columns=OHLCV_COLUMNS)
 
-    if include_delisted and asset_type == "equity" and not df.empty:
+    if not _df_overlaps_window(df, start, end):
+        return pd.DataFrame(columns=OHLCV_COLUMNS)
+
+    df = df.loc[(df.index >= start) & (df.index <= end)].copy()
+    if include_delisted and asset_type == "equity" and provider_name != "wrds":
         df = _attach_delisted_date(df, end)
 
     if use_cache and not df.empty:
-        # Merge with any existing cache for this ticker and persist full history.
-        try:
-            existing = _load_cached(path, cache_ttl_days=0)  # ignore TTL when merging
-        except Exception:
-            existing = None
+        existing = _load_cached(path, cache_ttl_days=0)
         if existing is not None and not existing.empty:
             combined = pd.concat([existing, df])
             combined = combined[~combined.index.duplicated(keep="last")].sort_index()
@@ -582,54 +306,9 @@ def get_ohlcv(
             combined = df.sort_index()
         _save_cache(path, combined)
 
-    # If download failed but cache has usable history for this window, return slice only.
-    if use_cache and (df is None or df.empty) and asset_type == "equity":
-        try:
-            cached_only = _load_cached(path, cache_ttl_days)
-        except Exception:
-            cached_only = None
-        if cached_only is not None and not cached_only.empty:
-            sl = cached_only.loc[(cached_only.index >= start) & (cached_only.index <= end)].copy()
-            if not sl.empty:
-                logger.debug(
-                    "[get_ohlcv] %s: cache slice fallback (download unusable), shape=%s",
-                    ticker,
-                    sl.shape,
-                )
-                if include_delisted:
-                    sl = _attach_delisted_date(sl, end)
-                return sl
-
     return df
 
 
 def clear_cache(ticker: str | None = None, cache_dir: str | None = None, provider: str = "yahoo") -> None:
-    """
-    Clear cached OHLCV data.
-
-    Parameters
-    ----------
-    ticker : str or None
-        If provided, clear only this ticker's cache file. If None, clear all.
-    cache_dir : str or None
-        Cache directory to operate on. Defaults to DEFAULT_CACHE_DIR.
-    provider : str
-        The data provider namespace to clear (default: "yahoo").
-    """
-    cache_dir = cache_dir or DEFAULT_CACHE_DIR
-    base = Path(cache_dir)
-    if not base.exists():
-        return
-    if ticker is None:
-        for p in base.glob("*.parquet"):
-            try:
-                p.unlink()
-            except OSError:
-                pass
-    else:
-        path = _cache_path(cache_dir, ticker, provider)
-        if path.exists():
-            try:
-                path.unlink()
-            except OSError:
-                pass
+    """Clear cached OHLCV data for an explicit provider namespace."""
+    clear_provider_cache(ticker=ticker, cache_dir=cache_dir, provider=resolve_data_provider(provider))

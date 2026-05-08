@@ -17,6 +17,19 @@ This repository supports a regulated operating model, but **governance is enforc
 | **Secrets / live keys** | secret manager entries, switching paper→live | Approver sign-off + ticket outside repo |
 | **Infra / deploy** | systemd timers, cron schedules, log shipping | Operator review + change window |
 
+## Promotion controls
+
+`scripts/promote_model.py` enforces manifest checksums, validator gates, production
+readiness reports, and clean-git checks before production promotion. Promoted `.pkl`
+artifacts are published to the configured object store and represented locally by metadata
+JSON only. The default production configuration requires `MODEL_REGISTRY_URI` to be set to
+an approved `s3://` or `gs://` prefix.
+
+Live paths (`brokers/`, `risk/`, and `run_daily_pipeline.py`) must not import from
+`research/` or `analysis/`. CI runs `tests/test_import_boundaries.py` plus
+`ruff --select F401,F841` so unused-code regressions and research/live boundary leaks fail
+before merge.
+
 ## Required audit artifacts per trading day
 
 From `output/runs/<RUN_ID>/` and `output/live/`:
@@ -35,4 +48,3 @@ All incidents must have:
 3. **Postmortem**: timeline, root cause, corrective actions, and tests added.
 
 Tabletop drill cadence: **monthly** until stable; then quarterly.
-

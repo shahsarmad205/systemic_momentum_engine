@@ -21,7 +21,8 @@ from .analytics import (
     compute_rank_ic_decay,
     run_execution_costs_sensitivity,
     run_transaction_cost_sensitivity,
-    run_walk_forward
+    run_walk_forward,
+    run_oos_stitch,
 )
 from .metrics import (
     compute_all_metrics,
@@ -63,6 +64,7 @@ __all__ = [
     "run_execution_costs_sensitivity",
     "run_transaction_cost_sensitivity",
     "run_walk_forward",
+    "run_oos_stitch",
     "compute_all_metrics",
     "compute_win_rate",
     "compute_average_return",

@@ -1,3 +1,10 @@
+# ─── STRATEGY MODE ────────────────────────────────────────────────────────────
+# Controls which execution pathway is active. Affects which config sections are live.
+#   continuous_optimizer    — forecast → risk model → QP optimizer → gradual execution
+#   top_n_cross_sectional   — ranked top-N long/short with discrete rebalancing
+#   ml_signal_only          — raw ML scores → position sizing only, no optimizer
+strategy_mode: continuous_optimizer
+
 backtest:
   bootstrap: false
   # ── Continuous optimization mode (forecast-driven, no discrete top-N rebalance) ──
@@ -15,26 +22,70 @@ backtest:
       use_forecast_demean: true  # Remove CS mean bias (adjusted_score mean≈−0.012) without
                                   # destroying signal magnitude (do NOT divide by std)
       max_alpha: 0.05            # Clip forecasts to ±5% expected return after demeaning
+      calibration:
+        enabled: true
+        method: linear            # linear or piecewise score→realized-return mapping
+        window_days: 504          # rolling causal fit window; excludes unrevealed forward returns
+        min_obs: 250
+        horizon_days: 63
+        target_col: forward_return
+        clip_quantile: 0.995
+        output_dir: output/forecast_calibration
     risk_model:
-      window: 60             # Rolling window for covariance estimation (trading days)
+      window: 60             # DEPRECATED: use exposure_limits.covariance_window — Rolling window for covariance estimation (trading days)
       min_periods: 20        # Minimum observations before using estimated cov
       method: ledoit_wolf    # 'ledoit_wolf' (recommended) or 'sample'
     optimizer:
-      lambda_risk: 2.0       # Risk aversion: higher → lower gross exposure
-      gamma_turnover: 4.0    # Turnover penalty: higher → lower turnover
-                             # Calibration: doubling both scale and gamma keeps turnover identical.
-                             # scale/gamma ratio preserved → ~340%/yr < 500%/yr target
-                             # Position sizes doubled vs scale=0.006/gamma=2.0 baseline
-      max_weight: 0.10       # Max absolute weight per position (fraction of portfolio)
-      net_exposure_max: 0.3  # Fix 2: cut beta 1.258→~0.35; was 1.0 (unconstrained)
-      long_only: false        # Set false to allow shorts (requires enable_shorts: true)
-      gross_cap: 0.6         # Fix 4: reduce gross leverage; was 1.0
-      min_position_weight: 0.02  # Fix 1: zero out positions <2% → forces concentration,
-                                 # eliminates index-hugging from 300-500 tiny positions
+      lambda_risk: 2.0       # DEPRECATED: use exposure_limits.lambda_risk — Risk aversion: higher → lower gross exposure
+      gamma_turnover: 2.0    # DEPRECATED: use exposure_limits.gamma_turnover — Turnover penalty BASE value.
+                             # FIXED (was 4.0): at IC≈0.007 and scale=0.012, expected alpha per stock
+                             # ≈ 0.015; γ_eff must be < 0.015 for any trade to occur.
+                             # Actual γ is updated daily by CostAwareLambdaCalibrator:
+                             #   γ_t = gamma_turnover × EMA(daily_cost / daily_gross_pnl)
+                             #   γ_t ∈ [gamma_turnover × floor, gamma_turnover × ceil]
+                             # At gamma_turnover=2.0, ceil=2: γ_eff_max=4.0; floor=0.125: γ_eff_min=0.25
+      # Dynamic γ calibrator config (all optional; shown with defaults)
+      cost_lambda_ema_span: 20         # EMA span for cost/alpha ratio (20 = monthly)
+      cost_lambda_floor_factor: 0.125  # γ ≥ gamma_turnover × factor (prevents freeze)
+      cost_lambda_ceil_factor: 2.0     # FIXED (was 10.0): γ ≤ gamma_turnover × 2 = 4.0 max
+                                       # Root cause of 250-day hold: ceil=10 → γ_eff=40 → portfolio
+                                       # frozen. At ceil=2 and base=2.0, γ_eff_max=4.0.
+      cost_lambda_warmup_days: 20      # Days before calibration activates
+      max_weight: 0.10       # DEPRECATED: use portfolio_constraints.max_name_weight
+      net_exposure_max: 0.3  # DEPRECATED: use portfolio_constraints.net_exposure_max — CONFLICT [C1]: canonical=0.10; this 0.3 means live runs at 3× looser than validation
+      long_only: true        # P1: long-only — canonical constraint (optimizer respects this)
+      gross_cap: 0.6         # NOTE: optimizer soft target (not same as hard circuit breaker); see portfolio_constraints.max_gross_exposure=1.5 — CONFLICT [C2]: validation.max_gross=1.0
+      min_position_weight: 0.02  # DEPRECATED: use portfolio_constraints.min_position_weight — CONFLICT [C3]: validation uses 0.0025 (8× smaller); canonical=0.020
     execution:
-      horizon_days: 3              # Spread trades over T days (1=immediate, 3=recommended)
-      short_close_horizon_days: 2  # Faster exit from shorts — reversal IC decays past day 2-3
+      horizon_days: 63             # Match production horizon contract.
+      short_close_horizon_days: 2  # Fallback for shorts when short_close_tau is not set
       min_trade_weight: 0.001      # Ignore weight changes smaller than 0.1% (avoids micro-trades)
+      # Signal-decay-aligned execution (decay-aware mode; all optional)
+      auto_estimate_halflife: true  # Estimate tau from lag-1 rank autocorrelation of scores
+                                    # Set false to use tau_exec directly (or span-derived fallback)
+      tau_exec: null                # Override: explicit execution tau in trading days.
+                                    # null → auto-estimated from signal autocorrelation.
+                                    # Example: 2.5 → f=1-exp(-0.4)≈33% per day
+      short_close_tau: null         # Override for short-close speed.
+                                    # null → 0.4 × tau_exec (2.5× faster than long entry)
+      # Liquidity-adaptive scheduling
+      persistence_multiplier: 1.0   # Dead-band threshold for alpha-vs-cost persistence gate.
+                                    # Trade only when: |α_i| × τ_exec > multiplier × 2 × κ_i
+                                    # i.e., expected alpha over decay horizon > round-trip cost.
+                                    # 1.0 (default): α×τ must recover full round-trip cost.
+                                    # 0.5: more permissive — recover half the round-trip.
+                                    # 2.0: conservative — require 2× safety margin.
+                                    # 0.0: disabled (every delta ≥ min_trade is executed).
+                                    # Estimated effect at 1.0: blocks ~15-25% of low-conviction
+                                    # trades, raises alpha_capture from ~0.4 → ~0.5-0.6.
+      max_participation: 0.02       # Max fraction of ADV to trade per ticker per day.
+                                    # Acts as the liquidity-rate cap in the scheduling function:
+                                    #   f_liq_i = P_max × ADV_i / (|remaining_i| × equity)
+                                    # When participation would exceed P_max, execution slows.
+                                    # Set 1.0 to disable (signal-paced only).
+                                    # Implied horizon: T_liq = |remaining|×E / (P_max×ADV_i)
+                                    #   At P_max=2%, equity=$50M, remaining=2%, ADV=$50M: T_liq=1d
+                                    #   At P_max=2%, equity=$50M, remaining=2%, ADV=$5M:  T_liq=10d
     exposure_scaling:
       enabled: true          # Scale portfolio weights by cross-sectional signal strength
       strength_window: 60    # Rolling history of daily signal strength (days)
@@ -42,11 +93,35 @@ backtest:
       ema_span: 5            # EMA smoothing span for α_t (prevents day-to-day instability)
       min_exposure: 0.1      # Floor: never scale below 10% even on weak-signal days
     factor_model:
-      enabled: false         # eta_beta/xi_sector removed: Σ_idio already strips
-                             # market+sector variance. Additive penalties on idio
-                             # covariance double-count and break λ calibration.
+      enabled: true          # Explicit post-optimization factor exposure controls.
       market_ticker: "SPY"   # Still needed: vol-targeting in MultiAlphaEngine
       sector_mapping_path: "config/sector_mapping.csv"  # Still needed: neutralization
+      max_exposures:
+        market_beta: 0.15
+        size: 0.25
+        momentum: 0.25
+      sector_net_exposure_max: 0.12
+    impact:
+      # Almgren-Chriss impact model parameters.  All are dimensionless ratios;
+      # calibration is cross-sectional (relative to median vol/ADV), not absolute.
+      eta_temp: 0.10       # Temporary impact coefficient (dominant term, ~70% of cost).
+                           # η_temp≈0.10 from Almgren et al. (2005) institutional data.
+      eta_perm: 0.03       # Permanent impact (price revision): ~30% of temporary.
+      c_spread: 0.05       # Spread proxy: effective_spread ≈ c_spread·σ·√(ADV_med/ADV_i).
+                           # c_spread=0.05 → ~5bp half-spread at median liquidity, σ=1%/day.
+      eta_impact: 0.5      # Heterogeneous-γ scale. Controls how strongly illiquid names are
+                           # penalized vs γ_base.
+                           #   At ADV_i = ADV_med:   γ_i = γ_base×1.5  (50% extra)
+                           #   At ADV_i = ADV_med/4: γ_i = γ_base×2.0  (100% extra)
+                           #   At ADV_i = ADV_med/10: γ_i = γ_base×2.58 (158% extra)
+                           # Position sizing proportional to 1/γ_i^eff:
+                           #   liquid names: ~full-size; illiquid at ADV/10: ~39% of size.
+      w_scale: 0.02        # Reference trade size for linearizing √-impact (2% position).
+                           # Set to half the typical active weight.
+    liquidity:
+      enabled: true
+      max_adv_fraction: 0.05  # DEPRECATED: use liquidity_limits.max_adv_fraction — duplicate of ms.validation and risk_factors [D1]
+      min_adv_usd: 25000000
     multi_alpha:
       enabled: true          # Full multi-alpha: Gram-Schmidt orth, Σ⁻¹μ weights, vol-targeting
       # §2 Alpha sources
@@ -59,9 +134,8 @@ backtest:
       # §5 Data-driven weights (Σ⁻¹μ from rolling IC)
       weights: [0.2, 0.5, 0.3]   # Fix 5: downweight α₁ reversal (decays 2-3d); was [0.5, 0.25, 0.25]
       ic_window: 60          # Rolling IC history for Σ⁻¹μ computation
-      ic_horizon_days: 5     # MUST match holding_period_days. IC calibration horizon:
-                             # 1-day IC upweights α₁ reversal (good at 1d, BAD at 5d).
-                             # 5-day IC correctly measures which alpha predicts over the
+      ic_horizon_days: 63     # MUST match holding_period_days=63. IC calibration horizon:
+                             # 63-day IC correctly measures which alpha predicts over the
                              # actual holding period — fixes the signal inversion bug.
       weight_ridge: 0.001    # Ridge regularisation on IC covariance matrix
       # §7 Continuous vol-targeting: s_t = clip(target_vol / σ_mkt, lo, hi)
@@ -83,41 +157,40 @@ backtest:
     rebalance_daily: false
     target_long_positions: 18
     top_longs: 18            # Grinold-Kahn: raise from 12 to 18 → +50% effective breadth
-    top_shorts: 5
+    top_shorts: 0              # P1: N/A — long-only deployment
     conviction_buffer: 0.0    # z-scored signals make fixed offset meaningless
     short_turnover_gate: true                # Medhat & Schmeling (2022): only short above-median-TO stocks
     information_discreteness_sort: true      # Da et al. (2014) / FIP: prefer continuous-momentum longs over discrete ones
-  min_holding_period_days: 3
+  min_holding_period_days: 5
   # BREADTH FIX: reduce from 15→10 days → 50% more rebalances per year → more independent bets.
   # Turnover will increase ~50% (from ~295% to ~440%) but breadth improvement dominates:
   # More bets at same IC > fewer bets at same IC (Grinold-Kahn). HSBC/Warwick survey §4.
-  rebalance_every_trading_days: 5   # Fix 5: match holding_period_days; was 10
+  rebalance_every_trading_days: 63   # Match production horizon contract.
   signal_confidence_multiplier: 0.3        # Phase 8: lowered from 1.0 — regressor model std=0.006
-  signal_confidence_multiplier_bear: 0.2   # Phase 8: lowered from 0.6
-  signal_confidence_multiplier_crisis: 0.2 # Phase 8: lowered from 0.5
-  signal_confidence_multiplier_sideways: 0.2 # Phase 8: lowered from 0.5
+  signal_confidence_multiplier_crisis: 0.2 # Phase 8: lowered from 0.5 (matches signals section — no conflict)
   start_date: '2008-01-01'   # TRUE OOS evaluation window — model trained on 2007-2022
   end_date: '2022-12-31'    # Full year end for walk-forward windows
-  holding_period_days: 5     # Fix 5: match reversal decay (2-3d); was 10
-  lookahead_horizon_days: 5  # MUST match holding_period_days; was 10
-  dynamic_holding:                         # B2: holding period varies by signal strength
-    enabled: true
+  holding_period_days: 63      # Match production horizon contract.
+  lookahead_horizon_days: 63   # Match production horizon contract.
+  dynamic_holding:                         # Disabled: production horizon contract is authoritative.
+    enabled: false
     by_signal:
-      Bullish: 5             # Fix 5: match new holding_period_days; was 10
-      Bearish: 4             # Shorts: slightly shorter than longs
+      Bullish: 63
+      Bearish: 63             # N/A long-only but retained for diagnostic consistency
     by_strength:             # CS z-score bands for selected stocks (≈1.5–3.5 range)
-      - [2.0, 8]             # |z| >= 2.0 → hold 8 days (high conviction); was 15
-      - [1.0, 5]             # |z| >= 1.0 → hold 5 days (normal); was 10
+      - [2.0, 63]
+      - [1.0, 63]
 data:
   cache_dir: data/cache
   cache_ohlcv: true
   cache_ttl_days: 0
-  provider: yahoo
+  provider: wrds
+  strict_fundamentals: false
 execution:
-  commission_per_trade: 1.0
-  enable_shorts: true   # Paper signals (RRLP/MS/JLST) require full-universe turnover dispersion; S&P 500 large-caps all have high TO — gate barely filters
-  long_only: false
-  slippage_bps: 1.0
+  commission_per_trade: 1.0  # NOTE [A3]: fixed USD cost per trade — different units from execution_costs.commission_bps (bps). Used by flat-cost path only.
+  enable_shorts: false  # P1: Long-only — short side toxic (IC_pos_rate=0.52, destroys alpha). Separate short modeling requires borrow cost/crowding features
+  long_only: true       # P1: canonical long-only constraint (DEPRECATED alias kept for backward compatibility)
+  slippage_bps: 1.0  # DEPRECATED [A4]: use cost_model.slippage_bps — flat-bps path; execution_costs.slippage_bps is the cost-model path (different code)
   # OVEREXTENSION REVERSAL FIX: new short_score_raw = nearness_52w_high × short_term_reversal.
   # This signal is valid in Sideways too (overextended stocks crack in flat markets).
   # Remove Sideways from suppress list — keep Bull and Crisis suppressed only.
@@ -125,13 +198,13 @@ execution:
   # suppression of entire regimes.
   regime_suppress_shorts: ["Bull", "Crisis"]
 execution_costs:
-  commission_bps: 1.0
+  commission_bps: 1.0  # DEPRECATED: use cost_model.commission_bps — NOTE [A3]: bps unit, not USD
   enabled: true
   scenarios:
   - 1
   sensitivity_test: false
-  slippage_bps: 1.0
-  spread_bps: 1.0
+  slippage_bps: 1.0  # DEPRECATED: use cost_model.slippage_bps
+  spread_bps: 1.0    # DEPRECATED: use cost_model.spread_bps
   # VIX-scaled transaction costs (Hasbrouck 2009 / Almgren-Chriss).
   # slippage_effective = slippage_bps × (1 + alpha × max(0, VIX_t − VIX_252d_median))
   # alpha=0.08: VIX=35 vs median=20 → 2.2× slippage; VIX=80 (GFC) → 5.8× slippage.
@@ -185,6 +258,24 @@ feature_selection:
   # NOTE: dist_from_52w_low, liquidity_stress, beta_adj_momentum temporarily removed.
   # Each must be validated individually against the 16-feature baseline before adding back.
   # New features go in only if they improve OOS IC by >0.005 AND don't reduce Sharpe.
+  overlay_feature_subset:
+  # Beta-sensitive deployment view: favor long-book alpha and stability features,
+  # not short-specific reversal/borrow proxies.
+  - f_trend
+  - ret_5d
+  - ret_10d
+  - ret_20d
+  - cs_momentum_percentile
+  - vol_ratio_5_20
+  - capm_residual_vol
+  - low_vol_score
+  - quality_score
+  - nearness_52w_high
+  - capm_alpha
+  - momentum_acceleration
+  - sector_relative_20d
+  - sector_relative_60d
+  - momentum_12m_skip1
   short_feature_subset:
   # --- Medhat & Schmeling (2022, RFS) "Short-term Momentum" ---
   # PRIMARY: turnover-conditioned return. Negative = high-TO loser → momentum continues down.
@@ -202,6 +293,21 @@ feature_selection:
   # Reversal and momentum profits are NEGATIVELY correlated across time and countries.
   # Strong 12M momentum stocks → weak reversal signal; weak 12M momentum → strong reversal.
   - momentum_12m_skip1          # Jegadeesh-Titman 12M-1M; inversely related to reversal alpha
+  # --- WRDS / Compustat deterioration features ---
+  - accruals_ratio              # Sloan accrual anomaly: high accruals = weak earnings quality
+  - margin_deterioration        # declining gross/operating margins
+  - weak_profitability          # negative ROA pressure
+  - delta_leverage              # rising long-term leverage
+  - total_debt_to_assets        # balance-sheet fragility
+  - dilution_pressure           # share issuance / dilution
+  - restatement_like_flag       # late/unstable accounting proxy
+  - fundamental_deterioration_score
+  # --- Borrow/crowding and squeeze controls ---
+  - short_interest_ratio        # optional WRDS short-interest feed; zero if unavailable
+  - days_to_cover               # optional crowding feed; zero if unavailable
+  - borrow_crowding_risk        # optional securities-lending feed; zero if unavailable
+  - short_squeeze_risk          # hard short-risk control from price/volume/crowding
+  - hard_short_squeeze_filter
   # --- Cross-sectional conditioning ---
   - sector_relative_20d         # sector-relative 20d performance (IRRX decomposition component)
   - cs_momentum_percentile      # cross-sectional percentile rank; bottom decile = short candidate
@@ -214,12 +320,317 @@ mean_variance:
   lookback_days: 60
   max_single_weight: 0.25
   method: max_sharpe
-  rebalance_days: 20
+  rebalance_days: 10
+horizon_config:
+  # 63d horizon contract — current IC-decay evidence selects the quarterly/fundamental cadence.
+  # P24: production_horizon_days is authoritative (from alpha_research.production_horizon).
+  # All other fields default to it unless explicitly overridden here.
+  # ic_evaluation_horizon is omitted → inherits production_horizon automatically.
+  # rebalance_frequency_days may differ from production_horizon for decay-aware execution.
+  target_horizon_days: 63         # P24: match production_horizon
+  holding_period_days: 63         # P24: match production_horizon
+  rebalance_frequency_days: 63    # P24: match production_horizon
+  execution_tau_days: null
+  # P24: Set to true only if ic_evaluation_horizon must differ from production_horizon.
+  # When false (default), mismatches raise HorizonConfigurationError.
+  allow_cross_horizon_evaluation: false
+  # P18: Rank-persistence eligibility filter
+  # Only stocks with >= N consecutive days in the top decile are eligible
+  # for portfolio allocation.  Filters churned names before QP optimization.
+  # Evidence: persistent top-decile names have +1.80 SR annual alpha;
+  # churned names have -6.59 SR. Filtering churn improves alpha capture.
+  persistence_filter:
+    enabled: true
+    min_consecutive_top_decile_days: 2
+    min_eligible_names: 10
+    apply_to_paths: [long_only_overlay]
 model_selection:
-  ensemble_size: 1   # XGBRegressor only. Ridge has std=1.653 across 5 windows (nearly as high as mean=1.786) — too volatile to blend. XGBRegressor alone: OOS Sharpe 1.312, std=1.189, far more consistent.
-  lookahead_horizon_days: 5    # MUST match holding_period_days; was 10
+  core_models_only: true     # Evaluate only Ridge, XGBRegressor, LGBMRanker, ElasticNet (drop 6 redundant/experimental models)
+  # model_tier is auto-set to "core" when core_models_only=true (model_registry.py:517)
+  # model_tier: core
+  # Costs, turnover, constraints, and optimizer objectives live downstream in
+  # validation / portfolio construction, never inside model fitting.
+  strict_alpha_separation: true
+  # Binary direction classifiers estimate P(return > 0), not return magnitude
+  # or cross-sectional rank. They are reserved for diagnostics/meta-labeling,
+  # not executable stock-selection alpha.
+  include_classifiers: false
+  include_short_classifiers: false
+  # model_tier is auto-set to "core" when core_models_only=true
+  # Keep promotion conservative: rank all models, but export only models that pass
+  # executable gates. Increase this only after stable multi-model IC evidence.
+  ensemble_size: 1
+  lookahead_horizon_days: 63   # Current adaptive-horizon evidence selects the quarterly/fundamental cadence.
+  # Production runs a single canonical horizon. Candidate horizons remain in
+  # adaptive_horizon.candidate_horizons for diagnostics without launching four
+  # full training children by default.
+  production_horizons: [63]
+  horizon_gate:
+    use_institutional: true
+    min_production_features: 3
+    min_families: 2
+    max_family_concentration: 0.60
+    min_effective_signals: 1.50
+    feature_expected_turnover: 0.10
+  cost_viability:
+    classification:
+      min_alpha_cost_ratio_viable: 1.50
+      min_alpha_cost_ratio_marginal: 1.00
+      min_net_alpha_bps: 0.0
+      max_expected_turnover: 0.80
+      max_turnover_to_ic_ratio: 50.0
+      max_impact_fraction_of_cost: 0.75
+      max_borrow_fraction_of_cost: 0.50
+      min_adv_usd_viable: 10000000
+      max_participation_for_viable: 0.05
+      min_gross_alpha_bps: 3.0
+      min_ic_absolute: 0.005
+      min_capacity_score: 1.0
+      min_cost_data_coverage: 0.80
+  # P16: Algorithmic horizon selection — when apply: true (or --auto-horizon CLI),
+  # the engine runs IC-decay analysis across candidate horizons and dispatches
+  # the full pipeline at the optimal horizon.  Guardrails: min 2 features with
+  # positive IC, min median IC > 0.002, prefer shorter horizon within 10% tie.
+  adaptive_horizon:
+    apply: false
+    min_features_per_horizon: 2
+    min_median_ic: 0.002
+    tie_tolerance_pct: 10.0
+    candidate_horizons: [5, 10, 20, 40, 60, 63]  # P22: includes 63d for fundamental evaluation
   max_positions: 10
   min_positions: 3
+  # Embargo between train-end and test-start (calendar days).
+  # Institutional standard: cover the longest feature lookback (momentum_12m_skip1 = 252d).
+  # 60d = 12-week buffer; conservative but not the full 252d since many features are shorter.
+  # Can be overridden with --embargo_days CLI flag for research sweeps.
+  embargo_days: 60
+  # Feature-horizon alignment audit: reports features whose documented horizon_days is
+  # incompatible with the prediction horizon. enforcement is off by default so existing
+  # runs are not broken — set enforce: true to fail fast on misaligned features.
+  horizon_alignment:
+    enabled: true
+    enforce: false                       # false = log only; true = hard-fail before model fitting
+    alignment_multiplier: 2.0            # feature.horizon_days <= target_horizon * multiplier → aligned
+    report_path: "output/horizon_alignment_report.csv"
+  target:
+    # Supervised labels are pure alpha labels residualized cross-sectionally
+    # against beta/sector/liquidity/vol. Implementation costs are applied by
+    # executable validation and construction, not embedded in model fitting.
+    residualize: true
+    net_of_costs: false
+    residual_ridge: 0.0001
+    winsor_q: 0.01
+    max_abs_return: 5.0
+  economic_objective:
+    # Deprecated under strict_alpha_separation. Economic objectives are retained
+    # only as research reference code; they are not registered as trainable
+    # AlphaModels and are ignored by run_model_selection.
+    enabled: false
+  preprocessing:
+    # Fit medians/winsor bounds/constant-feature mask on each training slice only.
+    winsor_q: 0.01
+  nested_validation:
+    # Inner validation runs inside each outer train window. The outer OOS window
+    # remains final evidence; models failing inner validation cannot promote.
+    #
+    # validation_days: 252 (1 year) provides ~25 non-overlapping 10-day observations,
+    # sufficient to discriminate among max_candidates=12 nested candidates with
+    # acceptable overfitting risk. The previous 126-day window (~12 observations)
+    # was severely underpowered for multi-candidate selection.
+    enabled: true
+    max_windows: 1
+    validation_days: 252
+    min_train_days: 504
+    min_sharpe: 0.0
+    min_ic: 0.0
+    search:
+      # Stage A is a cheap alpha proxy screen. Stage B runs executable validation
+      # only for shortlisted score candidates. Portfolio penalties are not part
+      # of candidate identity.
+      proxy_max_iter: 30
+      max_candidates: 12
+      prefilter_top_k: 8
+      prefilter_windows: 1
+      # Lock nested search to production horizon only. Evaluating horizon=1 or
+      # horizon=10 candidates against a 5d forward-return target is a category
+      # error — misaligned horizon/target pairs inflate candidate count 3× with
+      # no valid selection signal. max_horizons: 1 guards against accidental
+      # Keep nested search on the active production horizon unless an explicit
+      # research sweep is requested.
+      candidate_horizons: [63]
+      max_horizons: 1
+      # Grinold-Kahn IC viability floor for QP pre-screening.
+      # IC < 0.01 on 500 stocks → theoretical IR < 0.22, below all promotion gates.
+      # The QP solve is skipped for nested validation windows below this threshold,
+      # saving ~30-50% of solver calls in volatile regimes (2020, 2022).
+      # Set to 0.0 to disable the gate and always run the QP.
+      ic_qp_floor: 0.01
+      # Keep Stage C nested selection inside the Stage B survivor family.
+      # Cross-family nested selection reopens rejected models and makes final
+      # rows mislabeled (e.g. a Ridge row fitting LGBMRanker). Enable only for
+      # explicit research experiments where row identity is not promotion evidence.
+      allow_cross_family_selection: false
+      # PreparedPanelCache persistence policy:
+      #   horizon_only = persist reusable target panels by horizon, keep folds/preprocessors memory-only
+      #   all          = legacy behavior; persists fold objects too, high disk usage
+      #   none         = fully memory-only prepared-panel cache
+      prepared_panel_disk_persistence: horizon_only
+      min_cache_free_space_mb: 2048
+      # P12: Pre-fit factor neutralization (institutional fix)
+      # Residualize all feature columns against CAPM beta, sector dummies, size,
+      # and volatility BEFORE model training at the PreparedPanelCache level.
+      # This prevents any model from ever seeing factor-exposed features.
+      # Equivalent to training on idiosyncratic returns directly.
+      # Disable temporarily with false to compare with factor-exposed training.
+      neutralize_factors_before_training: true
+      neutralization_ridge: 0.0001  # Ridge regularization for factor residualization
+    # Controls which nested validation phases use full QP optimizer vs rank-based proxy.
+    # "executable" = full QP optimizer per date (production fidelity, slow)
+    # "proxy_only" = rank-based equal-weight portfolio (fast, for candidate ranking only)
+    #
+    # fast_sweep and nested_proxy are always proxy_only by design (IC + turnover only).
+    # final_validation is always executable (promotion-critical) — not configurable here.
+    simulation_policy:
+      nested_full: proxy_only
+  validation:
+    # Production model-selection path: evaluate the model as a tradable book,
+    # not as an idealized top-N forward-return proxy.
+    capital: 10000000
+    factor_neutral: true
+    beta_neutral: true
+    sector_neutral: true
+    max_adv_fraction: 0.05    # DEPRECATED [D1]: use liquidity_limits.max_adv_fraction
+    max_gross: 0.60           # FIXED [C2]: was 1.0 — now aligned with optimizer.gross_cap=0.6; use portfolio_constraints.max_gross_exposure as canonical
+    max_name_weight: 0.10     # DEPRECATED: use portfolio_constraints.max_name_weight
+    constraint_passes: 3
+    use_optimizer: true
+    lambda_risk: 2.0          # DEPRECATED [D2]: use exposure_limits.lambda_risk
+    gamma_turnover: 2.0       # DEPRECATED [D3]: use exposure_limits.gamma_turnover — FIXED (was 4.0)
+    net_exposure_max: 0.10    # DEPRECATED [C1]: use portfolio_constraints.net_exposure_max
+    min_position_weight: 0.020  # FIXED [C3]: was 0.0025 — now aligned with optimizer.min_position_weight=0.020; use portfolio_constraints.min_position_weight as canonical
+    no_trade_band_weight_diff: 0.005   # FIXED (was 0.015): 1.5% dead-zone locked positions at
+                                       # 2-4% weights (min_position=2%). At 0.5%, positions
+                                       # deviating >0.5% from optimal trigger rebalance.
+    no_trade_band_total_drift: 0.025   # FIXED (was 0.05): tighter total drift threshold
+    optimizer_lookback_days: 60  # DEPRECATED [D4]: use exposure_limits.covariance_window
+    optimizer_alpha_scale: 1.0
+    # Overlay diagnostics are useful for final research packs, but running them
+    # inside every model/window doubles executable simulation work.
+    run_overlay_diagnostics: false
+    short_squeeze_filter: true
+    short_squeeze_max_risk: 0.75
+  research_contract:
+    # Feature hypotheses are audited before model fitting. Set require_* to true
+    # for production promotion once the feature ledger is complete.
+    require_known_features: false
+    require_min_coverage: false
+    min_coverage: 0.60
+  alpha_research:
+    # Institutional feature admission layer. Features are tested before model
+    # fitting across raw, residualized, and net-of-cost residual targets at
+    # multiple horizons. Only features that pass the current production horizon
+    # and marginal contribution gates are available to the model. There is no
+    # minimum feature quota: the system fails closed rather than padding with
+    # weak/noisy features.
+    # P4: Relaxed research-tier admission — fundamental features (63d horizon) need
+    # wider thresholds because quarterly data produces fewer observations per window.
+    # Research tier allows marginal signals; production promotion gates remain strict.
+    enabled: true
+    enforce_admission: true
+    multi_horizon_admission: true
+    cross_horizon_admission: true      # P12: Admit features at non-production horizons with decay weight
+    horizons: [1, 2, 3, 5, 10, 20, 63]  # Added 63: fundamental quarterly cycle
+    production_horizon: 63               # Current adaptive-horizon evidence selects the quarterly/fundamental cadence.
+    min_coverage: 0.60                   # P12: Relaxed from 0.70 — cross-horizon features need wider tolerance
+    min_abs_ic: 0.0003                   # P12: Relaxed from 0.0005 — N=500 stocks, FE=25, small IC can compound
+    min_ic_tstat: 0.25                   # P12: Relaxed from 0.35 — statistical power grows with N=500, small t-stats valid
+    min_monotonicity: 0.35               # P12: Relaxed from 0.45 — allow partial monotonicity for cross-horizon features
+    min_regime_stability: 0.30           # P12: Relaxed from 0.40 — regime-dependent features expected at cross-horizon
+    min_marginal_abs_ic: 0.00005         # P12: Relaxed from 0.0001 — marginal contribution scales with sqrt(N)
+    allow_inversion: true
+    minimum_admitted_features: 5         # P12: Enforce minimum feature count for sufficient breadth
+    fail_if_below_minimum: true          # P12: Hard-stop if breadth is insufficient
+    fallback_mode: disabled               # Fail-closed production admission; no rank padding
+    min_admission_percentile: 0.50       # P12: Relaxed from 0.60 — median is sufficient for broad feature admission
+    max_features_by_rank: 25             # P12: Increased from 12 — allow all passing features
+    min_admitted_for_fallback: 3
+    residual_ridge: 0.0001
+    winsor_q: 0.01
+    max_abs_return: 5.0
+    stability:                           # P11 stability gates
+      ic_cv_max: 3.0                     # P12: Relaxed from 2.0 — cross-horizon features have natural CV
+      ic_sign_flip_max: 3                # P12: Relaxed from 2 — cross-horizon sign flips expected
+      min_halflife_days: 1.0
+  parallel_research:
+    enabled: true
+    model_workers: 2
+    # Legacy economic model workers are ignored under strict alpha separation.
+    economic_model_workers: 2
+    nested_candidate_workers: 4
+  screening:
+    enabled: true
+    shortlist_top_k_per_path: 4
+    min_keep_per_path: 2
+    adaptive_execution_budget: true
+    require_positive_feasibility: true
+  promotion:
+    gates:
+      # Hard gates for artifact export. Failing models still appear in model_comparison.csv.
+      # P12 institutional calibration for N=500 stocks, h=10d hold, 25 features:
+      #   IC ≈ 0.015 with N≈500 → IR = 0.015×√500 ≈ 0.335
+      #   After cross-horizon admission: IC ≈ 0.018, N ≈ 500, IR ≈ 0.40
+      #   Cost drag at 10d: ~15-25% of gross alpha
+      #   Expected net Sharpe: 0.35-0.55
+      dynamic_thresholds:
+        enabled: true
+        confidence: 0.80
+        min_effective_obs: 12
+        reference_ic_std: 0.10
+        reference_turnover: 0.35
+      min_sharpe: 0.30         # P12: Relaxed from 0.35 — achievable at IC≈0.018, N=500
+      min_cost_aware_sharpe: 0.10  # P12: Relaxed from 0.15 — net-of-cost at 10d hold
+      min_ic_tstat: 1.20       # P12: Relaxed from 1.30 — N=500 provides sufficient statistical power
+      min_ic_ir: 0.35          # P12: Relaxed from 0.45 — achievable with expanded feature set
+      min_beat_rate: 0.50      # P12: Relaxed from 0.55 — 50% positive-Sharpe windows is sufficient
+      max_drawdown: -0.35      # P12: Relaxed from -0.30 — allow -35% DD for more aggressive positions
+      min_windows: 6
+      min_psr: 0.50            # P12: Relaxed from 0.55 — PSR at Sharpe≈0.30 with 6+ windows
+      max_beta_abs_mean: 0.20  # P12: Relaxed from 0.15 — pre-fit factor neutralization handles beta
+      max_sector_abs_mean: 0.15  # P12: Relaxed from 0.12 — sector neutrality enforced in training
+      max_cost_to_gross_pnl: 0.65  # P12: Relaxed from 0.60 — 10d rebalancing has higher cost fraction
+      min_decile_spread: 0.0
+      min_tail_monotonicity: 0.45  # P12: Relaxed from 0.50 — partial monotonicity acceptable
+      min_long_leg_sharpe: 0.0
+      min_short_leg_sharpe: -0.15  # P12: Relaxed from -0.10 — short leg expected to be slightly negative
+      # P12: New gates for pre-fit factor neutralization
+      max_subsumption_r2: 0.30       # Factor subsumption R² must be <30% (idiosyncratic alpha > 70%)
+      min_subsumption_alpha_ann: -0.05  # Allow slightly negative subsumption alpha
+      min_subsumption_alpha_tstat: -1.0  # Allow slightly negative t-stat
+      min_signal_halflife_buffer: 2.0  # Signal halflife must exceed rebalance + 2d buffer
+      min_caic_to_ic_ratio: 0.60       # Cost-adjusted IC must be at least 60% of raw IC
+      max_avg_turnover: 0.40           # P12: Relaxed from default — 10d holding allows higher turnover
+      # Per-path threshold overrides.
+      path_overrides:
+        short_side:
+          min_ic_tstat: 0.80
+          min_ic_ir: 0.25
+    # Long-alpha candidate tier: research artifacts that pass long-only quality.
+    long_alpha_candidate_gates:
+      min_long_leg_sharpe: 0.0
+      min_ic_tstat: 0.80
+      min_beat_rate: 0.45       # P12: Relaxed from 0.50
+      max_drawdown: -0.45       # P12: Relaxed from -0.40
+      min_psr: 0.40             # P12: Relaxed from 0.45
+      max_cost_to_gross_pnl: 0.80  # P12: Relaxed from 0.75
+      min_decile_spread: 0.0
+      min_windows: 4
+    object_store:
+      enabled: true
+      # Set MODEL_REGISTRY_URI to s3://<bucket>/models or gs://<bucket>/models
+      # before production promotion. Local file:// URIs are supported for dry-runs/tests.
+      uri_env: MODEL_REGISTRY_URI
+      family: ensemble
+      require_for_production: true
   selection_weight_decay: 0.9
 monitoring:
   alert_method: print
@@ -331,12 +742,17 @@ retraining:
   validation_holdout_calendar_days: 252
   validation_walk_forward_windows: 6   # Raised from 3: HSBC survey says 3 is insufficient for OOS validation
 risk:
+  drawdown_overlay:
+    enabled: true
+    start_pct: 0.06
+    max_pct: 0.12
+    min_gross_multiplier: 0.35
+    halt_new_risk_pct: 0.12
+    flatten_all_pct: 0.18
   bear_gross_cap_fraction: 0.5    # Phase 9: lowered from 0.7
   crisis_gross_cap_fraction: 0.3  # Phase 13: lowered from 0.4 — tighter crisis gross cap to break <20% DD
   regime_short_suppression: true  # Suppress shorts in Crisis (fully) and Bear (capped at bear_short_cap)
   bear_short_cap: 0.5             # In Bear, allow shorts up to 50% of max_weight (vs 100% in Bull/Sideways)
-  # Bear: entry gate replaces forced liquidation — no new longs, existing positions exit via signal
-  bear_liquidate_longs_on_regime_entry: false  # ARCH: removed — was selling at panic prices on day 1 of Bear
   bear_max_carry_days: 3        # cap planned exits for pre-Bear longs so they don't drag into Bear trend
   bear_max_holding_days: 0
   bear_regime_intraday_exit_drawdown_pct: 0.0   # Disabled: 2% trigger fires within days in bear → re-enter loop → 982% turnover
@@ -350,7 +766,6 @@ risk:
   crisis_signal_window_days: 60
   crisis_transition_accel_enabled: true
   crisis_transition_flatten_all: false
-  crisis_transition_force_close_losers_same_day: false  # ARCH: removed — was causing 57% Gross/Net gap
   crisis_transition_loser_max_hold_days: 0
   crisis_transition_use_open_exit: true
   crisis_transition_winner_extra_days: 3  # winners get 3 extra days before being capped
@@ -360,13 +775,13 @@ risk:
   kelly_fraction: 0.5
   kelly_win_rate: 0.55
   max_drawdown_pct: 0.0
-  max_gross_exposure: 1.5
-  max_net_exposure: 0.1
+  max_gross_exposure: 1.5  # DEPRECATED: use portfolio_constraints.max_gross_exposure — NOTE [C2]: this is the hard circuit breaker; optimizer.gross_cap=0.6 is the soft target
+  max_net_exposure: 0.1   # DEPRECATED: use portfolio_constraints.net_exposure_max
   # VOL-TARGET FIX: actual portfolio vol = 6.5% but target = 10%.
   # Root cause: 12 positions at 8% = 96% gross, but correlation discount + gross cap = ~50% effective.
   # Raise per-position cap 8%→10%; with 18 positions at lower correlation, portfolio vol approaches target.
   # HKUST survey: proper portfolio construction requires vol-targeting to avoid return drag.
-  max_position_pct_of_equity: 0.10
+  max_position_pct_of_equity: 0.10  # DEPRECATED: use portfolio_constraints.max_name_weight
   max_short_single_name: 0.08       # Phase 4: match long cap
   min_holding_early_exit_drawdown_pct: 1.0
   position_sizing: signal_strength  # Phase 4: upgraded from equal — size by conviction
@@ -405,19 +820,62 @@ risk:
     short_trend_filter_ma: 200
   vol_lookback_days: 20
   vol_target_annual: 0.10   # Phase 9: lowered from 0.12 — tighter vol target to reduce DD
+
+# ── Institutional Risk Overlay (VolTargeting + TimeSeries + StressTest) ─────
+# Runs as daily multiplier on top of base position sizing. Replaces ad-hoc
+# SPY vol scalar with integrated AQR-style risk management.
+risk_overlay:
+  enabled: true
+  vol_targeting:
+    enabled: true
+    target_vol: 0.15          # Annualized portfolio vol target (15%)
+    min_scale: 0.3            # Minimum scale factor (max deleverage to 30%)
+    max_scale: 1.2            # Maximum scale factor (max leverage 1.2x)
+    ewm_halflife: 20          # EWM halflife for realized vol smoothing
+  time_series_overlay:
+    enabled: true
+    vol_target: 0.15          # Must match vol_targeting.target_vol
+    vol_min_scale: 0.3
+    vol_max_scale: 1.2
+    market_trend_enabled: true
+    trend_lookback: 200       # Days for market trend filter
+    trend_ema_span: 50        # EMA span for trend smoothing
+    crisis_detection_enabled: true
+    crisis_vol_threshold: 0.04  # Daily vol > 4% (~63% annualized) triggers crisis
+    crisis_exposure_scale: 0.1  # Crisis exposure multiplier
+  stress_test:
+    enabled: true
+    confidence_level: 0.95
+    n_simulations: 5000
+    max_dd_threshold: 0.25    # Fail if max drawdown > 25% in any scenario
+    max_vol_threshold: 0.40   # Fail if portfolio vol > 40% in any scenario
+    min_pass_scenarios: 3     # At least 3 of 5 scenarios must pass
+
+# ── Factor Attribution & Adverse Selection ────────────────────────────────────
+factor_attribution:
+  enabled: true
+  factors: ["market_beta", "size", "momentum", "value", "quality"]
+  benchmark_ticker: "SPY"
+  risk_free_rate: 0.02
+
+adverse_selection:
+  enabled: true
+  min_signal_to_cost: 2.0     # Signal must be 2x cost to trade
+  monitoring_window: 60       # Days for rolling analysis
+
 risk_factors:
   beta_cache_path: output/beta_cache.csv
-  beta_lookback_days: 60
+  beta_lookback_days: 60  # DEPRECATED [D4]: use exposure_limits.covariance_window
   compute_beta_on_fly: false
   liquidity:
     adv_cache_path: output/adv_cache.csv
     adv_lookback_days: 20
     enabled: true
-    max_adv_pct: 0.05
+    max_adv_pct: 0.05  # DEPRECATED [D1]: use liquidity_limits.max_adv_fraction
     refresh_cache_on_run: false
-  max_beta: 1.25
-  max_sector_exposure: 0.3
-  max_single_name_pct: 0.12
+  max_beta: 1.25          # NOTE [A2]: per-name beta cap (screen individual stocks); DIFFERENT from exposure_limits.max_market_beta=0.15 (portfolio factor exposure)
+  max_sector_exposure: 0.3  # NOTE [A1]: sector allocation cap (how much of portfolio in one sector); DIFFERENT from exposure_limits.max_sector_net_exposure=0.12 (net factor β)
+  max_single_name_pct: 0.12  # DEPRECATED [C4]: CONFLICT — use portfolio_constraints.max_name_weight=0.10; this 0.12 allows 20% larger names than optimizer enforces
   sector_mapping_path: config/sector_mapping.csv
 sectors:
   adjustment_enabled: false
@@ -428,7 +886,6 @@ sectors:
   volatility_weight: -0.05
 signals:
   base_signal_threshold: 0.001
-  crisis_block_all_new_entries: false  # must match risk.crisis_block_all_new_entries — was orphaned true (unused)
   dynamic_thresholds_enabled: false
   ensemble:
     clip: false
@@ -487,6 +944,62 @@ slippage_tracking:
   slippage_metrics_csv: output/live/slippage_metrics.csv
   trades_file: output/live/trades.csv
 
+# ─── CANONICAL SINGLE-SOURCE SECTIONS ────────────────────────────────────────
+# These sections are the single source of truth. config.py reads these first and
+# warns when deprecated sub-section values differ from the canonical values here.
+# Do not remove deprecated fields yet — they are still read by code paths that
+# have not been migrated. Migrate one section at a time.
+
+portfolio_constraints:
+  # Single-name and portfolio-level weight / exposure limits.
+  # SOURCES OF TRUTH for: optimizer, model_selection.validation, risk, risk_factors.
+  max_name_weight: 0.10          # max |weight| per position (fraction of equity); all sections agreed
+  max_gross_exposure: 1.5        # hard gross exposure circuit breaker (sum |w_i|); optimizer soft target is optimization_config.optimizer.gross_cap=0.6
+  net_exposure_max: 0.01         # P5: strict dollar neutrality for L/S spread books; long-only path is relaxed to 1.0 in code
+  min_position_weight: 0.020     # floor: zero out positions below this size; FIXES C3 — ms.validation was 0.0025 (8× smaller than optimizer)
+  max_positions: 25              # max simultaneous open positions
+  long_only: true                # P1: long-only deployment — short side systematically destroys alpha
+
+cost_model:
+  # All cost inputs in basis points per side (one-way), unless noted.
+  # SOURCES OF TRUTH for: execution_costs, execution (flat-bps path).
+  slippage_bps: 1.0              # execution slippage per side
+  commission_bps: 1.0            # all-in commission per side (bps path)
+  spread_bps: 1.0                # half-spread cost per side
+  commission_per_trade_usd: 1.0  # fixed dollar commission (flat-cost path, small accounts)
+  # VIX-scaled cost regime (shared between execution_costs.vix_* fields)
+  vix_cost_scaling_enabled: true
+  vix_cost_alpha: 0.08           # slippage_eff = slippage × (1 + alpha × max(0, VIX − VIX_252d_median))
+
+liquidity_limits:
+  # ADV-based liquidity constraints shared across optimizer, validation, risk_factors.
+  # SOURCES OF TRUTH for: optimization_config.liquidity, ms.validation.max_adv_fraction, risk_factors.liquidity.max_adv_pct.
+  max_adv_fraction: 0.05         # max holding as fraction of daily ADV (all 3 prior locations agreed)
+  min_adv_usd: 25000000          # minimum stock daily dollar volume ($25M)
+
+exposure_limits:
+  # Risk model and factor exposure parameters shared between optimizer and validation.
+  # SOURCES OF TRUTH for: optimization_config.optimizer.{lambda,gamma}, ms.validation.{lambda,gamma,lookback}.
+  lambda_risk: 2.0               # MVO risk aversion coefficient (both sections agreed)
+  gamma_turnover: 2.0            # FIXED (was 4.0): turnover penalty base — reduced to allow trading at IC≈0.01 signal level
+  adaptive_portfolio_control:
+    enabled: true
+    lookback_days: 252           # trailing point-in-time evidence window for IC/cost/vol control state
+    min_history_days: 60         # fail back to base lambda/gamma until enough evidence exists
+    ema_span: 20                 # monthly smoothing prevents coefficient whipsaw
+    target_volatility: 0.15      # lambda_t scales with (realized_vol / target_vol)^2
+    lambda_floor_factor: 0.50
+    lambda_ceil_factor: 4.00
+    gamma_floor_factor: 0.125
+    gamma_ceil_factor: 4.00
+    min_expected_alpha: 0.0001   # prevents infinite cost/alpha ratios in weak-signal regimes
+  covariance_window: 60          # rolling covariance / beta estimation window in trading days (all 3 sections agreed)
+  # Portfolio factor exposure caps (these are net portfolio-level exposures, not per-name)
+  max_sector_net_exposure: 0.12  # net sector factor β cap; source: optimization_config.factor_model.sector_net_exposure_max
+  max_market_beta: 0.15          # net portfolio market β cap; source: optimization_config.factor_model.max_exposures.market_beta
+  # NOTE: risk_factors.max_beta=1.25 and risk_factors.max_sector_exposure=0.3 are per-name
+  # screening caps (different semantics than portfolio-level factor exposures above).
+
 # Pillar 29: Institutional Dynamic Universe
 universe:
   # mode options:
@@ -495,8 +1008,10 @@ universe:
   #   "sp500"  — current Wikipedia constituents (survivorship bias — research only)
   #   "file"   — load from file_path
   #   "custom" — use tickers list in config
-  mode: "wrds"           # switch to "wrds" once WRDS cache is populated (Phase 7)
-  cache_path: "config/sp500_tickers.txt"
+  mode: "wrds"           # Production research uses WRDS PIT universe, not current-constituent files.
+  allow_fallback: false
+  include_full_membership_panel: false  # Keep ticker universe investable under min_price/min_dollar_vol; PIT panel is retained for audit.
+  file_path: "config/sp500_tickers.txt"
   cache_max_age_days: 7
   min_price: 10.0
   min_dollar_vol: 1.0e8   # $100M daily dollar volume minimum

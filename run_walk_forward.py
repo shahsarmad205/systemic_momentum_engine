@@ -65,8 +65,8 @@ def _resolve_tickers(cfg, cli_tickers: list[str] | None) -> list[str]:
     tickers = cli_tickers or cfg.tickers or []
     if not tickers:
         try:
-            from main import TICKERS
-            tickers = list(TICKERS)
+            from utils.default_universe import DEFAULT_TICKERS
+            tickers = list(DEFAULT_TICKERS)
         except Exception:
             tickers = []
 

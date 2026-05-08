@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,6 +23,7 @@ logging.getLogger("matplotlib").setLevel(logging.WARNING)
 
 from matplotlib import pyplot as plt
 from trend_signal_engine.utils.market_data import get_ohlcv
+from trend_signal_engine.utils.wrds_data import load_wrds_price_panel, resolve_data_provider
 
 
 @dataclass(frozen=True)
@@ -215,18 +217,29 @@ def main():
     strat_daily_ret = strat_eq_series.pct_change().dropna()
 
     # Benchmark: SPY buy-and-hold over same date range
-    # Add small buffer so Yahoo slicing doesn't miss first/last trading days.
     spy_start = (start_dt - pd.Timedelta(days=10)).strftime("%Y-%m-%d")
     spy_end = (end_dt + pd.Timedelta(days=10)).strftime("%Y-%m-%d")
-    spy_df = get_ohlcv(
-        args.benchmark_ticker,
-        spy_start,
-        spy_end,
-        provider="yahoo",
-        cache_dir="data/cache/ohlcv",
-        use_cache=True,
-        cache_ttl_days=0,
-    )
+    benchmark_provider = resolve_data_provider(os.environ.get("TREND_DATA_PROVIDER") or "wrds")
+    if benchmark_provider == "wrds":
+        spy_df = load_wrds_price_panel(
+            [args.benchmark_ticker],
+            start_date=spy_start,
+            end_date=spy_end,
+            username=os.environ.get("WRDS_USERNAME"),
+            cache_dir="data/cache/wrds",
+            cache_ttl_days=1,
+            ticker_to_permno={},
+        ).get(args.benchmark_ticker, pd.DataFrame())
+    else:
+        spy_df = get_ohlcv(
+            args.benchmark_ticker,
+            spy_start,
+            spy_end,
+            provider=benchmark_provider,
+            cache_dir="data/cache/ohlcv",
+            use_cache=True,
+            cache_ttl_days=0,
+        )
     if spy_df.empty or "Close" not in spy_df.columns:
         raise RuntimeError("Failed to load SPY benchmark data")
 
@@ -396,4 +409,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

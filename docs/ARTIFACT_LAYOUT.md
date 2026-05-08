@@ -37,6 +37,12 @@ All paths are relative to `trend_signal_engine/` unless noted.
 
 **Restore:** Copy the desired release folder’s `learned_weights.json` (and scaler) into `output/`, then rerun pipeline dry-run before enabling execution.
 
+Model pickle artifacts are not source files and must stay out of Git. Production promotion
+uses `scripts/promote_model.py` to publish model bytes to the configured registry prefix
+(`s3://`, `gs://`, or `file://` for dry-runs) and writes local lineage metadata under
+`output/models/artifact_registry/`. The production pointer should reference registry
+metadata, not rely on a tracked `.pkl`.
+
 ## Correlation ID
 
 Set `RUN_ID` in the environment for cron runs so `pipeline.log`, `execution_log.jsonl`, and execution entries share the same id (see `utils/run_context.py`).

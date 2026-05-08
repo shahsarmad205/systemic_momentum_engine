@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import datetime
 import logging
-import math
+import os
 from collections import defaultdict
 from datetime import timedelta
 from typing import Optional
@@ -33,6 +33,7 @@ from .execution import ExecutionEngine
 from .portfolio import Portfolio, Position
 from .regime import MarketRegimeAgent
 from .result import BacktestResult
+from utils.wrds_data import load_wrds_price_panel
 
 try:
     from execution.cost_model import TransactionCostModel
@@ -159,7 +160,13 @@ class Backtester:
         else:
             self.cost_model = None
             self.execution = ExecutionEngine(config.slippage_bps, config.commission_per_trade)
-        self.regime_agent = MarketRegimeAgent()
+        self.regime_agent = MarketRegimeAgent(
+            data_provider=getattr(config, "data_provider", "wrds"),
+            cache_dir=getattr(config, "cache_dir", "data/cache/ohlcv"),
+            cache_ttl_days=getattr(config, "cache_ttl_days", 1),
+            wrds_username=os.environ.get("WRDS_USERNAME"),
+            wrds_ticker_to_permno=getattr(config, "wrds_ticker_to_permno", {}) or {},
+        )
 
         # Almgren-Chriss market impact model (replaces ad-hoc k_bps * sqrt formula)
         self._market_impact_model: object = None
@@ -178,6 +185,33 @@ class Backtester:
                 "Almgren-Chriss market impact enabled  eta=%.3f  alpha=%.3f  gamma=%.2f",
                 _mi_params.eta, _mi_params.alpha, _mi_params.gamma,
             )
+
+        # Factor attribution engine (P&L decomposition into factor contributions)
+        self._factor_attribution = None
+        if bool(getattr(config, "factor_attribution_enabled", True)):
+            try:
+                from .factor_attribution import FactorAttribution
+                self._factor_attribution = FactorAttribution(
+                    factor_names=getattr(config, "attribution_factors", ["market_beta", "size", "momentum", "value", "quality"]),
+                    benchmark_ticker=getattr(config, "benchmark_ticker", "SPY"),
+                    risk_free_rate=float(getattr(config, "risk_free_rate", 0.02)),
+                )
+            except Exception as exc:
+                logger.warning("Factor attribution initialization failed: %s", exc)
+
+        # Adverse selection analyzer (signal-to-cost ratio, implementation shortfall)
+        self._adverse_selection = None
+        if bool(getattr(config, "adverse_selection_enabled", True)):
+            try:
+                from .adverse_selection import AdverseSelectionAnalyzer, AdverseSelectionConfig
+                self._adverse_selection = AdverseSelectionAnalyzer(
+                    AdverseSelectionConfig(
+                        min_signal_to_cost_ratio=float(getattr(config, "min_signal_to_cost", 2.0)),
+                        monitoring_window=int(getattr(config, "adverse_selection_window", 60)),
+                    )
+                )
+            except Exception as exc:
+                logger.warning("Adverse selection initialization failed: %s", exc)
 
         # Circuit breaker state
         self._equity_peak: float = config.initial_capital
@@ -254,8 +288,8 @@ class Backtester:
         tickers = tickers or self.config.tickers
         if not tickers:
             try:
-                from main import TICKERS
-                tickers = list(TICKERS)
+                from utils.default_universe import DEFAULT_TICKERS
+                tickers = list(DEFAULT_TICKERS)
             except Exception:
                 tickers = list(self._FALLBACK_TICKERS)
 
@@ -357,6 +391,7 @@ class Backtester:
                     "SPY",
                     self.config.start_date,
                     self.config.end_date,
+                    provider=getattr(self.config, "data_provider", None),
                     cache_dir=getattr(self.config, "cache_dir", "data/cache/ohlcv"),
                     use_cache=getattr(self.config, "cache_ohlcv", True),
                 )
@@ -711,6 +746,113 @@ class Backtester:
         plt.savefig(plot_path)
         plt.close()
 
+        # 5) Factor attribution and adverse selection analysis
+        self._run_factor_attribution_diagnostics(df, out_dir)
+        self._run_adverse_selection_diagnostics(df, out_dir)
+
+    def _run_factor_attribution_diagnostics(self, trades: pd.DataFrame, out_dir: Path) -> None:
+        """Compute and print factor attribution summary."""
+        if self._factor_attribution is None or trades is None or trades.empty:
+            return
+        try:
+            from .factor_attribution import FactorAttributionResult
+
+            attribution = self._factor_attribution
+            for _, row in trades.iterrows():
+                entry_date = pd.Timestamp(row.get("entry_date"))
+                ticker = str(row.get("ticker", ""))
+                pnl = float(row.get("pnl", 0.0))
+                cost = float(row.get("total_cost", 0.0))
+                score = float(row.get("adjusted_score", 0.0))
+
+                weights = {ticker: 1.0} if pnl > 0 else {}
+                realized_returns = {ticker: pnl / max(float(row.get("position_size", 1.0)), 1.0)}
+                factor_exposures = {
+                    "market_beta": {ticker: float(row.get("capm_beta", 1.0))},
+                    "momentum": {ticker: score},
+                }
+                factor_returns = {"market_beta": 0.0, "momentum": 0.0}
+
+                attribution.compute_attribution(
+                    weights=weights,
+                    factor_exposures=factor_exposures,
+                    factor_returns=factor_returns,
+                    realized_returns=realized_returns,
+                    transaction_costs={ticker: cost} if cost > 0 else None,
+                    benchmark_return=0.0,
+                    date=entry_date,
+                )
+
+            summary = attribution.summarize()
+            if summary.get("n_periods", 0) > 0:
+                print("\nFactor Attribution Summary:")
+                print(f"  Periods analyzed     : {summary['n_periods']}")
+                print(f"  Total return         : {summary['total_return']:+.4f}")
+                print(f"  Alpha component      : {summary['total_alpha']:+.4f} ({summary.get('alpha_pct', 0):.0%})")
+                print(f"  Beta component       : {summary['total_beta']:+.4f} ({summary.get('beta_pct', 0):.0%})")
+                print(f"  Total costs          : {summary['total_costs']:.4f}")
+                print(f"  Net return           : {summary['net_return']:+.4f}")
+                print(f"  Avg Information Ratio: {summary.get('avg_information_ratio', 0):.3f}")
+                if summary.get("factor_contributions"):
+                    print("  Factor contributions:")
+                    for fname, contrib in summary["factor_contributions"].items():
+                        print(f"    {fname:<15}: {contrib:+.4f}")
+
+                attr_path = out_dir / "factor_attribution.json"
+                import json
+                with open(attr_path, "w") as f:
+                    json.dump(summary, f, indent=2, default=str)
+        except Exception as exc:
+            logger.debug("Factor attribution diagnostics failed: %s", exc)
+
+    def _run_adverse_selection_diagnostics(self, trades: pd.DataFrame, out_dir: Path) -> None:
+        """Compute and print adverse selection and implementation shortfall analysis."""
+        if self._adverse_selection is None or trades is None or trades.empty:
+            return
+        try:
+            analyzer = self._adverse_selection
+            alphas = {}
+            costs = {}
+            for _, row in trades.iterrows():
+                ticker = str(row.get("ticker", ""))
+                score = float(row.get("adjusted_score", 0.0))
+                cost = float(row.get("total_cost", 0.0))
+                pnl = float(row.get("pnl", 0.0))
+                alphas[ticker] = score * 0.01
+                costs[ticker] = cost
+
+            report = analyzer.generate_report(
+                date=pd.Timestamp(trades["exit_date"].max()),
+                alphas=alphas,
+                costs=costs,
+            )
+
+            if report.recommendations:
+                print("\nAdverse Selection Analysis:")
+                print(f"  Avg signal-to-cost ratio : {report.avg_signal_to_cost_ratio:.2f}")
+                print(f"  Trades below threshold   : {report.pct_trades_below_threshold:.0%}")
+                print(f"  Avg impl. shortfall      : {report.avg_implementation_shortfall_bps:.1f} bps")
+                print(f"  Adverse selection measure: {report.adverse_selection_measure:+.4f}")
+                print("  Recommendations:")
+                for rec in report.recommendations:
+                    print(f"    - {rec}")
+
+                as_path = out_dir / "adverse_selection.json"
+                import json
+                report_dict = {
+                    "date": str(report.date.date()),
+                    "avg_signal_to_cost_ratio": report.avg_signal_to_cost_ratio,
+                    "pct_trades_below_threshold": report.pct_trades_below_threshold,
+                    "avg_implementation_shortfall_bps": report.avg_implementation_shortfall_bps,
+                    "adverse_selection_measure": report.adverse_selection_measure,
+                    "high_risk_trades": report.high_risk_trades,
+                    "recommendations": report.recommendations,
+                }
+                with open(as_path, "w") as f:
+                    json.dump(report_dict, f, indent=2)
+        except Exception as exc:
+            logger.debug("Adverse selection diagnostics failed: %s", exc)
+
     def run_with_custom_signals(
         self,
         price_data: dict,
@@ -743,6 +885,37 @@ class Backtester:
     # Phase 1 — data loading & signal generation
     # ==============================================================
 
+    def _apply_pit_universe_mask(self, ticker: str, signals: pd.DataFrame) -> pd.DataFrame:
+        """
+        Neutralize signals outside the point-in-time eligible membership window.
+
+        This preserves feature history while preventing trades in names that were
+        not actually investable on that date.
+        """
+        membership_ranges = getattr(self.config, "pit_membership_ranges", {}) or {}
+        ranges = membership_ranges.get(str(ticker), [])
+        if signals is None or signals.empty or not ranges:
+            return signals
+
+        idx = pd.DatetimeIndex(signals.index).normalize()
+        active = pd.Series(False, index=signals.index)
+        for start, end in ranges:
+            active |= (idx >= pd.Timestamp(start).normalize()) & (idx <= pd.Timestamp(end).normalize())
+
+        if bool(active.all()):
+            return signals
+
+        masked = signals.copy()
+        inactive_idx = active.index[~active.values]
+        if "signal" in masked.columns:
+            masked.loc[inactive_idx, "signal"] = "Neutral"
+        for col in ("adjusted_score", "score", "raw_score", "smoothed_score", "forecast"):
+            if col in masked.columns:
+                masked.loc[inactive_idx, col] = 0.0
+        if "confidence" in masked.columns:
+            masked.loc[inactive_idx, "confidence"] = "Low"
+        return masked
+
     def prepare_data(self, tickers: list[str]) -> tuple[dict, dict]:
         start_ts = pd.Timestamp(self.config.start_date)
         dl_start = start_ts - timedelta(days=HISTORY_BUFFER_DAYS)
@@ -758,64 +931,38 @@ class Backtester:
         min_history_days = int(getattr(self.config, "min_history_days", 252))
         excluded_for_history: list[str] = []
 
-        provider = getattr(self.config, "data_provider", "yahoo") or "yahoo"
+        provider = getattr(self.config, "data_provider", None)
+        if not provider:
+            raise RuntimeError("data provider must be explicit in BacktestConfig")
         cache = getattr(self.config, "cache_ohlcv", True)
         cache_dir = getattr(self.config, "cache_dir", "data/cache/ohlcv")
         # Institutional Caching Fix: Default to 1-day TTL if not specified.
         # This prevents redundant 50-year downloads for 500 tickers on every run.
         cache_ttl = getattr(self.config, "cache_ttl_days", 1)
 
-        # SPY/VIX Pre-load (Institutional Fix: load once with Tiingo to avoid Yahoo rate-limiting)
+        # Benchmark pre-load. In WRDS mode we keep the historical path inside CRSP;
+        # VIX features fall back to realized-vol proxies downstream.
         spy_df_global = None
         vix_df_global = None
         vix3m_df_global = None
         try:
-            print("\nPre-loading benchmarks (SPY, ^VIX, ^VIX3M) using Tiingo…")
-            spy_df_global = get_ohlcv(
-                "SPY",
-                dl_start.strftime("%Y-%m-%d"),
-                dl_end.strftime("%Y-%m-%d"),
-                provider="tiingo",
-                cache_dir=cache_dir,
-                use_cache=cache,
-                cache_ttl_days=cache_ttl,
-            )
-            vix_df_global = get_ohlcv(
-                "^VIX",
-                dl_start.strftime("%Y-%m-%d"),
-                dl_end.strftime("%Y-%m-%d"),
-                provider="tiingo",
-                cache_dir=cache_dir,
-                use_cache=cache,
-                cache_ttl_days=cache_ttl,
-            )
-            vix3m_df_global = get_ohlcv(
-                "^VIX3M",
-                dl_start.strftime("%Y-%m-%d"),
-                dl_end.strftime("%Y-%m-%d"),
-                provider="tiingo",
-                cache_dir=cache_dir,
-                use_cache=cache,
-                cache_ttl_days=cache_ttl,
-            )
-        except Exception as exc:
-            logger.warning("Optional pre-load for benchmarks (SPY/VIX/VIX3M) failed: %s.", exc)
-
-        for i, ticker in enumerate(tickers, 1):
-            msg_prefix = f"[{i}/{len(tickers)}] {ticker}"
-            print(f"  {msg_prefix}…", end=" ")
-            logger.debug(
-                "Requesting OHLCV for %s: %s → %s (provider=%s, cache_dir=%s, ttl=%d)",
-                ticker,
-                dl_start.strftime("%Y-%m-%d"),
-                dl_end.strftime("%Y-%m-%d"),
-                provider,
-                cache_dir,
-                cache_ttl,
-            )
-            try:
-                raw = get_ohlcv(
-                    ticker,
+            if str(provider).lower() == "wrds":
+                print("\nPre-loading benchmark context (SPY) using WRDS/CRSP…")
+                wrds_bench = load_wrds_price_panel(
+                    ["SPY"],
+                    start_date=dl_start,
+                    end_date=dl_end,
+                    username=os.environ.get("WRDS_USERNAME"),
+                    cache_dir=cache_dir if "wrds" in str(cache_dir).lower() else "data/cache/wrds",
+                    cache_ttl_days=cache_ttl,
+                    ticker_to_permno=getattr(self.config, "wrds_ticker_to_permno", {}) or {},
+                    as_of_date=dl_end,
+                )
+                spy_df_global = wrds_bench.get("SPY")
+            else:
+                print("\nPre-loading benchmarks (SPY, ^VIX, ^VIX3M) using market data provider…")
+                spy_df_global = get_ohlcv(
+                    "SPY",
                     dl_start.strftime("%Y-%m-%d"),
                     dl_end.strftime("%Y-%m-%d"),
                     provider=provider,
@@ -823,46 +970,124 @@ class Backtester:
                     use_cache=cache,
                     cache_ttl_days=cache_ttl,
                 )
-                # Only require core OHLCV columns to be non-null; ignore NaNs in auxiliary columns
-                data = raw.dropna(subset=["Close"])
-                logger.info(
-                    "Loaded OHLCV for %s: shape=%s",
-                    ticker,
-                    getattr(raw, "shape", None),
+                vix_df_global = get_ohlcv(
+                    "^VIX",
+                    dl_start.strftime("%Y-%m-%d"),
+                    dl_end.strftime("%Y-%m-%d"),
+                    provider=provider,
+                    cache_dir=cache_dir,
+                    use_cache=cache,
+                    cache_ttl_days=cache_ttl,
                 )
-                if not data.empty:
-                    logger.debug(
-                        "OHLCV window for %s: %s → %s (n=%d, cols=%s)",
-                        ticker,
-                        data.index.min(),
-                        data.index.max(),
-                        len(data),
-                        list(data.columns),
-                    )
-
-                if data.empty or len(data) < 210:
-                    print("insufficient data")
-                    logger.warning(
-                        "Skipping %s due to insufficient data (len=%d < 210 bars)",
-                        ticker,
-                        len(data),
-                    )
-                    continue
-                # Debug: show actual data window returned before pre-history check.
-                first_date = data.index.min()
-                last_date = data.index.max()
-                print(
-                    f"{msg_prefix} OHLCV window: first_date={first_date.date()}, "
-                    f"last_date={last_date.date()}, n={len(data)}"
+                vix3m_df_global = get_ohlcv(
+                    "^VIX3M",
+                    dl_start.strftime("%Y-%m-%d"),
+                    dl_end.strftime("%Y-%m-%d"),
+                    provider=provider,
+                    cache_dir=cache_dir,
+                    use_cache=cache,
+                    cache_ttl_days=cache_ttl,
                 )
-                # Allow tickers that list after the backtest start date (Unbalanced Panel Support)
-                pass
+        except Exception as exc:
+            logger.warning("Optional pre-load for benchmarks (SPY/VIX/VIX3M) failed: %s.", exc)
+        if str(provider).lower() == "wrds":
+            print("\nLoading WRDS/CRSP price panel with delisting-return splicing…")
+            try:
+                from utils.wrds_loader import WRDSLoader
+                from utils.wrds_universe import connect_wrds
 
-                pending_prices[ticker] = data
+                wrds_user = os.environ.get("WRDS_USERNAME")
+                if not wrds_user:
+                    raise RuntimeError("WRDS provider selected but WRDS_USERNAME is not set")
+                ticker_to_permno = dict(getattr(self.config, "wrds_ticker_to_permno", {}) or {})
+                relevant = {t: int(p) for t, p in ticker_to_permno.items() if t in tickers}
+                if not relevant:
+                    raise RuntimeError("No WRDS ticker→PERMNO mapping found for requested universe")
 
+                wrds_cache_dir = cache_dir
+                if "wrds" not in str(wrds_cache_dir).lower():
+                    wrds_cache_dir = "data/cache/wrds"
+                db = connect_wrds(wrds_user)
+                loader = WRDSLoader(db, cache_dir=wrds_cache_dir, cache_ttl_days=cache_ttl)
+                pending_prices = loader.load_universe(
+                    permnos=sorted(set(relevant.values())),
+                    ticker_map={int(v): k for k, v in relevant.items()},
+                    start_date=dl_start,
+                    end_date=dl_end,
+                )
+                for i, ticker in enumerate(tickers, 1):
+                    msg_prefix = f"[{i}/{len(tickers)}] {ticker}"
+                    data = pending_prices.get(ticker)
+                    if data is None or data.empty or len(data) < 20:
+                        print(f"  {msg_prefix}… insufficient data")
+                        continue
+                    print(
+                        f"  {msg_prefix}… WRDS window: first_date={data.index.min().date()}, "
+                        f"last_date={data.index.max().date()}, n={len(data)}"
+                    )
             except Exception as exc:
-                print(f"ERROR: {exc}")
-                logger.exception("Error preparing data for %s: %s", ticker, exc)
+                logger.exception("WRDS price load failed: %s", exc)
+                raise
+        else:
+            for i, ticker in enumerate(tickers, 1):
+                msg_prefix = f"[{i}/{len(tickers)}] {ticker}"
+                print(f"  {msg_prefix}…", end=" ")
+                logger.debug(
+                    "Requesting OHLCV for %s: %s → %s (provider=%s, cache_dir=%s, ttl=%d)",
+                    ticker,
+                    dl_start.strftime("%Y-%m-%d"),
+                    dl_end.strftime("%Y-%m-%d"),
+                    provider,
+                    cache_dir,
+                    cache_ttl,
+                )
+                try:
+                    raw = get_ohlcv(
+                        ticker,
+                        dl_start.strftime("%Y-%m-%d"),
+                        dl_end.strftime("%Y-%m-%d"),
+                        provider=provider,
+                        cache_dir=cache_dir,
+                        use_cache=cache,
+                        cache_ttl_days=cache_ttl,
+                    )
+                    # Only require core OHLCV columns to be non-null; ignore NaNs in auxiliary columns
+                    data = raw.dropna(subset=["Close"])
+                    logger.info(
+                        "Loaded OHLCV for %s: shape=%s",
+                        ticker,
+                        getattr(raw, "shape", None),
+                    )
+                    if not data.empty:
+                        logger.debug(
+                            "OHLCV window for %s: %s → %s (n=%d, cols=%s)",
+                            ticker,
+                            data.index.min(),
+                            data.index.max(),
+                            len(data),
+                            list(data.columns),
+                        )
+
+                    if data.empty or len(data) < 210:
+                        print("insufficient data")
+                        logger.warning(
+                            "Skipping %s due to insufficient data (len=%d < 210 bars)",
+                            ticker,
+                            len(data),
+                        )
+                        continue
+                    first_date = data.index.min()
+                    last_date = data.index.max()
+                    print(
+                        f"{msg_prefix} OHLCV window: first_date={first_date.date()}, "
+                        f"last_date={last_date.date()}, n={len(data)}"
+                    )
+
+                    pending_prices[ticker] = data
+
+                except Exception as exc:
+                    print(f"ERROR: {exc}")
+                    logger.exception("Error preparing data for %s: %s", ticker, exc)
 
         # Cross-sectional sector-relative momentum needs the full universe; compute once
         # then pass per-ticker series into generate_signals so learned adjusted_score matches training.
@@ -982,6 +1207,7 @@ class Backtester:
                 else:
                     sent_str = ""
 
+                signals = self._apply_pit_universe_mask(ticker, signals)
                 price_data[ticker] = data
                 signal_data[ticker] = signals
 
@@ -1002,15 +1228,27 @@ class Backtester:
         # `price_data` dict may not include it.
         if "SPY" not in price_data:
             try:
-                spy_raw = get_ohlcv(
-                    "SPY",
-                    dl_start.strftime("%Y-%m-%d"),
-                    dl_end.strftime("%Y-%m-%d"),
-                    provider=provider,
-                    cache_dir=cache_dir,
-                    use_cache=cache,
-                    cache_ttl_days=cache_ttl,
-                )
+                if str(provider).lower() == "wrds":
+                    spy_raw = load_wrds_price_panel(
+                        ["SPY"],
+                        start_date=dl_start,
+                        end_date=dl_end,
+                        username=os.environ.get("WRDS_USERNAME"),
+                        cache_dir=cache_dir if "wrds" in str(cache_dir).lower() else "data/cache/wrds",
+                        cache_ttl_days=cache_ttl,
+                        ticker_to_permno=getattr(self.config, "wrds_ticker_to_permno", {}) or {},
+                        as_of_date=dl_end,
+                    ).get("SPY", pd.DataFrame())
+                else:
+                    spy_raw = get_ohlcv(
+                        "SPY",
+                        dl_start.strftime("%Y-%m-%d"),
+                        dl_end.strftime("%Y-%m-%d"),
+                        provider=provider,
+                        cache_dir=cache_dir,
+                        use_cache=cache,
+                        cache_ttl_days=cache_ttl,
+                    )
                 spy_data = spy_raw.dropna(subset=["Close"])
                 if not spy_data.empty:
                     price_data["SPY"] = spy_data
@@ -1151,7 +1389,7 @@ class Backtester:
                 # Download VIX using the same helper from RegimeAgent to avoid code duplication.
                 _vix_start = pd.Timestamp(self.config.start_date) - pd.Timedelta(days=600)
                 _vix_end = pd.Timestamp(self.config.end_date) + pd.Timedelta(days=30)
-                _vix_dict = MarketRegimeAgent._download_vix(_vix_start, _vix_end, price_data.get("SPY", pd.DataFrame()))
+                _vix_dict = self.regime_agent._download_vix(_vix_start, _vix_end, price_data.get("SPY", pd.DataFrame()))
                 if _vix_dict:
                     _vix_s = pd.Series(_vix_dict)
                     _vix_s.index = pd.to_datetime(_vix_s.index)
@@ -1168,6 +1406,51 @@ class Backtester:
             except Exception:
                 logger.exception("VIX deleveraging failed; vol_scalar unchanged")
 
+        # ── Institutional Risk Overlay (VolTargeting + TimeSeries) ───────────────────
+        # Replaces ad-hoc SPY vol scalar with integrated risk management:
+        #   1. VolatilityTargeting: scales portfolio to hit target vol (AQR-style)
+        #   2. TimeSeriesRiskOverlay: adjusts exposure based on trend + signal strength
+        #   3. StressTestEngine: validates portfolio against historical scenarios
+        # These run as overlays on top of the base vol_scalar_series for compatibility.
+        self._risk_overlay_enabled = bool(getattr(self.config, "risk_overlay_enabled", True))
+        self._vol_targeting = None
+        self._ts_overlay = None
+        self._stress_engine = None
+        if self._risk_overlay_enabled:
+            try:
+                from .risk_model import VolatilityTargeting
+                from .time_series_risk import TimeSeriesRiskConfig, TimeSeriesRiskOverlay
+                from .stress_testing import StressTestEngine
+
+                self._vol_targeting = VolatilityTargeting(
+                    target_vol=float(getattr(self.config, "vol_target_annual", 0.15)),
+                    min_scale=float(getattr(self.config, "vol_target_min_scale", 0.3)),
+                    max_scale=float(getattr(self.config, "vol_target_max_scale", 1.2)),
+                    ewm_halflife=int(getattr(self.config, "vol_ewm_halflife", 20)),
+                )
+                self._ts_overlay = TimeSeriesRiskOverlay(
+                    TimeSeriesRiskConfig(
+                        enabled=bool(getattr(self.config, "ts_overlay_enabled", True)),
+                        vol_target=float(getattr(self.config, "vol_target_annual", 0.15)),
+                        vol_min_scale=float(getattr(self.config, "vol_target_min_scale", 0.3)),
+                        vol_max_scale=float(getattr(self.config, "vol_target_max_scale", 1.2)),
+                        market_trend_enabled=bool(getattr(self.config, "trend_filter_enabled", True)),
+                        crisis_detection_enabled=bool(getattr(self.config, "crisis_detection_enabled", True)),
+                        crisis_vol_threshold=float(getattr(self.config, "crisis_vol_threshold", 0.04)),
+                    )
+                )
+                self._stress_engine = StressTestEngine(
+                    confidence_level=float(getattr(self.config, "stress_confidence", 0.95)),
+                    n_simulations=int(getattr(self.config, "stress_n_sims", 5000)),
+                )
+                logger.info(
+                    "Risk overlay enabled: VolTargeting(target=%.2f) + TimeSeries + StressTest",
+                    float(getattr(self.config, "vol_target_annual", 0.15)),
+                )
+            except Exception as exc:
+                logger.warning("Risk overlay initialization failed (%s); falling back to legacy vol scalar.", exc)
+                self._risk_overlay_enabled = False
+
         # ── VIX-Scaled Transaction Costs (Almgren-Chriss + Hasbrouck 2009) ──────────────
         # Bid-ask spreads expand 3-7× during stress. Replace fixed slippage_bps with a
         # dynamic scalar: cost_scalar = 1 + α × max(0, VIX_t − VIX_rolling_median_t).
@@ -1178,7 +1461,7 @@ class Backtester:
             try:
                 _vc_start = pd.Timestamp(self.config.start_date) - pd.Timedelta(days=600)
                 _vc_end = pd.Timestamp(self.config.end_date) + pd.Timedelta(days=30)
-                _vc_dict = MarketRegimeAgent._download_vix(
+                _vc_dict = self.regime_agent._download_vix(
                     _vc_start, _vc_end, price_data.get("SPY", pd.DataFrame())
                 )
                 if _vc_dict:
@@ -1344,6 +1627,52 @@ class Backtester:
                 crisis_consecutive_days = 0
             prev_regime = regime_today
 
+            # ── Daily Risk Overlay: compute exposure multiplier from vol targeting + TS overlay ──
+            risk_overlay_today = 1.0
+            if self._risk_overlay_enabled and self._ts_overlay is not None:
+                try:
+                    spy_df_sim = price_data.get("SPY")
+                    spy_px = None
+                    spy_vol = None
+                    if spy_df_sim is not None and date in spy_df_sim.index:
+                        bar_spy = spy_df_sim.loc[date]
+                        spy_px = float(bar_spy.get("Close", np.nan)) if np.isfinite(bar_spy.get("Close", np.nan)) else None
+                        close_col_spy = "Close" if "Close" in bar_spy.index else "close"
+                        if close_col_spy and np.isfinite(bar_spy.get(close_col_spy, np.nan)):
+                            spy_px = float(bar_spy[close_col_spy])
+                        ret_col = "ret_20d_ann" if "ret_20d_ann" in bar_spy.index else None
+                        if ret_col:
+                            spy_vol = float(bar_spy[ret_col]) if np.isfinite(bar_spy.get(ret_col, np.nan)) else None
+
+                    cross_scores = pd.Series(dtype=float)
+                    if pending_entries:
+                        cross_scores = pd.Series({
+                            e["ticker"]: float(e.get("adjusted_score", 0.0) or 0.0)
+                            for e in pending_entries
+                        })
+
+                    if len(cross_scores) >= 3:
+                        exposure, ts_state = self._ts_overlay.compute_exposure(
+                            date=date,
+                            scores=cross_scores,
+                            market_price=spy_px,
+                            market_vol=spy_vol,
+                        )
+                        risk_overlay_today = exposure
+                        if i % 20 == 0:
+                            logger.info(
+                                "Risk overlay %s: exposure=%.3f  signal=%.2f  trend=%.2f  vol=%.2f  regime=%s",
+                                date.date(), exposure,
+                                ts_state.signal_strength, ts_state.trend_signal,
+                                ts_state.vol_scale, ts_state.regime_label,
+                            )
+                    self._risk_overlay_today = risk_overlay_today
+                except Exception as exc:
+                    logger.debug("Risk overlay computation failed: %s", exc)
+                    self._risk_overlay_today = 1.0
+            else:
+                self._risk_overlay_today = 1.0
+
             # Crisis transition: cap exit dates for existing winners so they don't drag into prolonged Crisis.
             # No forced closes — positions exit via their signal-based planned_exit_date.
             # Entry gates (crisis_block_all_new_entries) prevent new risk from being opened.
@@ -1403,6 +1732,12 @@ class Backtester:
             if self._equity_peak > 0:
                 drawdown = (equity - self._equity_peak) / self._equity_peak  # negative when underwater
             dd_abs = -drawdown if drawdown < 0 else 0.0
+            from risk.drawdown_overlay import compute_drawdown_overlay
+            overlay_state = compute_drawdown_overlay(
+                current_equity=equity,
+                peak_equity=self._equity_peak,
+                overlay_cfg=getattr(self.config, "drawdown_overlay", {}) or {},
+            )
 
             max_dd = float(getattr(self.config, "max_drawdown_pct", 0.0) or 0.0)
             resume_dd = float(getattr(self.config, "drawdown_resume_pct", max_dd))
@@ -1432,6 +1767,15 @@ class Backtester:
                 )
                 for pos in list(self.portfolio.positions):
                     self._close_position(pos, date, price_data, reason="circuit_close_all")
+
+            if overlay_state.flatten_all and self.portfolio.positions:
+                logger.warning(
+                    "Drawdown overlay flatten at %s: drawdown=%.2f%% exceeds flatten_all_pct.",
+                    date,
+                    overlay_state.drawdown * 100.0,
+                )
+                for pos in list(self.portfolio.positions):
+                    self._close_position(pos, date, price_data, reason="drawdown_overlay_flatten")
 
             # Resume trading once drawdown improves above resume_dd
             if (
@@ -1821,6 +2165,13 @@ class Backtester:
                     len(pending_entries),
                 )
                 pending_entries = []
+            if overlay_state.halt_new_risk and pending_entries:
+                logger.info(
+                    "Drawdown overlay active on %s: skipping %d pending entries while underwater.",
+                    date,
+                    len(pending_entries),
+                )
+                pending_entries = []
 
             # Correlation-aware position selection before entry processing.
             corr_window_days = int(getattr(self.config, "correlation_window_days", 60) or 60)
@@ -1881,12 +2232,7 @@ class Backtester:
 
             vol_scalar_today = float(vol_scalar_series.loc[date]) if date in vol_scalar_series.index else 1.0
             # Gross exposure caps (D1: continuous regime score → linear interpolation)
-            # Precompute Sharpe CB params once per day so both gross_cap block and CB block share values.
-            sharpe_cb_window = int(getattr(self.config, "sharpe_cb_window_days", 60) or 60)
-            sharpe_cb_thr = float(getattr(self.config, "sharpe_cb_threshold", 0.0) or 0.0)
-            sharpe_cb_recovery = float(getattr(self.config, "sharpe_cb_recovery_threshold", 0.3) or 0.3)
             sharpe_cb_scale = float(getattr(self.config, "sharpe_cb_exposure_scale", 0.5) or 0.5)
-            sharpe_cb_enabled = bool(getattr(self.config, "sharpe_cb_enabled", True))
 
             _rs = float((regime_score_data or {}).get(date, float("nan")))
             if np.isfinite(_rs) and bool(getattr(self.config, "regime_continuous_score_enabled", True)):
@@ -1914,6 +2260,7 @@ class Backtester:
             # D3: Apply Sharpe CB scaling (stacks on top of regime gross cap)
             if self._sharpe_cb_active:
                 gross_cap_fraction_today = gross_cap_fraction_today * sharpe_cb_scale
+            gross_cap_fraction_today = gross_cap_fraction_today * float(overlay_state.gross_multiplier)
 
             # Precompute signal-score pool for volatility-scaled sizing (non-cross-sectional entries only).
             non_cs_entries = [
@@ -2373,6 +2720,11 @@ class Backtester:
                 # so it truly affects the final order sizing.
                 if size_dollars is not None and size_dollars > 0:
                     size_dollars *= vol_scalar_today
+
+                # Apply institutional risk overlay (vol targeting + time-series exposure)
+                risk_overlay = getattr(self, "_risk_overlay_today", 1.0)
+                if size_dollars is not None and size_dollars > 0 and risk_overlay != 1.0:
+                    size_dollars *= risk_overlay
 
                 # Re-apply gross cap after beta/vol adjustments (beta_scalar can
                 # otherwise push us above the regime cap).
@@ -3068,7 +3420,7 @@ class Backtester:
         -------
         (trades_df, daily_equity_df) compatible with existing metrics pipeline.
         """
-        from .forecast import ForecastEngine
+        from .forecast import ForecastCalibrator, ForecastEngine
         from .risk_model import RiskModel
         from .optimizer import PortfolioOptimizer
         from .trade_scheduler import TradeScheduler
@@ -3076,10 +3428,33 @@ class Backtester:
         cfg = self.config
         opt_cfg = getattr(cfg, "optimization_config", {}) or {}
 
+        # H2: Continuous optimizer expects return-unit calibrated alpha.
+        # Model selection trains for cross-sectional rank utility — aligned by design only
+        # when signal_mode is ML/ensemble (ForecastEngine maps rank-utility scores → returns).
+        # Warn loudly when a non-ML mode is used, since scale_factor mapping is uncalibrated.
+        _sig_mode = str(getattr(cfg, "signal_mode", "price")).lower()
+        if _sig_mode not in ("ml", "ensemble"):
+            logger.warning(
+                "_simulate_continuous [H2]: use_continuous_optimization=True but "
+                "signal_mode=%r. ForecastEngine calibrates adjusted_score assuming "
+                "cross-sectional rank-utility output (ML/ensemble). "
+                "price/full mode scores have no return-unit calibration — "
+                "optimizer weights will be incorrect. Set signal_mode='ml'.",
+                _sig_mode,
+            )
+        _fc_scale = float((opt_cfg.get("forecast", {}) or {}).get("scale_factor", 0.012))
+        if _fc_scale <= 0.0:
+            raise ValueError(
+                f"[H2] optimization_config.forecast.scale_factor must be > 0 (got {_fc_scale}). "
+                "Calibrate: scale=0.012 gives w*(z=1)≈3.3% at idio_vol=30%, λ=2."
+            )
+
         # ── Build components from config ────────────────────────────────────
         fc_cfg = opt_cfg.get("forecast", {})
         _use_demean = bool(fc_cfg.get("use_forecast_demean", True))
         _max_alpha = float(fc_cfg.get("max_alpha", 0.05))
+        _calibration_cfg = (fc_cfg.get("calibration", {}) or {}) if isinstance(fc_cfg, dict) else {}
+        _forecast_calibration_enabled = bool(_calibration_cfg.get("enabled", False))
         forecast_engine = ForecastEngine(
             tau_days=float(fc_cfg.get("tau_days", 6.0)),
             smoothing_span=int(fc_cfg.get("smoothing_span", 5)),
@@ -3097,6 +3472,7 @@ class Backtester:
         op_cfg = opt_cfg.get("optimizer", {})
         fm_cfg = opt_cfg.get("factor_model", {})
         _market_ticker = str(fm_cfg.get("market_ticker", "SPY"))
+        _use_factor_model = bool(fm_cfg.get("enabled", False))
         # eta_beta and xi_sector removed: when using Σ_idio (factor-neutralized
         # covariance), market and sector variance are already absent. Additive
         # factor penalties on top of Σ_idio double-count and make λ uncalibrated.
@@ -3109,8 +3485,43 @@ class Backtester:
             gross_cap=float(op_cfg.get("gross_cap", getattr(cfg, "max_gross_exposure", 1.0))),
             min_position_weight=float(op_cfg.get("min_position_weight", 0.0)),
         )
+        liq_cfg = opt_cfg.get("liquidity", {})
+        _use_liquidity_caps = bool(liq_cfg.get("enabled", False))
+        _max_adv_fraction = float(liq_cfg.get("max_adv_fraction", 0.05))
+        _min_adv_usd = float(liq_cfg.get("min_adv_usd", 0.0))
+        _drawdown_overlay_cfg = getattr(cfg, "drawdown_overlay", {}) or {}
+
+        # ── Dynamic γ calibrator: updates optimizer.gamma_turnover each day ──
+        # γ_t = γ_base × EMA(cost/gross_pnl, span=20)
+        # Derived from execution observations — no fixed rebalance percentages.
+        from .cost_lambda_calibrator import CostAwareLambdaCalibrator
+        _calibrator = CostAwareLambdaCalibrator(
+            gamma_base=optimizer.gamma_turnover,
+            ema_span=int(op_cfg.get("cost_lambda_ema_span", 20)),
+            gamma_floor_factor=float(op_cfg.get("cost_lambda_floor_factor", 0.125)),
+            gamma_ceil_factor=float(op_cfg.get("cost_lambda_ceil_factor", 10.0)),
+            warmup_days=int(op_cfg.get("cost_lambda_warmup_days", 20)),
+        )
+
+        # ── Impact model: per-ticker Almgren-Chriss cost + heterogeneous γ ─
+        # Combines spread proxy, permanent impact, and √-law temporary impact.
+        # Replaces the flat cost_per_unit scaling in the Almgren-Chriss block.
+        from .impact_model import ImpactModel
+        imp_cfg = opt_cfg.get("impact", {})
+        _impact_model = ImpactModel(
+            eta_temp=float(imp_cfg.get("eta_temp", 0.10)),
+            eta_perm=float(imp_cfg.get("eta_perm", 0.03)),
+            c_spread=float(imp_cfg.get("c_spread", 0.05)),
+            eta_impact=float(imp_cfg.get("eta_impact", 0.5)),
+            adv_fallback=float(liq_cfg.get("min_adv_usd", 50_000_000.0)),
+        )
+        _impact_w_scale = float(imp_cfg.get("w_scale", 0.02))
 
         ex_cfg = opt_cfg.get("execution", {})
+        # TradeScheduler is initialised here with placeholder tau; actual tau is
+        # set after signal_data is loaded and estimate_halflife() is called below.
+        # The object is re-created there; this instance is just for attribute access
+        # before the simulation loop (horizon, min_trade).
         scheduler = TradeScheduler(
             horizon=int(ex_cfg.get("horizon_days", 3)),
             min_trade=float(ex_cfg.get("min_trade_weight", 0.001)),
@@ -3156,6 +3567,7 @@ class Backtester:
         # the sector map is required for consistent return-space neutralization in
         # both the risk model (Σ_idio) and the MultiAlphaEngine (_factor_neutralize).
         _sector_id_map: dict[str, int] = {}
+        _sector_name_by_id: dict[int, str] = {}
         _n_sectors: int = 0
         _sector_map_path = str(fm_cfg.get("sector_mapping_path", "config/sector_mapping.csv"))
         try:
@@ -3166,6 +3578,7 @@ class Backtester:
             _sm_df = pd.read_csv(_sm_path)
             _sector_labels = sorted(_sm_df["sector"].dropna().unique().tolist())
             _sector_label_to_id = {s: i for i, s in enumerate(_sector_labels)}
+            _sector_name_by_id = {i: s for s, i in _sector_label_to_id.items()}
             _n_sectors = len(_sector_labels)
             for _, row in _sm_df.iterrows():
                 t_sym = str(row["ticker"])
@@ -3184,6 +3597,65 @@ class Backtester:
 
         # ── Pre-compute smoothed forecast series (vectorised, no per-bar overhead) ──
         signal_data_with_fc = forecast_engine.build_forecast_series(signal_data)
+        _forecast_calibration_result = None
+        if _forecast_calibration_enabled:
+            _forecast_calibrator = ForecastCalibrator.from_config(
+                _calibration_cfg,
+                fallback_scale_factor=forecast_engine.scale_factor,
+                fallback_max_alpha=_max_alpha,
+            )
+            _forecast_calibration_result = _forecast_calibrator.calibrate(
+                signal_data_with_fc,
+                raw_forecast_col="raw_smoothed_forecast",
+            )
+            signal_data_with_fc = _forecast_calibration_result.signal_data
+            if _forecast_calibration_result.diagnostics is not None and not _forecast_calibration_result.diagnostics.empty:
+                _last_diag = _forecast_calibration_result.diagnostics.tail(60)
+                logger.info(
+                    "_simulate_continuous: forecast calibration active | method=%s | "
+                    "median_n_obs=%.0f | median_slope=%.6f | outputs=%s",
+                    str(_calibration_cfg.get("method", "linear")),
+                    float(_last_diag["n_obs"].median()),
+                    float(_last_diag["slope"].median()),
+                    str(_calibration_cfg.get("output_dir", "output/forecast_calibration")),
+                )
+
+        # ── Auto-estimate signal half-life from score autocorrelation ────────
+        # tau_exec drives both execution fraction (1-exp(-1/τ)) and scheduler.
+        # Config override: set execution.tau_exec explicitly to bypass estimation.
+        _tau_exec_override = ex_cfg.get("tau_exec", None)
+        _auto_estimate_hl = bool(ex_cfg.get("auto_estimate_halflife", True))
+        if _tau_exec_override is not None:
+            _tau_exec = float(_tau_exec_override)
+        elif _auto_estimate_hl:
+            _tau_exec = ForecastEngine.estimate_halflife(signal_data)
+            if not (0.0 < _tau_exec < 60.0):
+                # Estimation failed or implausible — fall back to span-derived tau
+                _tau_exec = ForecastEngine.tau_from_span(forecast_engine.smoothing_span)
+            logger.info(
+                "_simulate_continuous: auto-estimated tau_exec=%.2fd (halflife=%.2fd)",
+                _tau_exec, _tau_exec * 0.693,
+            )
+        else:
+            _tau_exec = ForecastEngine.tau_from_span(forecast_engine.smoothing_span)
+        # Sync forecast engine decay with execution speed
+        forecast_engine.tau_days = _tau_exec
+        _short_close_tau_override = ex_cfg.get("short_close_tau", None)
+        _short_close_tau = (
+            float(_short_close_tau_override)
+            if _short_close_tau_override is not None
+            else None  # TradeScheduler default: 0.4 × tau_exec
+        )
+        # Re-create scheduler with decay-derived execution fractions.
+        # Replaces the placeholder instance built before signal_data was loaded.
+        scheduler = TradeScheduler(
+            horizon=int(ex_cfg.get("horizon_days", 3)),
+            min_trade=float(ex_cfg.get("min_trade_weight", 0.001)),
+            tau_exec=_tau_exec,
+            short_close_tau=_short_close_tau,
+            max_participation=float(ex_cfg.get("max_participation", 0.02)),
+            persistence_multiplier=float(ex_cfg.get("persistence_multiplier", 1.0)),
+        )
 
         # ── Collect all dates in simulation window ───────────────────────────
         start_ts = pd.Timestamp(cfg.start_date)
@@ -3198,6 +3670,32 @@ class Backtester:
             return pd.DataFrame(), pd.DataFrame()
 
         tickers_universe = [t for t in signal_data_with_fc if t in price_data]
+
+        # ── Fix 2: Point-in-time universe filter ─────────────────────────────
+        # Prevent survivorship bias: only include tickers available at each date.
+        # Default: cache proxy (exclude tickers with < min_history_days of data).
+        # Override: provide config/sp500_historical.csv with date_added/date_removed.
+        _use_pit_filter = bool(getattr(cfg, "use_pit_universe_filter", True))
+        _pit_universe = None
+        if _use_pit_filter:
+            try:
+                from .universe_pit import PointInTimeUniverse
+                _cache_dir = str(getattr(cfg, "cache_dir", "data/cache"))
+                _pit_csv = str(getattr(cfg, "pit_universe_csv", "")) or None
+                _pit_min_hist = int(getattr(cfg, "pit_min_history_days", 252))
+                _pit_universe = PointInTimeUniverse(
+                    cache_dir=_cache_dir,
+                    pit_csv=_pit_csv,
+                    min_history_days=_pit_min_hist,
+                )
+                logger.info(
+                    "_simulate_continuous: PIT universe filter active "
+                    "(cache_dir=%s, min_history_days=%d, pit_csv=%s)",
+                    _cache_dir, _pit_min_hist, _pit_csv or "none",
+                )
+            except Exception as _pit_exc:
+                logger.warning("_simulate_continuous: PIT universe filter failed: %s", _pit_exc)
+                _pit_universe = None
 
         # ── MultiAlphaEngine precompute (once, before loop) ──────────────────
         if _mae is not None:
@@ -3225,6 +3723,19 @@ class Backtester:
         trade_log: list[dict] = []
         total_cost_paid = 0.0
 
+        # Alpha capture tracker: measures realized vs theoretical alpha and
+        # decomposes losses into cost / lag / decay / timing components.
+        from .alpha_capture import AlphaCaptureTracker
+        _alpha_tracker = AlphaCaptureTracker(
+            tau_days=_tau_exec,
+            ema_span=int(op_cfg.get("cost_lambda_ema_span", 20)),
+        )
+        overlay_peak_equity = float(cfg.initial_capital)
+        # Fix 3: Daily MTM attribution — track per-ticker P&L contribution each day.
+        # Enables honest performance attribution: which positions drove alpha vs noise.
+        _output_attribution = bool(getattr(cfg, "output_daily_attribution", False))
+        _attribution_rows: list[dict] = []
+
         # Slippage / commission cost per unit of weight change (fraction)
         cost_per_unit = (
             float(getattr(cfg, "slippage_bps", 1.0)) +
@@ -3232,8 +3743,77 @@ class Backtester:
             float(getattr(cfg, "execution_costs_spread_bps", 1.0))
         ) / 10_000.0
 
+        # Per-day execution accumulators (reset each iteration; feed calibrator)
+        _day_cost: float = 0.0
+        _day_turnover: float = 0.0
+
+        def _weight_direction(weight: float) -> int:
+            if weight >= _POS_THRESHOLD:
+                return 1
+            if weight <= -_POS_THRESHOLD:
+                return -1
+            return 0
+
+        def _build_virtual_trade_record(
+            ticker: str,
+            pos: dict,
+            *,
+            exit_date: pd.Timestamp,
+            exit_price: float,
+            regime_label: str,
+        ) -> dict:
+            entry_price = float(pos.get("entry_price", exit_price) or exit_price)
+            avg_exposure = float(
+                pos.get("exposure_notional_sum", 0.0) / max(int(pos.get("mtm_observations", 0)), 1)
+            )
+            if avg_exposure <= 0.0:
+                avg_exposure = float(pos.get("entry_weight", 0.0)) * float(pos.get("entry_equity", equity))
+
+            gross_mtm_pnl = float(pos.get("gross_mtm_pnl", 0.0))
+            total_cost = float(pos.get("cumulative_cost", 0.0))
+            raw_ret = float(pos.get("direction", 0)) * (exit_price - entry_price) / (entry_price + 1e-12)
+            gross_return = gross_mtm_pnl / avg_exposure if avg_exposure > 0 else raw_ret
+            holding_days = max(1, (exit_date - pos["entry_date"]).days)
+
+            return {
+                "ticker": ticker,
+                "signal": "Bullish" if pos["direction"] > 0 else "Bearish",
+                "direction": pos["direction"],
+                "signal_date": pos["signal_date"],
+                "entry_date": pos["entry_date"],
+                "exit_date": exit_date,
+                "entry_price": entry_price,
+                "exit_price": exit_price,
+                "position_size": avg_exposure,
+                "shares": avg_exposure / max(entry_price, 1e-6),
+                "return": raw_ret,
+                "gross_return": gross_return,
+                "pnl": gross_mtm_pnl,
+                "gross_mtm_pnl": gross_mtm_pnl,
+                "realized_pnl": gross_mtm_pnl,
+                "net_pnl_after_cost": gross_mtm_pnl - total_cost,
+                "adjusted_score": pos.get("entry_score", 0.0),
+                "confidence": "High",
+                "regime": regime_label,
+                "holding_days": holding_days,
+                "transaction_cost": total_cost,
+                "entry_cost": 0.0,
+                "exit_cost": 0.0,
+                "total_cost": total_cost,
+                "entry_weight": float(pos.get("entry_weight", 0.0)),
+                "max_weight": float(pos.get("max_abs_weight", pos.get("entry_weight", 0.0))),
+                "mtm_observations": int(pos.get("mtm_observations", 0)),
+            }
+
         for date in trading_days:
             regime = regime_data.get(date, "Sideways")
+            from risk.drawdown_overlay import compute_drawdown_overlay
+            overlay_state = compute_drawdown_overlay(
+                current_equity=equity,
+                peak_equity=overlay_peak_equity,
+                overlay_cfg=_drawdown_overlay_cfg,
+            )
+            overlay_peak_equity = overlay_state.peak_equity
 
             # ── 1. Regime-based gross cap override ──────────────────────────
             regime_gross_cap = optimizer.gross_cap
@@ -3241,6 +3821,7 @@ class Backtester:
                 regime_gross_cap = min(regime_gross_cap, float(getattr(cfg, "crisis_gross_cap_fraction", 0.30)))
             elif regime == "Bear":
                 regime_gross_cap = min(regime_gross_cap, float(getattr(cfg, "bear_gross_cap_fraction", 0.50)))
+            regime_gross_cap = regime_gross_cap * float(overlay_state.gross_multiplier)
             optimizer.gross_cap = regime_gross_cap
 
             # ── 2. Build today's forecasts for all tickers ───────────────────
@@ -3250,7 +3831,7 @@ class Backtester:
 
             # ── 3. Regime multiplier on forecasts ────────────────────────────
             regime_adj = getattr(cfg, "regime_adjustments", {}).get(regime, {})
-            score_mult = float(regime_adj.get("score_mult", 1.0))
+            score_mult = 1.0 if _forecast_calibration_enabled else float(regime_adj.get("score_mult", 1.0))
             forecasts = {t: v * score_mult for t, v in raw_forecasts.items()}
 
             # ── 3b. Forecast normalisation / multi-alpha combination ─────────
@@ -3269,7 +3850,7 @@ class Backtester:
                         fc_mean = float(fc_arr.mean())
                         forecasts = {t: v - fc_mean for t, v in forecasts.items()}
                         fc_arr = np.array(list(forecasts.values()))
-                    if _max_alpha > 0.0:
+                    if _max_alpha > 0.0 and not _forecast_calibration_enabled:
                         forecasts = {t: float(np.clip(v, -_max_alpha, _max_alpha))
                                      for t, v in forecasts.items()}
                         fc_arr = np.array(list(forecasts.values()))
@@ -3280,114 +3861,238 @@ class Backtester:
                 _strength_history.append(_signal_strength)
 
             # ── 4. Active tickers: universe ∩ those with signals today ───────
-            active_tickers = [t for t in tickers_universe if t in forecasts]
-            if not active_tickers:
-                # No signals → hold current weights, no trades
-                equity_history.append({"date": date, "equity": equity, "n_positions": 0,
-                                        "gross_exposure": sum(abs(v) for v in w_current.values()),
-                                        "regime": regime})
-                continue
+            # Fix 2: PIT filter — exclude tickers not yet in the index on this date.
+            # Prevents using stocks before their S&P 500 entry (survivorship bias).
+            if _pit_universe is not None:
+                active_tickers = [
+                    t for t in tickers_universe
+                    if t in forecasts and _pit_universe.is_available(t, date)
+                ]
+            else:
+                active_tickers = [t for t in tickers_universe if t in forecasts]
+            w_target_map = dict(w_current)
+            per_ticker_cost_today: dict[str, float] = {}   # populated in step 6a when cov ready
+            _n_gated = 0                                    # gated-trade count for tracker
+            if active_tickers:
+                # ── 5. Covariance matrix for active tickers (Σ_idio) ───────
+                # Pass sector_id_map so risk model estimates Σ from idiosyncratic
+                # returns — the same return space as the alpha signals. Without
+                # this, λw'Σ_raw·w and the idio-space forecast μ have inconsistent
+                # units, making λ uncalibrated and the optimizer solution invalid.
+                cov, cov_tickers = risk_model.fit_at_date(
+                    price_data, active_tickers, date,
+                    sector_id_map=_sector_id_map if _sector_id_map else None,
+                )
+                if len(cov_tickers) >= 2:
+                    # Align forecast and w_prev to cov_tickers order
+                    fc_vec = {t: forecasts.get(t, 0.0) for t in cov_tickers}
+                    wp_vec = {t: w_current.get(t, 0.0) for t in cov_tickers}
 
-            # ── 5. Covariance matrix for active tickers (Σ_idio) ───────────
-            # Pass sector_id_map so risk model estimates Σ from idiosyncratic
-            # returns — the same return space as the alpha signals. Without
-            # this, λw'Σ_raw·w and the idio-space forecast μ have inconsistent
-            # units, making λ uncalibrated and the optimizer solution invalid.
-            cov, cov_tickers = risk_model.fit_at_date(
-                price_data, active_tickers, date,
-                sector_id_map=_sector_id_map if _sector_id_map else None,
+                    # ── 6. Build ADV per-ticker bounds for optimizer ─────────────
+                    # ── 6a. Impact model: per-ticker cost + heterogeneous γ ──
+                    # ImpactModel computes:
+                    #   per_ticker_cost_today[t] = spread/2 + permanent impact
+                    #     → subtracts from forecast: μ̃_i = μ_i - κ_i·dir_i
+                    #   per_ticker_gamma_today[t] = γ_base × (1 + η·(σ/σ_med)·√(ADV_med/ADV))
+                    #     → per-ticker turnover penalty in FISTA (encodes √-impact)
+                    #
+                    # ADV caps (per_ticker_ub) remain active for hard capacity limits:
+                    # they exclude names below min_adv_usd and cap position at ADV_fraction.
+                    # The impact penalty handles gradual sizing within those bounds.
+                    per_ticker_cost_today, per_ticker_gamma_today = _impact_model.compute_universe(
+                        cov_tickers, equity, price_data, date,
+                        gamma_base=_calibrator.gamma,
+                        w_scale=_impact_w_scale,
+                    )
+
+                    # ── 6b. ADV hard caps (exclude illiquid names, cap capacity) ──
+                    per_ticker_ub: dict | None = None
+                    if _use_liquidity_caps:
+                        per_ticker_ub = {}
+                        for t in cov_tickers:
+                            adv_usd = self._compute_adv_usd(t, price_data, date)
+                            if adv_usd < _min_adv_usd:
+                                per_ticker_ub[t] = 0.0
+                            else:
+                                cap = (_max_adv_fraction * adv_usd) / max(equity, 1.0)
+                                per_ticker_ub[t] = min(float(optimizer.max_weight), max(cap, 0.0))
+
+                    # ── 7. Optimise ──────────────────────────────────────────
+                    # γ_i^eff updated daily: calibrator handles portfolio-level cost ratio;
+                    # impact model adds per-ticker illiquidity penalty on top.
+                    optimizer.gamma_turnover = _calibrator.gamma
+                    w_target_map = optimizer.optimize(
+                        fc_vec, cov, wp_vec, cov_tickers,
+                        per_ticker_ub=per_ticker_ub,
+                        per_ticker_cost=per_ticker_cost_today,
+                        per_ticker_impact_gamma=per_ticker_gamma_today,
+                    )
+
+                    # Zero out tickers with no signal (they were in cov but not in forecasts)
+                    for t in cov_tickers:
+                        if t not in forecasts:
+                            w_target_map[t] = 0.0
+
+                    # ── 8. Regime short suppression ──────────────────────────
+                    # In Crisis/Bear regimes the short book gets destroyed by market beta
+                    # surges (e.g. 2009 recovery, 2020 rebound). Suppress shorts entirely
+                    # in Crisis; allow only weak shorts (≤50% of normal cap) in Bear.
+                    if getattr(cfg, "regime_short_suppression", True):
+                        if regime == "Crisis":
+                            w_target_map = {t: max(0.0, v) for t, v in w_target_map.items()}
+                        elif regime == "Bear":
+                            _bear_short_cap = float(getattr(cfg, "bear_short_cap", 0.5))
+                            w_target_map = {
+                                t: max(v, -abs(optimizer.max_weight) * _bear_short_cap)
+                                for t, v in w_target_map.items()
+                            }
+
+                    # ── 9. Exposure scaling: α_t × w_opt ─────────────────────
+                    # Scales the whole portfolio by cross-sectional signal strength.
+                    # Weak-signal days (flat cross-section) → small positions.
+                    # α_t is EMA-smoothed to prevent day-to-day instability.
+                    if _use_exposure_scaling and len(_strength_history) >= max(5, _strength_window // 4):
+                        _hist_arr = np.array(_strength_history)
+                        _threshold = float(np.percentile(_hist_arr, _strength_pct))
+                        if _threshold > 1e-9:
+                            _alpha_raw = min(1.0, _signal_strength / _threshold)
+                        else:
+                            _alpha_raw = 1.0
+                        _alpha_ema = _alpha_raw * _es_alpha + _alpha_ema * (1.0 - _es_alpha)
+                        _scale = max(_min_exposure, _alpha_ema)
+                        w_target_map = {t: v * _scale for t, v in w_target_map.items()}
+
+                    factor_exposures = None
+                    factor_bounds = None
+                    if _use_factor_model:
+                        factor_exposures = risk_model.compute_factor_exposures_at_date(
+                            price_data,
+                            cov_tickers,
+                            date,
+                            market_ticker=_market_ticker,
+                            sector_id_map=_sector_id_map if _sector_id_map else None,
+                            sector_labels=_sector_name_by_id if _sector_name_by_id else None,
+                        )
+                        factor_bounds = {}
+                        raw_bounds = fm_cfg.get("max_exposures", {}) or {}
+                        for key, value in raw_bounds.items():
+                            try:
+                                factor_bounds[str(key)] = abs(float(value))
+                            except (TypeError, ValueError):
+                                continue
+                        sector_cap = fm_cfg.get("sector_net_exposure_max")
+                        if sector_cap is not None:
+                            try:
+                                sector_cap_f = abs(float(sector_cap))
+                                for fname in list((factor_exposures or {}).keys()):
+                                    if fname.startswith("sector:"):
+                                        factor_bounds[fname] = sector_cap_f
+                            except (TypeError, ValueError):
+                                pass
+
+                    # Factor exposure constraints only (ADV already inside FISTA)
+                    if factor_exposures or factor_bounds:
+                        w_target_map = optimizer.constrain_weights(
+                            w_target_map,
+                            cov_tickers,
+                            factor_exposures=factor_exposures,
+                            factor_bounds=factor_bounds,
+                            max_weight_overrides=None,
+                        )
+
+            if overlay_state.flatten_all:
+                w_target_map = {t: 0.0 for t in w_target_map}
+            elif overlay_state.halt_new_risk:
+                adjusted_targets: dict[str, float] = {}
+                for t, target in w_target_map.items():
+                    prev = float(w_current.get(t, 0.0))
+                    if abs(target) <= abs(prev) + 1e-12:
+                        adjusted_targets[t] = target
+                    elif prev != 0.0 and np.sign(target) == np.sign(prev):
+                        adjusted_targets[t] = np.sign(target) * abs(prev)
+                    elif prev != 0.0 and np.sign(target) != np.sign(prev):
+                        adjusted_targets[t] = 0.0
+                    else:
+                        adjusted_targets[t] = 0.0
+                w_target_map = adjusted_targets
+
+            # ── 9. Gradual execution ────────────────────────────────────────
+            # Per-ticker urgency from today's forecast cross-section.
+            # High |α| relative to p75 → execute faster; low |α| → slower.
+            _urgency_map: dict[str, float] | None = None
+            if forecasts:
+                _abs_vals = [abs(v) for v in forecasts.values() if v != 0.0]
+                if _abs_vals:
+                    _alpha_p75 = float(np.percentile(_abs_vals, 75))
+                    if _alpha_p75 > 1e-10:
+                        _urgency_map = {
+                            t: min(2.0, abs(v) / _alpha_p75)
+                            for t, v in forecasts.items()
+                        }
+
+            # ADV map for liquidity-rate constraint: covers both new targets
+            # and existing positions being exited (in w_current but not w_target).
+            _exec_tickers = set(w_target_map) | set(w_current)
+            _adv_map: dict[str, float] = {
+                t: self._compute_adv_usd(t, price_data, date)
+                for t in _exec_tickers
+            }
+            actual_delta, _n_gated = scheduler.step(
+                w_target_map, w_current,
+                urgency_map=_urgency_map,
+                adv_map=_adv_map,
+                equity=equity,
+                alpha_map=forecasts,
+                cost_map=per_ticker_cost_today if per_ticker_cost_today else None,
             )
-            if len(cov_tickers) < 2:
-                # Fallback: keep current weights
-                equity_history.append({"date": date, "equity": equity, "n_positions": 0,
-                                        "gross_exposure": sum(abs(v) for v in w_current.values()),
-                                        "regime": regime})
-                continue
+            today_costs: dict[str, float] = defaultdict(float)
+            _day_cost = 0.0
+            _day_turnover = 0.0
 
-            # Align forecast and w_prev to cov_tickers order
-            fc_vec = {t: forecasts.get(t, 0.0) for t in cov_tickers}
-            wp_vec = {t: w_current.get(t, 0.0) for t in cov_tickers}
-
-            # ── 6. Optimise ──────────────────────────────────────────────────
-            # Factor penalties (eta_beta, xi_sector) removed. Σ_idio is estimated
-            # from idiosyncratic returns, so market and sector variance are already
-            # absent from the covariance. No additive penalties needed.
-            w_target_map = optimizer.optimize(fc_vec, cov, wp_vec, cov_tickers)
-
-            # Zero out tickers with no signal (they were in cov but not in forecasts)
-            for t in cov_tickers:
-                if t not in forecasts:
-                    w_target_map[t] = 0.0
-
-            # ── 7. Regime short suppression ──────────────────────────────────
-            # In Crisis/Bear regimes the short book gets destroyed by market beta
-            # surges (e.g. 2009 recovery, 2020 rebound). Suppress shorts entirely
-            # in Crisis; allow only weak shorts (≤50% of normal cap) in Bear.
-            if getattr(cfg, "regime_short_suppression", True):
-                if regime == "Crisis":
-                    w_target_map = {t: max(0.0, v) for t, v in w_target_map.items()}
-                elif regime == "Bear":
-                    _bear_short_cap = float(getattr(cfg, "bear_short_cap", 0.5))
-                    w_target_map = {
-                        t: max(v, -abs(optimizer.max_weight) * _bear_short_cap)
-                        for t, v in w_target_map.items()
-                    }
-
-            # ── 8. Exposure scaling: α_t × w_opt ─────────────────────────────
-            # Scales the whole portfolio by cross-sectional signal strength.
-            # Weak-signal days (flat cross-section) → small positions.
-            # α_t is EMA-smoothed to prevent day-to-day instability.
-            if _use_exposure_scaling and len(_strength_history) >= max(5, _strength_window // 4):
-                _hist_arr = np.array(_strength_history)
-                _threshold = float(np.percentile(_hist_arr, _strength_pct))
-                if _threshold > 1e-9:
-                    _alpha_raw = min(1.0, _signal_strength / _threshold)
-                else:
-                    _alpha_raw = 1.0
-                _alpha_ema = _alpha_raw * _es_alpha + _alpha_ema * (1.0 - _es_alpha)
-                _scale = max(_min_exposure, _alpha_ema)
-                w_target_map = {t: v * _scale for t, v in w_target_map.items()}
-
-            # ── 10. Gradual execution ────────────────────────────────────────
-            actual_delta = scheduler.step(w_target_map, w_current)
-
-            # ── 11. Apply cost and update weights ────────────────────────────
+            # ── 10. Apply cost and update weights ───────────────────────────
             for t, dw in actual_delta.items():
                 if abs(dw) < scheduler.min_trade:
                     continue
                 trade_dollar = abs(dw) * equity
-                # Fix 3: one-way cost per execution step — no ×2 multiplier.
-                # Round-trip cost is naturally paid as two separate one-way steps
-                # (open leg + close leg). Applying ×2 per step means a position
-                # opened over 3 scheduler steps pays 6× the correct one-way cost.
+                # One-way cost per execution step; round-trip cost is paid
+                # naturally as two separate executions.
                 cost = trade_dollar * cost_per_unit
                 equity -= cost
                 total_cost_paid += cost
+                today_costs[t] += cost
+                _day_cost += cost
+                _day_turnover += abs(dw)
                 w_current[t] = w_current.get(t, 0.0) + dw
-                # Accumulate per-position cost for trade log attribution (Fix 3)
-                if t in virt_positions:
-                    virt_positions[t]["cumulative_cost"] = (
-                        virt_positions[t].get("cumulative_cost", 0.0) + cost
-                    )
 
             # Clamp tiny residuals
             for t in list(w_current.keys()):
                 if abs(w_current[t]) < 1e-5:
                     w_current[t] = 0.0
 
-            # ── 12. Mark-to-market: compute today's P&L ─────────────────────
-            daily_pnl = 0.0
-            for t, w in w_current.items():
-                if abs(w) < 1e-6 or t not in price_data:
+            capital_base = equity
+            tracked_tickers = (
+                set(virt_positions.keys())
+                | set(today_costs.keys())
+                | {t for t, w in w_current.items() if abs(w) >= _POS_THRESHOLD}
+            )
+            price_marks: dict[str, dict] = {}
+            for t in tracked_tickers:
+                if t not in price_data:
                     continue
                 df_px = price_data[t]
                 if df_px is None or df_px.empty:
                     continue
                 close_col = "Close" if "Close" in df_px.columns else "close"
-                # Find today and previous trading day close
                 idx_arr = df_px.index
                 loc = idx_arr.searchsorted(date)
                 if loc == 0 or loc >= len(idx_arr) or idx_arr[loc] != date:
+                    px_fallback = self._get_close_price(t, date, price_data)
+                    if np.isfinite(px_fallback):
+                        price_marks[t] = {
+                            "close": float(px_fallback),
+                            "prev_close": float(px_fallback),
+                            "ret": 0.0,
+                        }
                     continue
                 try:
                     c_today = float(pd.to_numeric(df_px[close_col].iloc[loc], errors="coerce"))
@@ -3396,90 +4101,145 @@ class Backtester:
                     continue
                 if not (np.isfinite(c_today) and np.isfinite(c_prev) and c_prev > 0):
                     continue
-                ret = (c_today - c_prev) / c_prev
-                daily_pnl += w * ret
+                price_marks[t] = {
+                    "close": c_today,
+                    "prev_close": c_prev,
+                    "ret": (c_today - c_prev) / c_prev,
+                }
 
-            equity = equity * (1.0 + daily_pnl)
-
-            # ── 10. Virtual position tracking → trade log ────────────────────
-            for t in tickers_universe:
-                w = w_current.get(t, 0.0)
-                direction = 1 if w > 0 else (-1 if w < 0 else 0)
+            # ── 11. Reconcile accounting containers with today's book ───────
+            for t in tracked_tickers:
+                w = float(w_current.get(t, 0.0))
+                desired_direction = _weight_direction(w)
+                desired_abs_weight = abs(w) if desired_direction != 0 else 0.0
                 prev_pos = virt_positions.get(t)
+                prev_abs_weight = float(
+                    prev_pos.get("current_weight", prev_pos.get("entry_weight", 0.0))
+                ) if prev_pos is not None else 0.0
+                ticker_cost = float(today_costs.get(t, 0.0))
+                price_mark = price_marks.get(t, {})
+                exec_price = float(
+                    price_mark.get("prev_close", self._get_close_price(t, date, price_data))
+                )
 
-                if prev_pos is None and abs(w) >= _POS_THRESHOLD:
-                    # Open a virtual position
-                    px = self._get_close_price(t, date, price_data)
+                open_cost = 0.0
+                if prev_pos is not None and desired_direction != prev_pos["direction"]:
+                    close_cost = ticker_cost
+                    if desired_direction != 0:
+                        denom = prev_abs_weight + desired_abs_weight
+                        if denom > 0:
+                            close_cost = ticker_cost * (prev_abs_weight / denom)
+                        else:
+                            close_cost = ticker_cost * 0.5
+                        open_cost = ticker_cost - close_cost
+
+                    prev_pos["cumulative_cost"] = prev_pos.get("cumulative_cost", 0.0) + close_cost
+                    trade_log.append(
+                        _build_virtual_trade_record(
+                            t,
+                            prev_pos,
+                            exit_date=date,
+                            exit_price=exec_price,
+                            regime_label=regime,
+                        )
+                    )
+                    del virt_positions[t]
+                    prev_pos = None
+                elif prev_pos is not None:
+                    prev_pos["cumulative_cost"] = prev_pos.get("cumulative_cost", 0.0) + ticker_cost
+
+                if desired_direction == 0:
+                    continue
+
+                if prev_pos is None:
                     virt_positions[t] = {
                         "entry_date": date,
-                        "entry_price": px,
-                        "direction": direction,
-                        "entry_weight": abs(w),
-                        "entry_equity": equity,             # Fix 4: equity at open for accurate position_size
-                        "entry_score": float(forecasts.get(t, 0.0)),  # Fix 1: entry-day signal for IC
-                        "cumulative_cost": 0.0,             # Fix 3: accumulate tx costs during hold
+                        "entry_price": exec_price,
+                        "direction": desired_direction,
+                        "entry_weight": desired_abs_weight,
+                        "entry_equity": capital_base,
+                        "entry_score": float(forecasts.get(t, 0.0)),
+                        "cumulative_cost": open_cost if open_cost > 0.0 else ticker_cost,
                         "signal_date": date,
+                        "gross_mtm_pnl": 0.0,
+                        "exposure_notional_sum": 0.0,
+                        "mtm_observations": 0,
+                        "current_weight": desired_abs_weight,
+                        "max_abs_weight": desired_abs_weight,
                     }
-                elif prev_pos is not None:
-                    direction_flip = (prev_pos["direction"] > 0) != (direction > 0)
-                    closed = abs(w) < _POS_THRESHOLD or direction_flip
-                    if closed:
-                        # Close virtual position and record trade
-                        px_exit = self._get_close_price(t, date, price_data)
-                        px_entry = prev_pos["entry_price"]
-                        raw_ret = prev_pos["direction"] * (px_exit - px_entry) / (px_entry + 1e-12)
-                        # Fix 4: use entry equity so position_size reflects actual capital at risk
-                        _entry_equity = prev_pos.get("entry_equity", equity)
-                        _pos_size = prev_pos["entry_weight"] * _entry_equity
-                        _total_cost = prev_pos.get("cumulative_cost", 0.0)
-                        holding_days = max(1, (date - prev_pos["entry_date"]).days)
-                        trade_log.append({
-                            "ticker": t,
-                            "signal": "Bullish" if prev_pos["direction"] > 0 else "Bearish",
-                            "direction": prev_pos["direction"],
-                            "signal_date": prev_pos["signal_date"],
-                            "entry_date": prev_pos["entry_date"],
-                            "exit_date": date,
-                            "entry_price": px_entry,
-                            "exit_price": px_exit,
-                            "position_size": _pos_size,
-                            "shares": _pos_size / max(px_entry, 1e-6),
-                            "return": raw_ret,
-                            "pnl": raw_ret * _pos_size,
-                            "realized_pnl": raw_ret * _pos_size,
-                            # Fix 1: entry-day signal (not exit-day) for valid IC measurement
-                            "adjusted_score": prev_pos.get("entry_score", 0.0),
-                            "confidence": "High",
-                            "regime": regime,
-                            "holding_days": holding_days,
-                            # Fix 3: expose actual accumulated transaction costs
-                            "transaction_cost": _total_cost,
-                            "entry_cost": 0.0,
-                            "exit_cost": 0.0,
-                            "total_cost": _total_cost,
-                        })
-                        del virt_positions[t]
-                        # Re-open if still has weight (direction flip)
-                        if abs(w) >= _POS_THRESHOLD and direction_flip:
-                            px_new = self._get_close_price(t, date, price_data)
-                            virt_positions[t] = {
-                                "entry_date": date,
-                                "entry_price": px_new,
-                                "direction": direction,
-                                "entry_weight": abs(w),
-                                "entry_equity": equity,
-                                "entry_score": float(forecasts.get(t, 0.0)),
-                                "cumulative_cost": 0.0,
-                                "signal_date": date,
-                            }
+                else:
+                    prev_pos["current_weight"] = desired_abs_weight
+                    prev_pos["max_abs_weight"] = max(
+                        float(prev_pos.get("max_abs_weight", 0.0)),
+                        desired_abs_weight,
+                    )
+
+            # ── 12. Mark-to-market: compute today's P&L ─────────────────────
+            daily_pnl = 0.0
+            for t, w in w_current.items():
+                if abs(w) < 1e-6 or t not in price_data:
+                    continue
+                mark = price_marks.get(t)
+                if not mark:
+                    continue
+                ret = float(mark["ret"])
+                ticker_pnl_contribution = w * ret  # fractional portfolio contribution
+                daily_pnl += ticker_pnl_contribution
+                pos = virt_positions.get(t)
+                if pos is not None and _weight_direction(w) == pos["direction"]:
+                    dollar_pnl = capital_base * ticker_pnl_contribution
+                    pos["gross_mtm_pnl"] = pos.get("gross_mtm_pnl", 0.0) + dollar_pnl
+                    pos["exposure_notional_sum"] = (
+                        pos.get("exposure_notional_sum", 0.0) + abs(w) * capital_base
+                    )
+                    pos["mtm_observations"] = int(pos.get("mtm_observations", 0)) + 1
+
+                # Fix 3: record per-ticker daily MTM for attribution
+                if _output_attribution and abs(ticker_pnl_contribution) > 1e-8:
+                    _attribution_rows.append({
+                        "date": date,
+                        "ticker": t,
+                        "weight": w,
+                        "daily_ret": float(mark["ret"]),
+                        "pnl_contribution_pct": ticker_pnl_contribution,
+                        "pnl_contribution_usd": capital_base * ticker_pnl_contribution,
+                        "direction": "long" if w > 0 else "short",
+                        "regime": regime,
+                    })
+
+            equity = capital_base * (1.0 + daily_pnl)
+
+            # Feed today's observations to calibrator; γ updated at next day's optimize call.
+            _calibrator.update(_day_cost, _day_turnover, abs(daily_pnl))
+
+            # Record alpha capture: w_current reflects post-execution holdings.
+            _alpha_tracker.record_day(
+                date=date,
+                forecasts=forecasts,
+                w_current=w_current,
+                w_target=w_target_map,
+                cost_today=_day_cost / max(equity, 1.0),   # as fraction of equity
+                n_trades=len(actual_delta),
+                n_gated=_n_gated,
+            )
 
             n_open = int(sum(1 for v in w_current.values() if abs(v) >= _POS_THRESHOLD))
             gross_exp = float(sum(abs(v) for v in w_current.values()))
+            long_exp = float(sum(v for v in w_current.values() if v > _POS_THRESHOLD))
+            short_exp = float(sum(v for v in w_current.values() if v < -_POS_THRESHOLD))
             equity_history.append({
                 "date": date,
                 "equity": equity,
                 "n_positions": n_open,
+                "position_count": n_open,
                 "gross_exposure": gross_exp,
+                "long_exposure": long_exp,
+                "short_exposure": short_exp,
+                "net_exposure": long_exp + short_exp,
+                "daily_pnl_pct": daily_pnl,
+                "daily_pnl_usd": capital_base * daily_pnl,
+                "drawdown": float(overlay_state.drawdown),
+                "drawdown_gross_multiplier": float(overlay_state.gross_multiplier),
                 "regime": regime,
             })
 
@@ -3488,46 +4248,42 @@ class Backtester:
         if last_date is not None:
             for t, prev_pos in list(virt_positions.items()):
                 px_exit = self._get_close_price(t, last_date, price_data)
-                px_entry = prev_pos["entry_price"]
-                raw_ret = prev_pos["direction"] * (px_exit - px_entry) / (px_entry + 1e-12)
-                avg_w = prev_pos["entry_weight"]
-                # Fix 4: use entry equity for consistent position_size
-                _entry_equity_eod = prev_pos.get("entry_equity", equity)
-                _pos_size_eod = avg_w * _entry_equity_eod
-                _total_cost_eod = prev_pos.get("cumulative_cost", 0.0)
-                holding_days = max(1, (last_date - prev_pos["entry_date"]).days)
-                trade_log.append({
-                    "ticker": t,
-                    "signal": "Bullish" if prev_pos["direction"] > 0 else "Bearish",
-                    "direction": prev_pos["direction"],
-                    "signal_date": prev_pos["signal_date"],
-                    "entry_date": prev_pos["entry_date"],
-                    "exit_date": last_date,
-                    "entry_price": px_entry,
-                    "exit_price": px_exit,
-                    "position_size": _pos_size_eod,
-                    "shares": _pos_size_eod / max(px_entry, 1e-6),
-                    "return": raw_ret,
-                    "pnl": raw_ret * _pos_size_eod,
-                    "realized_pnl": raw_ret * _pos_size_eod,
-                    # Fix 1: use stored entry-day signal; 0.0 fallback means this
-                    # position was opened before the fix — tolerable for final-day close
-                    "adjusted_score": prev_pos.get("entry_score", 0.0),
-                    "confidence": "High",
-                    "regime": regime_data.get(last_date, "Sideways"),
-                    "holding_days": holding_days,
-                    # Fix 3: expose actual accumulated costs
-                    "transaction_cost": _total_cost_eod,
-                    "entry_cost": 0.0,
-                    "exit_cost": 0.0,
-                    "total_cost": _total_cost_eod,
-                })
+                trade_log.append(
+                    _build_virtual_trade_record(
+                        t,
+                        prev_pos,
+                        exit_date=last_date,
+                        exit_price=px_exit,
+                        regime_label=regime_data.get(last_date, "Sideways"),
+                    )
+                )
+
+        # Alpha capture summary — logged at INFO, exposed on equity_df as metadata.
+        _alpha_tracker.log_summary(prefix="_simulate_continuous: ")
+        _ac_summary = _alpha_tracker.summary()
 
         trades_df = pd.DataFrame(trade_log)
         equity_df = pd.DataFrame(equity_history)
 
+        # Attach alpha capture scalars to equity_df metadata for downstream reporting.
+        equity_df.attrs["alpha_capture"] = _ac_summary.get("alpha_capture")
+        equity_df.attrs["net_alpha_capture"] = _ac_summary.get("net_alpha_capture")
+        equity_df.attrs["cost_fraction"] = _ac_summary.get("cost_fraction")
+        equity_df.attrs["lag_fraction"] = _ac_summary.get("lag_fraction")
+        equity_df.attrs["decay_fraction"] = _ac_summary.get("decay_fraction")
+        equity_df.attrs["timing_fraction"] = _ac_summary.get("timing_fraction")
+        equity_df.attrs["gated_pct"] = _ac_summary.get("gated_pct")
+
+        # Fix 3: Write daily MTM attribution CSV
+        if _output_attribution and _attribution_rows:
+            import os as _os
+            _attr_df = pd.DataFrame(_attribution_rows)
+            _attr_path = _os.path.join("output", "backtests", "daily_attribution.csv")
+            _os.makedirs(_os.path.dirname(_attr_path), exist_ok=True)
+            _attr_df.to_csv(_attr_path, index=False)
+            logger.info("Daily MTM attribution written → %s (%d rows)", _attr_path, len(_attribution_rows))
+
         gross = sum(abs(v) for v in w_current.values())
-        n_pos = sum(1 for v in w_current.values() if abs(v) >= _POS_THRESHOLD)
         print(f"  Continuous sim complete: {len(trading_days)} days, "
               f"{len(trade_log)} virtual trades, "
               f"final equity ${equity:,.0f}, "

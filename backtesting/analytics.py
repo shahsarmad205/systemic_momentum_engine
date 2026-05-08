@@ -132,26 +132,31 @@ def compute_rank_ic_decay(
 # Walk-forward splits
 # ------------------------------------------------------------------
 
+def _date_add_years(ts: pd.Timestamp, years: float) -> pd.Timestamp:
+    months = max(int(round(years * 12)), 1)
+    return ts + pd.DateOffset(months=months)
+
+
 def walk_forward_splits(
     start_date: str,
     end_date: str,
     n_windows: int = 4,
     train_ratio: float = 0.7,
     embargo_days: int = 21,
+    *,
+    train_years: float | None = None,
+    test_years: float | None = None,
+    step_years: float | None = None,
 ) -> list[dict]:
     """
     Generate rolling walk-forward train/test date splits with embargo period.
 
-    The **embargo** is a gap between the end of the training set and the
-    start of the test set.  It prevents leakage from autocorrelated returns:
-    if a trade opened on the last training day is still open at the start of
-    the test window, and we use that trade's outcome in both training loss and
-    test performance, we have a leakage path.
+    Preferred institutional path:
+      - calendar-based train/test/step windows (e.g. 5y / 1y / 1y)
+      - training set purged by embargo_days before the OOS boundary
 
-    Institutional standard (López de Prado 2018, Chapter 7):
-      - Embargo = max(holding_period, 1 month) trading days
-      - Purging: remove training observations where the forward-return
-        window overlaps with the test period (handled in feature_builder)
+    Legacy fallback path:
+      - equal-sized block splits controlled by n_windows/train_ratio
 
     Parameters
     ----------
@@ -162,9 +167,12 @@ def walk_forward_splits(
     train_ratio : float
         Fraction of each window used for training (before embargo).
     embargo_days : int
-        Calendar days to exclude between train_end and test_start.
-        Default: 21 calendar days ≈ 15 trading days (covers a 10-day
-        holding period with buffer).
+        Calendar-day purge between train_end and test_start.
+    train_years, test_years, step_years : float | None
+        When all are positive, use the institutional calendar roll:
+        train on [cursor, cursor + train_years) and test on
+        [cursor + train_years, cursor + train_years + test_years),
+        then advance by step_years.
 
     Returns
     -------
@@ -173,6 +181,36 @@ def walk_forward_splits(
     """
     start = pd.Timestamp(start_date)
     end = pd.Timestamp(end_date)
+
+    if (
+        train_years is not None
+        and test_years is not None
+        and step_years is not None
+        and train_years > 0
+        and test_years > 0
+        and step_years > 0
+    ):
+        splits: list[dict] = []
+        cursor = start
+        embargo_delta = pd.Timedelta(days=max(int(embargo_days), 0))
+        while True:
+            train_start = cursor
+            test_start = _date_add_years(train_start, float(train_years))
+            if test_start >= end:
+                break
+            test_end = min(_date_add_years(test_start, float(test_years)), end)
+            train_end = test_start - embargo_delta
+            if train_end > train_start:
+                splits.append({
+                    "train_start": train_start.strftime("%Y-%m-%d"),
+                    "train_end": train_end.strftime("%Y-%m-%d"),
+                    "test_start": test_start.strftime("%Y-%m-%d"),
+                    "test_end": test_end.strftime("%Y-%m-%d"),
+                    "embargo_days": int(embargo_days),
+                })
+            cursor = _date_add_years(cursor, float(step_years))
+        return splits
+
     total_days = (end - start).days
     window_size = total_days // n_windows
 
@@ -229,6 +267,9 @@ def run_walk_forward(
         config.walk_forward_windows,
         config.walk_forward_train_ratio,
         embargo_days=embargo_days,
+        train_years=float(getattr(config, "train_years", 0) or 0),
+        test_years=float(getattr(config, "test_years", 0) or 0),
+        step_years=float(getattr(config, "step_years", 0) or 0),
     )
 
     if train_weights is None:
@@ -262,6 +303,11 @@ def run_walk_forward(
                     start_date=split["train_start"],
                     end_date=split["test_end"],
                     holding_period=getattr(config, "holding_period_days", 5),
+                    data_provider=getattr(config, "data_provider", None),
+                    cache_dir=getattr(config, "cache_dir", None),
+                    cache_ttl_days=getattr(config, "cache_ttl_days", 1),
+                    wrds_username=os.environ.get("WRDS_USERNAME"),
+                    wrds_ticker_to_permno=getattr(config, "wrds_ticker_to_permno", {}) or {},
                 )
                 train_ts_start = pd.Timestamp(split["train_start"])
                 train_ts_end = pd.Timestamp(split["train_end"])
@@ -347,6 +393,198 @@ def run_walk_forward(
             print(f"\n  [WARN] Statistical significance report failed: {exc}")
 
     return results, summary_df
+
+
+# ------------------------------------------------------------------
+# Walk-forward OOS equity stitch
+# ------------------------------------------------------------------
+
+
+def run_oos_stitch(
+    config,
+    tickers: list[str] | None = None,
+    *,
+    report_path: str | None = None,
+) -> tuple[pd.DataFrame, dict]:
+    """
+    Honest OOS backtest: stitch equity from non-overlapping test windows.
+
+    The standard single-run backtest (2008–2022) is in-sample because every
+    parameter choice was informed by that period's results.  This function
+    evaluates the SAME strategy on held-out test slices:
+
+    Walk-forward protocol:
+      • Uses research.train_years / test_years / step_years from config
+        (default: train=7y, test=1y, step=1y → 8 windows, 2015–2022)
+      • Each window: run backtester on test period only (train split not used
+        for tuning here — strategy is rules-based, no ML retrain)
+      • Chain equity curves: window i+1 starts from where window i ended
+      • Report Sharpe/CAGR from the stitched curve
+
+    Returns
+    -------
+    (stitched_daily_equity : pd.DataFrame, metrics_dict : dict)
+        stitched_daily_equity has columns ["equity", "daily_return"]
+        metrics_dict has "sharpe", "cagr", "max_drawdown", "n_windows"
+    """
+    import copy
+    import os
+
+    from .backtester import Backtester
+
+    embargo_days = int(getattr(config, "walk_forward_embargo_days", 21))
+    train_y = float(getattr(config, "train_years", 7) or 7)
+    test_y = float(getattr(config, "test_years", 1) or 1)
+    step_y = float(getattr(config, "step_years", 1) or 1)
+    n_windows = int(getattr(config, "walk_forward_windows", 8) or 8)
+    train_ratio = float(getattr(config, "walk_forward_train_ratio", 0.7) or 0.7)
+
+    splits = walk_forward_splits(
+        config.start_date,
+        config.end_date,
+        n_windows=n_windows,
+        train_ratio=train_ratio,
+        embargo_days=embargo_days,
+        train_years=train_y,
+        test_years=test_y,
+        step_years=step_y,
+    )
+
+    if not splits:
+        print("[OOS Stitch] No walk-forward windows generated — check config dates.")
+        return pd.DataFrame(), {}
+
+    report_path = report_path or getattr(
+        config, "walk_forward_report_path",
+        "output/backtests/oos_stitch_report.csv",
+    )
+
+    all_equity_frames: list[pd.DataFrame] = []
+    summary_rows: list[dict] = []
+    chain_start_equity = float(getattr(config, "initial_capital", 100_000.0))
+
+    print("\n" + "=" * 65)
+    print("  WALK-FORWARD OOS STITCH  (honest out-of-sample evaluation)")
+    print("=" * 65)
+
+    for i, split in enumerate(splits, 1):
+        print(f"\n  Window {i}/{len(splits)}: "
+              f"train {split['train_start']} → {split['train_end']} | "
+              f"OOS  {split['test_start']} → {split['test_end']}")
+
+        window_cfg = copy.deepcopy(config)
+        window_cfg.start_date = split["test_start"]
+        window_cfg.end_date = split["test_end"]
+        # Scale initial capital to where previous window ended (continuous curve)
+        window_cfg.initial_capital = chain_start_equity
+
+        bt = Backtester(window_cfg)
+        result = bt.run(tickers)
+
+        eq_df = getattr(result, "daily_equity", None)
+        if eq_df is None or eq_df.empty:
+            print(f"    [WARN] No equity data for window {i} — skipping.")
+            continue
+
+        if "equity" not in eq_df.columns:
+            # Try common alternative names
+            for col in ("portfolio_value", "total_equity", "value"):
+                if col in eq_df.columns:
+                    eq_df = eq_df.rename(columns={col: "equity"})
+                    break
+
+        if "equity" not in eq_df.columns:
+            print(f"    [WARN] Window {i}: equity column not found in daily_equity.")
+            continue
+
+        # Scale equity to chain properly
+        first_equity = float(eq_df["equity"].iloc[0])
+        if first_equity > 0:
+            eq_df = eq_df.copy()
+            eq_df["equity"] = eq_df["equity"] * (chain_start_equity / first_equity)
+
+        chain_start_equity = float(eq_df["equity"].iloc[-1])
+        all_equity_frames.append(eq_df[["equity"]])
+
+        m = result.metrics
+        win_sharpe = m.get("sharpe_ratio", 0.0)
+        win_cagr = m.get("cagr", m.get("annualized_return", 0.0))
+        win_dd = m.get("max_drawdown", 0.0)
+        print(f"    OOS Sharpe={win_sharpe:.3f}  CAGR={win_cagr:.1%}  MaxDD={win_dd:.1%}")
+
+        summary_rows.append({
+            "window": i,
+            "train_start": split["train_start"],
+            "train_end": split["train_end"],
+            "test_start": split["test_start"],
+            "test_end": split["test_end"],
+            "oos_sharpe": win_sharpe,
+            "oos_cagr": win_cagr,
+            "oos_max_drawdown": win_dd,
+            "oos_total_trades": m.get("total_trades", 0),
+        })
+
+    if not all_equity_frames:
+        print("[OOS Stitch] No windows completed successfully.")
+        return pd.DataFrame(), {}
+
+    # ── Stitch equity curves ─────────────────────────────────────────
+    stitched = pd.concat(all_equity_frames, axis=0)
+    stitched = stitched[~stitched.index.duplicated(keep="last")].sort_index()
+    stitched["daily_return"] = stitched["equity"].pct_change(fill_method=None)
+
+    # ── Compute aggregate metrics ────────────────────────────────────
+    daily_rets = stitched["daily_return"].dropna()
+    n_days = len(daily_rets)
+
+    sharpe = 0.0
+    cagr = 0.0
+    max_dd = 0.0
+
+    if n_days >= 20:
+        ann_ret = float(daily_rets.mean()) * 252
+        ann_vol = float(daily_rets.std()) * np.sqrt(252)
+        sharpe = ann_ret / ann_vol if ann_vol > 1e-9 else 0.0
+        total_return = float(stitched["equity"].iloc[-1] / stitched["equity"].iloc[0]) - 1.0
+        years = n_days / 252.0
+        cagr = float((1 + total_return) ** (1 / years) - 1) if years > 0 else 0.0
+        rolling_max = stitched["equity"].cummax()
+        dd_series = (stitched["equity"] - rolling_max) / rolling_max
+        max_dd = float(dd_series.min())
+
+    metrics = {
+        "sharpe": round(sharpe, 4),
+        "cagr": round(cagr, 4),
+        "max_drawdown": round(max_dd, 4),
+        "n_windows": len(summary_rows),
+        "n_oos_days": n_days,
+    }
+
+    print("\n" + "=" * 65)
+    print("  OOS STITCH RESULTS  (honest out-of-sample)")
+    print("=" * 65)
+    print(f"  Windows         : {metrics['n_windows']}")
+    print(f"  OOS Days        : {metrics['n_oos_days']}")
+    print(f"  Stitched Sharpe : {metrics['sharpe']:.4f}")
+    print(f"  Stitched CAGR   : {metrics['cagr']:.2%}")
+    print(f"  Max Drawdown    : {metrics['max_drawdown']:.2%}")
+    print("=" * 65)
+
+    summary_df = pd.DataFrame(summary_rows)
+    if not summary_df.empty:
+        os.makedirs(os.path.dirname(report_path) or ".", exist_ok=True)
+        summary_df.to_csv(report_path, index=False)
+        print(f"\n  OOS report saved → {report_path}")
+
+    # Save stitched equity curve
+    stitched_path = os.path.join(
+        os.path.dirname(report_path) or "output/backtests",
+        "oos_stitched_equity.csv",
+    )
+    stitched.to_csv(stitched_path)
+    print(f"  Stitched equity  → {stitched_path}\n")
+
+    return stitched, metrics
 
 
 # ------------------------------------------------------------------

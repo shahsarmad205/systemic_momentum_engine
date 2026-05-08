@@ -34,8 +34,30 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
+import numpy as np
+from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
+
+def wrds_query(db, sql: str, date_cols: list[str] | None = None) -> pd.DataFrame:
+    """Robust query execution for WRDS/SQLAlchemy 2.0."""
+    try:
+        with db.engine.connect() as conn:
+            return pd.read_sql_query(sql=text(sql), con=conn, parse_dates=date_cols)
+    except Exception:
+        with db.engine.connect() as conn:
+            result = conn.execute(text(sql))
+            df = pd.DataFrame(result.fetchall(), columns=result.keys())
+            if date_cols:
+                for col in date_cols:
+                    if col in df.columns:
+                        df[col] = pd.to_datetime(df[col], errors="coerce")
+            return df
+
+
+def _is_missing_wrds_username(raw: str | None) -> bool:
+    user = str(raw or "").strip().lower()
+    return user in {"", "your_wrds_username", "wrds_username", "username"}
 
 
 class WRDSUniverse:
@@ -112,8 +134,8 @@ class WRDSUniverse:
         )
         result = panel.loc[mask].copy()
         # Clip membership dates to the requested window
-        result["effective_start"] = result["start"].clip(lower=s)
-        result["effective_end"] = result["ending"].fillna(e).clip(upper=e)
+        result.loc[:, "effective_start"] = result["start"].clip(lower=s)
+        result.loc[:, "effective_end"] = result["ending"].fillna(e).clip(upper=e)
         logger.info(
             "S&P 500 panel %s→%s: %d membership records, %d unique PERMNOs",
             s.date(), e.date(), len(result), result["permno"].nunique(),
@@ -196,7 +218,7 @@ class WRDSUniverse:
             FROM crsp.dsp500list
             ORDER BY permno, start
         """
-        membership = self._db.raw_sql(membership_sql, date_cols=["start", "ending"])
+        membership = wrds_query(self._db, membership_sql, date_cols=["start", "ending"])
         membership["permno"] = membership["permno"].astype(int)
         membership["ending"] = pd.to_datetime(membership["ending"], errors="coerce")
 
@@ -206,8 +228,8 @@ class WRDSUniverse:
             FROM crsp.stocknames
             ORDER BY permno, namedt
         """
-        stocknames = self._db.raw_sql(
-            stocknames_sql, date_cols=["namedt", "nameenddt"]
+        stocknames = wrds_query(
+            self._db, stocknames_sql, date_cols=["namedt", "nameenddt"]
         )
         stocknames["permno"] = stocknames["permno"].astype(int)
         stocknames["nameenddt"] = pd.to_datetime(stocknames["nameenddt"], errors="coerce")
@@ -262,7 +284,7 @@ class WRDSUniverse:
               AND (nameenddt IS NULL OR nameenddt >= '{date_str}')
             ORDER BY permno, namedt
         """
-        return self._db.raw_sql(sql, date_cols=["namedt", "nameenddt"])
+        return wrds_query(self._db, sql, date_cols=["namedt", "nameenddt"])
 
     def _is_cache_fresh(self, path: Path) -> bool:
         """True if the file exists and is younger than cache_ttl_days."""
@@ -331,7 +353,7 @@ def build_backtest_universe(
         WHERE start <= '{date_str}'
           AND (ending IS NULL OR ending >= '{date_str}')
     """
-    members = db.raw_sql(universe_sql)
+    members = wrds_query(db, universe_sql)
     if members.empty:
         logger.warning("build_backtest_universe: no S&P 500 members found at %s", date_str)
         return []
@@ -350,7 +372,7 @@ def build_backtest_universe(
         QUALIFY ROW_NUMBER() OVER (PARTITION BY permno ORDER BY date DESC) = 1
     """
     try:
-        liq = db.raw_sql(liquidity_sql)
+        liq = wrds_query(db, liquidity_sql)
     except Exception:
         # Some WRDS setups don't support QUALIFY — fall back to subquery
         liquidity_sql_fallback = f"""
@@ -365,7 +387,7 @@ def build_backtest_universe(
                 GROUP BY permno
             ) b ON a.permno = b.permno AND a.date = b.max_date
         """
-        liq = db.raw_sql(liquidity_sql_fallback)
+        liq = wrds_query(db, liquidity_sql_fallback)
 
     liq["permno"] = liq["permno"].astype(int)
     liquid_permnos = set(
@@ -382,7 +404,7 @@ def build_backtest_universe(
         WHERE permno IN ({permno_str})
           AND dlstdt <= '{date_str}'
     """
-    delisted = db.raw_sql(delist_sql)
+    delisted = wrds_query(db, delist_sql)
     delisted_set = set(delisted["permno"].astype(int).tolist()) if not delisted.empty else set()
 
     # ── Combine filters ───────────────────────────────────────────────────────
@@ -402,15 +424,23 @@ def build_backtest_universe(
     return investable
 
 
+_GLOBAL_WRDS_CONNECTION = None
+
 def connect_wrds(username: str | None = None) -> "wrds.Connection":
     """
     Convenience wrapper: create a WRDS connection using the environment
     variable WRDS_USERNAME (or explicit username).
 
+    Caches the connection to prevent connection-limit exhaustion (FATAL: too many connections).
+
     Usage:
         db = connect_wrds()   # reads WRDS_USERNAME from env
         db = connect_wrds("myusername")
     """
+    global _GLOBAL_WRDS_CONNECTION
+    if _GLOBAL_WRDS_CONNECTION is not None:
+        return _GLOBAL_WRDS_CONNECTION
+
     try:
         import wrds  # type: ignore[import]
     except ImportError as exc:
@@ -419,9 +449,11 @@ def connect_wrds(username: str | None = None) -> "wrds.Connection":
         ) from exc
 
     user = username or os.environ.get("WRDS_USERNAME")
-    if not user:
+    if _is_missing_wrds_username(user):
         raise ValueError(
             "WRDS username required. Set WRDS_USERNAME environment variable "
-            "or pass username= explicitly."
+            "or pass username= explicitly. Placeholder values like "
+            "'your_wrds_username' are rejected to avoid interactive prompts."
         )
-    return wrds.Connection(wrds_username=user)
+    _GLOBAL_WRDS_CONNECTION = wrds.Connection(wrds_username=user)
+    return _GLOBAL_WRDS_CONNECTION

@@ -58,8 +58,8 @@ def _sp500_symbols() -> list[str]:
         if re.fullmatch(r"[A-Z]{1,5}(-[A-Z])?", sym):
             syms.append(sym)
 
-    # yfinance uses '-' instead of '.' for class shares
-    # e.g. BRK.B -> BRK-B, BF.B -> BF-B
+    # Provider symbols commonly use '-' instead of '.' for class shares
+    # e.g. BRK.B -> BRK-B, BF.B -> BF-B.
     out = []
     seen = set()
     for s in syms:
@@ -87,7 +87,7 @@ def _dollar_adv(df: pd.DataFrame, lookback: int = 20) -> float | None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build top-N liquid universe from S&P 500.")
     parser.add_argument("--n", type=int, default=300, help="Number of tickers to select")
-    parser.add_argument("--provider", type=str, default="yahoo", help="Data provider (default: yahoo)")
+    parser.add_argument("--provider", type=str, default="wrds", help="Data provider (default: wrds)")
     parser.add_argument("--end", type=str, default=None, help="End date YYYY-MM-DD (default: today)")
     parser.add_argument("--lookback-days", type=int, default=450, help="Recent days to download for ADV ranking")
     parser.add_argument("--adv-lookback", type=int, default=20, help="$ADV window in trading days")
@@ -149,4 +149,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

@@ -27,7 +27,7 @@ class BacktestConfig:
     universe: dict = field(default_factory=dict)
     
     # Market data: provider and cache
-    data_provider: str = "yahoo"       # "yahoo" | "alpaca" | "finnhub"
+    data_provider: str = "wrds"        # "wrds" | "yahoo" | "alpaca" | "finnhub"
     cache_ohlcv: bool = True          # cache downloaded OHLCV to avoid repeated API calls
     cache_dir: str = "data/cache/ohlcv"
     cache_ttl_days: int = 0            # 0 = use cache indefinitely
@@ -155,6 +155,7 @@ class BacktestConfig:
     max_drawdown_pct: float = 0.20         # circuit breaker: halt new trades beyond this DD (e.g. 0.20 = -20%)
     drawdown_resume_pct: float = 0.10      # resume trading once DD improves above this level
     severe_drawdown_close_all_pct: float = 0.0  # 0=disabled; e.g. 0.30 = close all positions if DD worse than -30%
+    drawdown_overlay: dict = field(default_factory=dict)
 
     # D3: Rolling Sharpe circuit breaker (soft exposure reducer)
     sharpe_cb_enabled: bool = True
@@ -228,8 +229,12 @@ class BacktestConfig:
     learned_weights_path: str = ""  # path to learned_weights.json (used when signal_mode="learned")
     ml_long_model_path: str = "output/models/best_long_model.pkl"
     ml_short_model_path: str = "output/models/best_short_model.pkl"
+    ml_overlay_model_path: str = "output/models/best_overlay_model.pkl"
     ml_long_weight: float = 0.5
     ml_short_weight: float = 0.5
+    # Overlay alpha weight (0.0 = disabled). When > 0, blends best_overlay_model.pkl
+    # into long_score: long_score = (1 - w) * long_score + w * overlay_score.
+    ml_overlay_weight: float = 0.0
     ml_short_allowed_regimes: list[str] = ("Bear", "Crisis", "Sideways")
     ml_short_holding_period_days: int = 2
     ml_short_min_signal_strength: float = 0.6
@@ -243,6 +248,8 @@ class BacktestConfig:
     ml_model_type: str = "classifier"
     ml_standardize: bool = False
     ml_clip: bool = False
+    # M1: when True, override holding_period_days with the artifact's horizon_days at model load.
+    ml_use_artifact_horizon: bool = False
     ensemble_models: list[dict] = field(default_factory=list)
     ensemble_normalize: bool = True
     ensemble_clip: bool = False
@@ -336,6 +343,162 @@ class BacktestConfig:
     # Continuous optimization mode (forecast → risk model → optimizer → gradual execution)
     use_continuous_optimization: bool = False
     optimization_config: dict = field(default_factory=dict)
+
+    # Strategy mode — set by portfolio_constraints canonical section.
+    # Choices: continuous_optimizer | top_n_cross_sectional | ml_signal_only
+    strategy_mode: str = "continuous_optimizer"
+
+
+def _warn_conflict(param: str, canonical: object, deprecated_key: str, deprecated_val: object) -> None:
+    """Emit a warning when a deprecated field differs from the canonical section value."""
+    if canonical is None or deprecated_val is None:
+        return
+    try:
+        close = abs(float(canonical) - float(deprecated_val)) < 1e-9  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        close = canonical == deprecated_val
+    if not close:
+        import warnings
+        warnings.warn(
+            f"CONFIG CONFLICT [{param}]: canonical={canonical!r} but {deprecated_key}={deprecated_val!r}. "
+            f"Canonical value will be used. Set {deprecated_key} to match or remove it.",
+            stacklevel=4,
+        )
+
+
+def _apply_canonical(raw: dict, cfg: "BacktestConfig") -> None:
+    """
+    Read canonical sections and override deprecated sub-section fields.
+
+    Canonical sections (portfolio_constraints, cost_model, liquidity_limits,
+    exposure_limits) are the single source of truth.  When a deprecated field
+    in an older section disagrees with the canonical value, a warning is emitted
+    and the canonical value wins.
+    """
+    pc = raw.get("portfolio_constraints") or {}
+    cm = raw.get("cost_model") or {}
+    ll = raw.get("liquidity_limits") or {}
+
+    bt = raw.get("backtest") or {}
+    opt = (bt.get("optimization_config") or {}) if isinstance(bt, dict) else {}
+    op = (opt.get("optimizer") or {}) if isinstance(opt, dict) else {}
+    ms = raw.get("model_selection") or {}
+    val = (ms.get("validation") or {}) if isinstance(ms, dict) else {}
+    ec = raw.get("execution_costs") or {}
+    ex = raw.get("execution") or {}
+    risk = raw.get("risk") or {}
+    rf = raw.get("risk_factors") or {}
+
+    # ── portfolio_constraints ─────────────────────────────────────────────────
+    if "max_name_weight" in pc:
+        c = float(pc["max_name_weight"])
+        _warn_conflict("max_name_weight", c, "optimization_config.optimizer.max_weight", op.get("max_weight"))
+        _warn_conflict("max_name_weight", c, "model_selection.validation.max_name_weight", val.get("max_name_weight"))
+        _warn_conflict("max_name_weight", c, "risk.max_position_pct_of_equity", risk.get("max_position_pct_of_equity"))
+        _warn_conflict("max_name_weight", c, "risk_factors.max_single_name_pct", rf.get("max_single_name_pct"))
+        cfg.max_position_pct_of_equity = c
+
+    if "max_gross_exposure" in pc:
+        c = float(pc["max_gross_exposure"])
+        _warn_conflict("max_gross_exposure", c, "risk.max_gross_exposure", risk.get("max_gross_exposure"))
+        # C2: optimizer soft target vs validation vs hard circuit breaker are all different
+        gross_cap = op.get("gross_cap")
+        val_max_gross = val.get("max_gross")
+        if gross_cap is not None and val_max_gross is not None:
+            import warnings as _w
+            if abs(float(gross_cap) - float(val_max_gross)) > 1e-9:
+                _w.warn(
+                    f"CONFIG CONFLICT [C2 gross]: optimization_config.optimizer.gross_cap={gross_cap} "
+                    f"(soft optimizer target) differs from model_selection.validation.max_gross={val_max_gross} "
+                    f"(validation constraint). Models are validated at {val_max_gross}× gross but run live at "
+                    f"{gross_cap}× gross. Set validation.max_gross to match optimizer.gross_cap.",
+                    stacklevel=4,
+                )
+        cfg.max_gross_exposure = c
+
+    if "min_position_weight" in pc:
+        c = float(pc["min_position_weight"])
+        # C3: validation uses a much smaller floor than the optimizer enforces
+        _warn_conflict("min_position_weight [C3]", c, "optimization_config.optimizer.min_position_weight", op.get("min_position_weight"))
+        _warn_conflict("min_position_weight [C3]", c, "model_selection.validation.min_position_weight", val.get("min_position_weight"))
+
+    if "net_exposure_max" in pc:
+        c = float(pc["net_exposure_max"])
+        # C1: optimizer.net_exposure_max=0.30 conflicts with canonical=0.10
+        _warn_conflict("net_exposure_max", c, "optimization_config.optimizer.net_exposure_max", op.get("net_exposure_max"))
+        _warn_conflict("net_exposure_max", c, "risk.max_net_exposure", risk.get("max_net_exposure"))
+        cfg.max_net_exposure = c
+
+    if "long_only" in pc:
+        cfg.long_only = bool(pc["long_only"])
+        cfg.allow_shorts = not cfg.long_only
+        cfg.enable_shorts = cfg.allow_shorts
+
+    if "max_positions" in pc:
+        cfg.max_positions = int(pc["max_positions"])
+
+    # ── cost_model ────────────────────────────────────────────────────────────
+    if "slippage_bps" in cm:
+        c = float(cm["slippage_bps"])
+        _warn_conflict("slippage_bps", c, "execution.slippage_bps", ex.get("slippage_bps"))
+        _warn_conflict("slippage_bps", c, "execution_costs.slippage_bps", ec.get("slippage_bps"))
+        cfg.slippage_bps = c
+        cfg.execution_costs_slippage_bps = c
+
+    if "commission_bps" in cm:
+        c = float(cm["commission_bps"])
+        _warn_conflict("commission_bps", c, "execution_costs.commission_bps", ec.get("commission_bps"))
+        cfg.execution_costs_commission_bps = c
+
+    if "spread_bps" in cm:
+        c = float(cm["spread_bps"])
+        _warn_conflict("spread_bps", c, "execution_costs.spread_bps", ec.get("spread_bps"))
+        cfg.execution_costs_spread_bps = c
+
+    if "commission_per_trade_usd" in cm:
+        cfg.commission_per_trade = float(cm["commission_per_trade_usd"])
+
+    # ── liquidity_limits ──────────────────────────────────────────────────────
+    # (consumed by configuration.py / evaluation_config; stored on raw dict for now)
+    # No direct BacktestConfig field — evaluation_config() reads raw yaml directly.
+
+    # ── strategy_mode ─────────────────────────────────────────────────────────
+    # Expose on cfg so downstream code can branch without re-reading YAML.
+    cfg.strategy_mode = str(raw.get("strategy_mode", "continuous_optimizer"))
+
+    # ── conflict C5/C6: dead backtest.signal_confidence_multiplier_* fields ──
+    dead_bear = bt.get("signal_confidence_multiplier_bear")
+    live_bear = raw.get("signals", {}).get("signal_confidence_multiplier_bear")
+    if dead_bear is not None and live_bear is not None:
+        _warn_conflict(
+            "signal_confidence_multiplier_bear",
+            live_bear,
+            "backtest.signal_confidence_multiplier_bear (dead — never read)",
+            dead_bear,
+        )
+
+    dead_sideways = bt.get("signal_confidence_multiplier_sideways")
+    live_sideways = raw.get("signals", {}).get("signal_confidence_multiplier_sideways")
+    if dead_sideways is not None and live_sideways is not None:
+        _warn_conflict(
+            "signal_confidence_multiplier_sideways",
+            live_sideways,
+            "backtest.signal_confidence_multiplier_sideways (dead — never read)",
+            dead_sideways,
+        )
+
+    # ── conflict C7: orphaned signals.crisis_block_all_new_entries ────────────
+    sig_cbn = (raw.get("signals") or {}).get("crisis_block_all_new_entries")
+    risk_cbn = risk.get("crisis_block_all_new_entries")
+    if sig_cbn is not None and risk_cbn is not None and sig_cbn != risk_cbn:
+        import warnings
+        warnings.warn(
+            f"CONFIG CONFLICT [C7 orphaned]: signals.crisis_block_all_new_entries={sig_cbn!r} "
+            f"but risk.crisis_block_all_new_entries={risk_cbn!r}. "
+            "signals.crisis_block_all_new_entries is never read — only the risk value is used. "
+            "Remove signals.crisis_block_all_new_entries.",
+            stacklevel=4,
+        )
 
 
 def load_config(path: str = "backtest_config.yaml") -> BacktestConfig:
@@ -470,6 +633,7 @@ def load_config(path: str = "backtest_config.yaml") -> BacktestConfig:
     cfg.severe_drawdown_close_all_pct = float(
         risk.get("severe_drawdown_close_all_pct", cfg.severe_drawdown_close_all_pct)
     )
+    cfg.drawdown_overlay = dict(risk.get("drawdown_overlay", cfg.drawdown_overlay) or {})
     # D3: Rolling Sharpe circuit breaker (nested under risk.sharpe_circuit_breaker)
     sharpe_cb = risk.get("sharpe_circuit_breaker", {})
     cfg.sharpe_cb_enabled = bool(sharpe_cb.get("enabled", cfg.sharpe_cb_enabled))
@@ -577,9 +741,11 @@ def load_config(path: str = "backtest_config.yaml") -> BacktestConfig:
     cfg.learned_weights_path = sig.get("learned_weights_path", cfg.learned_weights_path)
     cfg.ml_long_model_path = str(sig.get("ml_long_model_path", "output/models/best_long_model.pkl"))
     cfg.ml_short_model_path = str(sig.get("ml_short_model_path", "output/models/best_short_model.pkl"))
+    cfg.ml_overlay_model_path = str(sig.get("ml_overlay_model_path", "output/models/best_overlay_model.pkl"))
     cfg.ml_regime_models_dir = str(sig.get("ml_regime_models_dir", cfg.ml_regime_models_dir))
     cfg.ml_long_weight = float(sig.get("ml_long_weight", 0.5))
     cfg.ml_short_weight = float(sig.get("ml_short_weight", 0.5))
+    cfg.ml_overlay_weight = float(sig.get("ml_overlay_weight", 0.0))
     raw_regimes = sig.get("ml_short_allowed_regimes", ["Bear", "Crisis", "Sideways"])
     cfg.ml_short_allowed_regimes = [str(r).strip() for r in raw_regimes] if isinstance(raw_regimes, list) else ["Bear", "Crisis", "Sideways"]
     cfg.ml_short_holding_period_days = int(sig.get("ml_short_holding_period_days", 2))
@@ -593,6 +759,7 @@ def load_config(path: str = "backtest_config.yaml") -> BacktestConfig:
     cfg.ml_model_type = str(sig.get("ml_model_type", cfg.ml_model_type))
     cfg.ml_standardize = bool(sig.get("ml_standardize", cfg.ml_standardize))
     cfg.ml_clip = bool(sig.get("ml_clip", cfg.ml_clip))
+    cfg.ml_use_artifact_horizon = bool(sig.get("ml_use_artifact_horizon", cfg.ml_use_artifact_horizon))
     ens = sig.get("ensemble", {}) or {}
     cfg.ensemble_models = list(ens.get("models", cfg.ensemble_models) or [])
     cfg.ensemble_normalize = bool(ens.get("normalize", cfg.ensemble_normalize))
@@ -720,5 +887,8 @@ def load_config(path: str = "backtest_config.yaml") -> BacktestConfig:
     # Continuous optimization mode
     cfg.use_continuous_optimization = bool(bt.get("use_continuous_optimization", False))
     cfg.optimization_config = bt.get("optimization_config", {}) or {}
+
+    # Apply canonical single-source sections last; they win over deprecated duplicates.
+    _apply_canonical(raw, cfg)
 
     return cfg

@@ -24,8 +24,9 @@ from utils.adv_cache import (
 )
 from utils.live_trades import append_trade_row
 from utils.market_data import get_ohlcv
-from utils.quant_utils import load_beta_cache, load_sector_mapping
+from utils.quant_utils import get_sector, load_beta_cache, load_sector_mapping
 from utils.trading_control import is_live_trading_allowed, trading_halt_reason
+from risk.drawdown_overlay import compute_drawdown_overlay
 
 
 class ExecutionEngine:
@@ -41,6 +42,8 @@ class ExecutionEngine:
         self._dd_current_equity: float | None = None
         self._dd_peak_equity: float | None = None
         self._dd_drawdown: float | None = None
+        self._dd_halt_new_risk: bool = False
+        self._dd_flatten_all: bool = False
         path = Path(config_path)
         if not path.is_file():
             raise FileNotFoundError(
@@ -49,6 +52,10 @@ class ExecutionEngine:
         with open(path, encoding="utf-8") as fh:
             self.config = yaml.safe_load(fh) or {}
         self.bt = self.config.get("backtest", self.config)
+        self.data_cfg = self.config.get("data", {}) or {}
+        self.data_provider = str(self.data_cfg.get("provider") or "").strip()
+        if not self.data_provider:
+            raise RuntimeError("data.provider must be explicit for execution")
         risk = self.config.get("risk", {})
 
         self.max_position_pct = float(
@@ -58,6 +65,18 @@ class ExecutionEngine:
         self.max_gross_exposure = float(risk.get("max_gross_exposure", 1.0) or 1.0)
         self.max_net_exposure = float(risk.get("max_net_exposure", 1.0) or 1.0)
         self.max_short_single_name = float(risk.get("max_short_single_name", 0.0) or 0.0)
+        dir_budget_cfg = risk.get("directional_budgets") or {}
+        if not isinstance(dir_budget_cfg, dict):
+            dir_budget_cfg = {}
+        self.directional_budgets_enabled = bool(dir_budget_cfg.get("enabled", False))
+        try:
+            self.long_budget = float(dir_budget_cfg.get("long_budget", self.max_gross_exposure))
+        except (TypeError, ValueError):
+            self.long_budget = float(self.max_gross_exposure)
+        try:
+            self.short_budget = float(dir_budget_cfg.get("short_budget", self.max_gross_exposure))
+        except (TypeError, ValueError):
+            self.short_budget = float(self.max_gross_exposure)
         # Optional factor risk limits (disabled when missing/None).
         self.max_beta: float | None = (
             float(risk["max_beta"]) if risk.get("max_beta") is not None else None
@@ -128,7 +147,7 @@ class ExecutionEngine:
         self.adv_lookback_days = int(liq_cfg.get("adv_lookback_days", 20))
         self.adv_cache_path = Path(str(liq_cfg.get("adv_cache_path", "output/adv_cache.csv")))
         self.adv_refresh_on_run = bool(liq_cfg.get("refresh_cache_on_run", False))
-        self._ohlcv_cache_dir = Path(str(self.bt.get("cache_dir", "data/cache/ohlcv")))
+        self._ohlcv_cache_dir = Path(str(self.data_cfg.get("cache_dir", "data/cache/ohlcv")))
 
         sig = self.config.get("signals", {})
         self.min_signal_threshold = float(
@@ -244,6 +263,16 @@ class ExecutionEngine:
             return max(w, -short_cap)
         target["target_weight"] = target["target_weight"].astype(float).apply(_cap_w)
 
+        if self.directional_budgets_enabled:
+            long_mask = target["target_weight"] > 0
+            short_mask = target["target_weight"] < 0
+            long_sum = float(target.loc[long_mask, "target_weight"].sum())
+            short_sum = float(-target.loc[short_mask, "target_weight"].sum())
+            if long_sum > max(self.long_budget, 0.0) and long_sum > 1e-12:
+                target.loc[long_mask, "target_weight"] *= float(self.long_budget) / long_sum
+            if short_sum > max(self.short_budget, 0.0) and short_sum > 1e-12:
+                target.loc[short_mask, "target_weight"] *= float(self.short_budget) / short_sum
+
         # Enforce net exposure cap by scaling the dominant side
         long_sum = float(target[target["target_weight"] > 0]["target_weight"].sum())
         short_sum = float(-target[target["target_weight"] < 0]["target_weight"].sum())
@@ -306,8 +335,20 @@ class ExecutionEngine:
         end = pd.Timestamp(datetime.now().date())
         start = end - pd.Timedelta(days=int(lb * 2.2))
         try:
-            s_df = get_ohlcv(ticker, start.date().isoformat(), end.date().isoformat())
-            m_df = get_ohlcv("SPY", start.date().isoformat(), end.date().isoformat())
+            s_df = get_ohlcv(
+                ticker,
+                start.date().isoformat(),
+                end.date().isoformat(),
+                provider=self.data_provider,
+                cache_dir=str(self._ohlcv_cache_dir),
+            )
+            m_df = get_ohlcv(
+                "SPY",
+                start.date().isoformat(),
+                end.date().isoformat(),
+                provider=self.data_provider,
+                cache_dir=str(self._ohlcv_cache_dir),
+            )
         except Exception:
             return None
 
@@ -443,10 +484,7 @@ class ExecutionEngine:
             for sym, w in cur_w.items():
                 b = self._resolve_beta(sym, beta_cache)
                 port_beta += w * b
-                sec = sector_map.get(sym)
-                if sec is None:
-                    sec_calc = self._get_sector_yahoo_best_effort(sym)
-                    sec = sec_calc or "Unknown"
+                sec = self._resolve_sector(sym, sector_map)
                 sec_used[sec] = sec_used.get(sec, 0.0) + abs(float(w))
 
         sm = float(sizing_mult) if (sizing_mult == sizing_mult) else 1.0
@@ -488,10 +526,7 @@ class ExecutionEngine:
                 w_old = float(cur_w.get(t, 0.0))
                 delta_w = cand_w - w_old
 
-                sec = sector_map.get(t) or ""
-                if not sec:
-                    sec_calc = self._get_sector_yahoo_best_effort(t)
-                    sec = sec_calc or "Unknown"
+                sec = self._resolve_sector(t, sector_map)
                 cap_sec = self._sector_cap_for(sec)
 
                 if self.max_single_name_pct is not None and abs(cand_w) > float(
@@ -597,18 +632,14 @@ class ExecutionEngine:
         except Exception:
             return
 
-    def _get_sector_yahoo_best_effort(self, ticker: str) -> str | None:
-        try:
-            import yfinance as yf
-
-            info = yf.Ticker(ticker).info or {}
-            sector = info.get("sector")
-            if sector and isinstance(sector, str):
-                sector = sector.strip()
-                return sector or None
-            return None
-        except Exception:
-            return None
+    def _resolve_sector(self, ticker: str, sector_map: dict[str, str]) -> str:
+        """Resolve sector from governed local mappings only; never call external fallback APIs."""
+        symbol = str(ticker).strip().upper()
+        mapped = sector_map.get(symbol)
+        if mapped:
+            return str(mapped)
+        derived = get_sector(symbol)
+        return derived if derived and derived != "Other" else "Unknown"
 
     def _sector_cap_for(self, sector: str) -> float | None:
         if sector in self.max_sector_exposure_by_sector:
@@ -689,14 +720,9 @@ class ExecutionEngine:
                 current_beta += w * float(b)
 
             if self.max_sector_exposure_default is not None or self.max_sector_exposure_by_sector:
-                sec = sector_map.get(ticker)
-                if sec is None:
-                    sec_calc = self._get_sector_yahoo_best_effort(ticker)
-                    if sec_calc is not None:
-                        sec = sec_calc
-                        new_sectors[ticker] = sec
-                if sec is None:
-                    sec = "Unknown"
+                sec = self._resolve_sector(ticker, sector_map)
+                if ticker not in sector_map and sec != "Unknown":
+                    new_sectors[ticker] = sec
                 sector_exposure[sec] = float(sector_exposure.get(sec, 0.0) + w)
 
         filtered_open: set[str] = set()
@@ -729,14 +755,9 @@ class ExecutionEngine:
                     continue
 
             if self.max_sector_exposure_default is not None or self.max_sector_exposure_by_sector:
-                sec = sector_map.get(ticker)
-                if sec is None:
-                    sec_calc = self._get_sector_yahoo_best_effort(ticker)
-                    if sec_calc is not None:
-                        sec = sec_calc
-                        new_sectors[ticker] = sec
-                if sec is None:
-                    sec = "Unknown"
+                sec = self._resolve_sector(ticker, sector_map)
+                if ticker not in sector_map and sec != "Unknown":
+                    new_sectors[ticker] = sec
                 cap = self._sector_cap_for(sec)
                 if cap is not None and cap > 0:
                     proposed = float(sector_exposure.get(sec, 0.0) + w_abs)
@@ -926,6 +947,8 @@ class ExecutionEngine:
         # Default / fail-safe values.
         self._dd_peak_equity = current_equity if current_equity > 0 else None
         self._dd_drawdown = 0.0
+        self._dd_halt_new_risk = False
+        self._dd_flatten_all = False
 
         pnl_file = Path("output/live/daily_pnl.csv")
         if not pnl_file.exists():
@@ -958,6 +981,19 @@ class ExecutionEngine:
             self._dd_drawdown = 0.0
             return 1.0
 
+        overlay_cfg = ((self.config.get("risk") or {}).get("drawdown_overlay") or {})
+        if isinstance(overlay_cfg, dict) and overlay_cfg.get("enabled"):
+            overlay_state = compute_drawdown_overlay(
+                current_equity=current_equity,
+                peak_equity=peak,
+                overlay_cfg=overlay_cfg,
+            )
+            self._dd_peak_equity = float(overlay_state.peak_equity)
+            self._dd_drawdown = float(overlay_state.drawdown)
+            self._dd_halt_new_risk = bool(overlay_state.halt_new_risk)
+            self._dd_flatten_all = bool(overlay_state.flatten_all)
+            return float(overlay_state.gross_multiplier)
+
         drawdown = float((peak - current_equity) / peak)
         self._dd_drawdown = drawdown
 
@@ -979,6 +1015,8 @@ class ExecutionEngine:
         dd_mult = self._get_drawdown_multiplier()
         current_positions = self.broker.get_positions()
         target = self.compute_target_portfolio(signals_df, account, verbose=False)
+        if self._dd_flatten_all:
+            target = pd.DataFrame(columns=["ticker", "target_weight", "target_value"])
         if (
             len(target) > 0
             and dd_mult != 1.0
@@ -1008,6 +1046,8 @@ class ExecutionEngine:
                 "liquidity_skips": liquidity_skips,
             }
         changes = self.reconcile(target, current_positions, verbose=False)
+        if self._dd_halt_new_risk and not self._dd_flatten_all:
+            changes["to_open"] = set()
         total = 0.0
         planned: list[dict[str, Any]] = []
         for ticker in sorted(changes["to_open"]):
@@ -1057,6 +1097,9 @@ class ExecutionEngine:
         current_positions = self.broker.get_positions()
 
         target = self.compute_target_portfolio(signals_df, account, verbose=True)
+        if self._dd_flatten_all:
+            print("  Drawdown overlay: flatten-all active, targeting zero risk.")
+            target = pd.DataFrame(columns=["ticker", "target_weight", "target_value"])
         if (
             len(target) > 0
             and dd_mult != 1.0
@@ -1093,7 +1136,7 @@ class ExecutionEngine:
                         f"    SKIP {item.get('ticker')} — {item.get('reason')}: {item.get('detail')}"
                     )
 
-        if len(target) == 0:
+        if len(target) == 0 and not (self._dd_flatten_all and current_positions is not None and not current_positions.empty):
             print("  No trades to execute")
             place_live_empty = not dry_run and is_live_trading_allowed(
                 self.config, halt_env_var=self._trading_halt_env
@@ -1135,6 +1178,9 @@ class ExecutionEngine:
             return skip_log
 
         changes = self.reconcile(target, current_positions, verbose=True)
+        if self._dd_halt_new_risk and not self._dd_flatten_all and changes["to_open"]:
+            print("  Drawdown overlay: halting new risk, open orders suppressed.")
+            changes["to_open"] = set()
 
         as_of = str((extra_execution_log or {}).get("as_of") or "").strip() or datetime.now().strftime("%Y-%m-%d")
         existing_intents = self._load_intents_for_as_of(as_of)
